@@ -24,6 +24,7 @@ dist/
 node_modules/
 target/
 .vite/
+apps/desktop/src-tauri/gen/
 coverage/
 
 # Runtime databases, model weights, caches and logs

@@ -1,7 +1,7 @@
 # PHX-003 — Tauri + React Desktop Foundation
 
 ## Status
-TODO
+DONE
 
 ## Phase
 Phase 0 — Foundation
@@ -88,3 +88,59 @@ Report:
 - decisions added, if any
 - environment prerequisites discovered
 - assumptions and known limitations
+
+### Verified completion — 2026-10-04
+
+- Implemented the minimal React/TypeScript/Vite workspace and Tauri 2 native
+  boundary under `apps/desktop/`. No source correction was needed during recovery.
+- Runtime npm dependencies: React and React DOM 19.3.0. Build/dev dependencies:
+  TypeScript 6.0.3, Vite 8.3.2, React Vite plugin 6.1.1, Tauri CLI 2.12.1,
+  React/React DOM type packages 19.3.0, and Node types 22.20.5. The root npm
+  lockfile captures resolved versions; Node >=22.12.0 reflects Vite requirements.
+- Direct Rust dependencies remain `tauri = "2"` and `tauri-build = "2"`.
+  Cargo generated `src-tauri/Cargo.lock`; it resolves these to 2.12.1 and 2.7.1.
+  The application lockfile is retained for version control and was not edited manually.
+- Toolchain: `rustc 1.99.0 (b940084d7 2026-09-28)` and
+  `cargo 1.99.0 (5f94df478 2026-08-27)`, with active/default
+  `stable-x86_64-pc-windows-msvc`. Verification commands prepended the existing
+  user Cargo bin directory to process PATH because Codex retained its old PATH.
+  No host software or persistent environment changes were made during recovery.
+- Native verification:
+  - `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: PASS.
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: PASS;
+    zero Rust tests, zero failures; the minimal crate has no custom Rust behavior.
+  - `npm run tauri:info --workspace @phoenix/desktop`: PASS; stable MSVC Rust,
+    C++ Build Tools, and WebView2 available; React/Vite configuration detected.
+  - `npm run tauri:build --workspace @phoenix/desktop`: PASS;
+    `tauri build --no-bundle` produced the optimized Windows executable in ignored
+    `src-tauri/target/release/`, including a successful frontend build hook.
+- Frontend verification:
+  - `npm install --package-lock-only --ignore-scripts`: PASS.
+  - `npm ci --ignore-scripts`: PASS; zero reported vulnerabilities.
+  - `npm test`: PASS; four workspace/rendering/security checks.
+  - `npm run typecheck --workspace @phoenix/desktop`: PASS; strict TypeScript.
+  - `npm run build --workspace @phoenix/desktop`: PASS.
+- Backend regression:
+  - `uv sync --locked`: PASS.
+  - `uv run --locked pytest`: PASS; 19 tests.
+  - `uv run --locked ruff check .`: PASS.
+  - `uv run --locked ruff format --check .`: PASS; 14 files.
+  - `uv run --locked mypy`: PASS; 14 source files.
+  - `uv build`: PASS; wheel and source distribution.
+  - `/health` remains `{"status":"ok","service":"phoenix-api","version":"0.1.0"}`.
+- `git diff --check`: PASS; generated environments, frontend/native builds,
+  schemas, caches, and logs remain ignored. No secrets, compiled binaries, or
+  machine-specific private paths are staged or committed.
+- UI contract: semantic main/heading/paragraphs render only `PHOENIX`,
+  `Rise from the ashes.`, and `Desktop foundation operational.`
+- Capabilities: main window only, no IPC permissions, plugins, or custom Rust
+  commands. Production CSP remains restrictive; development permits only the
+  checked React refresh preamble hash, loopback HMR, and inline CSS updates.
+- Reviewed INV-001 through INV-024: preserved or unaffected, especially INV-001,
+  INV-003, INV-004, INV-011, INV-012, INV-015, INV-016, INV-021, and INV-024.
+  No provider/database/tool calls or backend duplication introduced.
+- Decisions: ADR-018 preserved; no additional ADR required.
+- Limitations: GUI interaction and installer packaging were not tested. The
+  existing third-party Starlette HTTPX deprecation warning remains; tests pass.
+- All acceptance checks passed before status updates. No staging, commit, push,
+  pull request, merge, or PHX-004 implementation performed.

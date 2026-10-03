@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": ["apps/desktop"],
-  "engines": { "node": ">=22", "npm": ">=10" },
+  "engines": { "node": ">=22.12.0", "npm": ">=10" },
   "packageManager": "npm@11.6.4",
   "scripts": {
     "test": "node --test tests/workspace.test.mjs"
