@@ -162,3 +162,26 @@ queried VRAM is independently checked. Ti/Super/Desktop and other substantive
 tokens remain significant. Disks/free space, driver versions, and Ollama versions
 are not identity checks. Hardware facts never grant authority or claim runtime
 readiness.
+
+## ADR-023 — Provider-neutral async inference contracts
+Status: Accepted for PHX-010.
+
+Adapters implement `ModelProvider` under `phoenix/models/`; agents and
+orchestration consume this boundary rather than provider SDKs. The ABC owns a
+validated stable provider ID and abstract async health, capabilities, generation,
+and operation-scoped cancellation methods. Streaming returns an AsyncIterator
+directly. Construction and contract imports start no I/O or runtime work.
+
+Frozen Pydantic models carry ordered text messages, generated/caller-supplied
+string operation IDs, model/provider identity, generic generation controls,
+provider-local UTC health, explicit capability flags, response/chunk content,
+optional reported token counts, and finite nonnegative metrics with explicit
+units. Unknown counts/metrics remain None; totals are not inferred. Correlation
+is an adapter obligation. No arbitrary metadata/options dictionaries are exposed.
+
+Cancellation distinguishes accepted, unsupported, and not_found; acceptance is
+an acknowledgement rather than proof execution has stopped. Provider failures
+propagate through the small ModelProviderError/ProviderUnavailableError boundary.
+Capability metadata and model output convey no authority, permissions, tool
+execution, or PHOENIX readiness. Concrete adapters, timeout/stream lifecycle
+behavior, discovery, routing, events, persistence, and benchmarks are later work.

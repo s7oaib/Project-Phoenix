@@ -1,6 +1,6 @@
 # PHX-010 — ModelProvider Interface
 
-Status: TODO
+Status: DONE
 
 Phase: 1 — Model Runtime
 
@@ -343,3 +343,68 @@ No live provider/network verification is required because PHX-010 is contract-on
 ## Completion evidence
 
 When complete, append concise evidence covering files, contract/API, validation and failure semantics, fake-provider tests, regressions, dependency status, security/invariants, known limitations, commit, and push.
+
+### Verified completion — 2026-10-04
+
+- Added `phoenix/models/provider.py` and `tests/test_model_provider.py`. No package
+  re-exports, concrete provider, SDK/client, runtime probe, or future empty module.
+  Existing stdlib/Pydantic only; no dependency change and `uv.lock` unchanged.
+- `ModelProvider(ABC)` exposes validated read-only `provider_id`; abstract async
+  `health()`, `capabilities(model_id)`, `generate(request)`, `cancel(operation_id)`;
+  abstract `stream(request)` returns AsyncIterator[GenerationChunk] directly.
+  Adapters call the base constructor with a neutral non-empty stable ID and are
+  responsible for matching provider/model/operation identities in their results.
+- Frozen models: ModelMessage/MessageRole, GenerationRequest, ModelCapabilities,
+  ProviderHealth/ProviderHealthStatus, TokenUsage, GenerationMetrics,
+  GenerationResponse, GenerationChunk, CancellationResult/CancellationStatus.
+  Extra fields are forbidden; no arbitrary metadata/options dictionaries.
+  Ordered messages and stop sequences are snapshotted to tuples. IDs/non-empty
+  stop items, positive integer context/output limits, finite nonnegative controls
+  and metrics, and strict capability flags validate. Generated UUID string IDs
+  and caller IDs serialize stably. Health timestamps are aware and normalized UTC.
+- Response/chunks retain operation/provider/model correlation, text, optional
+  finish reason, usage and metrics; chunks add final indication. Token counts are
+  nonnegative optional integers with no inferred total. Metrics use ttft_ms,
+  duration_ms and tokens_per_second; unknown values remain None. No benchmarking.
+- Cancellation is scoped to one operation: accepted/unsupported/not_found;
+  accepted acknowledges the request, not completed termination. Two exceptions,
+  ModelProviderError and ProviderUnavailableError, expose failures without fake
+  success. No process killing, model lifecycle or background task machinery.
+- Test-only deterministic providers exercise the full ABC through base-typed
+  consumers with separate IDs. Tests verify ordered streaming/final metrics,
+  response correlation, request-scoped cancellation leaving another operation
+  untouched, explicit unsupported/not-found results and unavailable failure.
+- Commands/results:
+  - `uv run --locked pytest tests/test_model_provider.py`: PASS; 61 cases.
+  - `uv lock` / `uv sync --locked`: PASS; 36 packages, no lockfile churn.
+  - `uv run --locked pytest`: PASS; 187 tests. API 8, bootstrap 11, config 19,
+    events 28, hardware 48, model provider 61, persistence 12.
+  - `uv run --locked ruff check .`: PASS.
+  - `uv run --locked ruff format --check .`: PASS; 28 files.
+  - `uv run --locked mypy`: PASS; 26 source files, strict configuration unchanged.
+  - `uv build`: PASS; source distribution and wheel in ignored dist/.
+  - `npm test`: PASS; four tests; desktop typecheck/build: PASS.
+  - `git diff --check` and staged whitespace/credential-signature checks: PASS.
+- Fresh-interpreter isolation blocks socket creation, subprocess launch, file
+  writes (audit hook), mkdir, SQLite connections, threads and asyncio task
+  creation. Blocked subsystem imports cover providers/HTTP clients, hardware,
+  events/core, API, persistence, agents, tools, permissions and voice. Importing
+  contracts and constructing every model plus the actual test fake class passes;
+  temporary working directory remains empty. AST checks restrict contract imports
+  to standard library and Pydantic. No live provider/network run is needed.
+- Phase 0 and desktop are unchanged: exact health contract, Alembic baseline,
+  canonical 32 events, configuration, hardware scanner, EventBus and UI preserved.
+  Security/privacy: no credentials/URLs/private paths/environment metadata,
+  arbitrary object serialization, provider I/O or model-generated execution.
+  Tool roles and tool-use support are content/technical metadata only.
+- Reviewed INV-001..INV-024: preserved or unaffected, especially orchestrator
+  authority, provider replaceability, frontend boundary, permission/tool controls,
+  explicit failure and no mandatory optional runtime. ADR-023 records the contract.
+- Limitations: adapters must honor correlation, safe health detail and bounded
+  operation/stream/cancellation behavior; the ABC implements no provider runtime,
+  registry, scheduler, timeout policy, metadata bag or structured-output decoding.
+  Existing Starlette HTTPX deprecation warning remains; all verification passes.
+- Completion uses a new feature commit `feat: complete PHX-010 ModelProvider
+  interface` and pushes only `feature/PHX-010-model-provider-interface`. Final SHA
+  and remote verification are reported after push. No main/PR/merge/force push.
+  PHX-010 is DONE; PHX-011..PHX-016 remain TODO and are not started.
