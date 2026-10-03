@@ -4,7 +4,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 
 ## Phase 0 — Foundation
 - PHX-001 Repository bootstrap — DONE
-- PHX-002 FastAPI backend foundation — TODO
+- PHX-002 FastAPI backend foundation — DONE
 - PHX-003 Tauri + React desktop foundation — TODO
 - PHX-004 Configuration system — TODO
 - PHX-005 SQLite/SQLAlchemy/Alembic foundation — TODO
