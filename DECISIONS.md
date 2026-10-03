@@ -185,3 +185,31 @@ propagate through the small ModelProviderError/ProviderUnavailableError boundary
 Capability metadata and model output convey no authority, permissions, tool
 execution, or PHOENIX readiness. Concrete adapters, timeout/stream lifecycle
 behavior, discovery, routing, events, persistence, and benchmarks are later work.
+
+## ADR-024 — Bounded direct Ollama REST adapter and scoped cancellation
+Status: Accepted for PHX-011.
+
+Use HTTPX AsyncClient directly, promoting the existing httpx>=0.27,<1 dependency
+to runtime without an Ollama SDK. OllamaProvider implements PHX-010 unchanged.
+Default to http://127.0.0.1:11434; configurable HTTP(S) endpoints reject credentials,
+queries, fragments and malformed addresses. Owned clients retain TLS verification,
+disable ambient proxy configuration, and never follow redirects. Injected clients
+are caller-owned; transports supplied to the owned client close with that client.
+
+Network work is explicit. Finite connect/read/write/pool limits default to
+3/120/10/5 seconds; a 300-second total operation deadline additionally bounds I/O.
+Health validates local version evidence; show metadata maps capabilities/context
+conservatively. Structured-output support stays false under the current neutral
+request contract. Chat content, completion, model identity (allowing only default
+:latest equivalence), counts and nanosecond timings validate before mapping.
+No inferred total tokens or TTFT; no prompts/raw provider errors are logged.
+
+Generation/streaming operations register caller tasks per ID on one event loop.
+No hidden workers or scheduler are created. Cancellation affects only the active
+operation's I/O task or closes its suspended stream; it acknowledges a request,
+not proven cessation of server computation. Streaming yields incrementally,
+requires genuine done=true evidence, and closes/unregisters before its one final
+chunk. Consumers that stop early must close the iterator/provider. Explicit,
+bounded provider cleanup releases owned resources without shutting down Ollama.
+Registry, model lifecycle, events, routing, embeddings and benchmarks stay outside
+this adapter. Optional live smoke findings are separate from deterministic tests.
