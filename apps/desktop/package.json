@@ -1,0 +1,7 @@
+{
+  "name": "@phoenix/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tauri 2 / React / TypeScript / Vite desktop boundary; PHX-003 owns the application scaffold"
+}

@@ -46,3 +46,19 @@ Status: Accepted.
 
 ## ADR-015 — Unauthorized exact voice-actor cloning is not required
 Status: Accepted. Distribution path uses original/licensed/consented profiles.
+
+## ADR-016 — Python bootstrap packaging and tooling
+Status: Accepted for PHX-001.
+
+Use a root `phoenix` package, Hatchling as the build backend, and uv with a committed
+lockfile for a Python 3.11-only development environment. Pytest verifies packaging;
+Ruff provides lint/format checks; mypy provides strict type checks. These are pinned
+development/build dependencies, with no application runtime dependencies added.
+
+## ADR-017 — npm desktop workspace foundation
+Status: Accepted for PHX-001.
+
+Use a private root npm workspace containing `apps/desktop`, with a committed npm
+lockfile and a declared npm version. Node's built-in test runner validates workspace
+metadata without extra dependencies. PHX-003 introduces the approved Tauri 2 / React /
+TypeScript / Vite scaffold and dependencies; PHX-001 reserves its package boundary.
