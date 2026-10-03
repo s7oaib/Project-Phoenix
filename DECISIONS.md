@@ -230,3 +230,29 @@ wins for a shared key. Listings and all technical matches sort by provider/model
 True boolean requirements demand support; false imposes no constraint. Unknown
 context cannot satisfy a positive minimum. No ranking, routing, health, lifecycle,
 persistence, events, benchmark evidence, or permission authority belongs here.
+
+## ADR-026 — Global cancellation-safe heavy-generation leases
+Status: Accepted for PHX-013.
+
+ModelLifecycleManager coordinates one global heavy-generation capacity per shared
+instance, defaulting to one for BLAZE-6. Explicit positive integer overrides do
+not select a model or infer hardware policy. Use an asyncio BoundedSemaphore and
+validated neutral provider/model/operation lease snapshots with UTC acquisition
+timestamps. The manager binds to its first acquisition event loop; no workers,
+provider calls, external resources, registry mutation or shutdown API are owned.
+
+Check duplicate active operation IDs before waiting and after obtaining a permit.
+Commit without another await; any pre-commit failure returns the acquired permit.
+Release synchronously and idempotently, validating handle identity before removing
+bookkeeping and returning capacity. Async context exit releases on exceptions and
+cancellation; nested/released context entry fails. Callers explicitly release raw
+leases and own inference, queue deadlines and provider cancellation. Active
+snapshots sort by operation ID; available_count is capacity minus committed leases,
+including slots in waiter handoff, not a promise of immediate admission. No strict
+fairness or priority policy is added beyond the synchronization primitive.
+
+Lease allocation represents PHOENIX coordination only: no physical model residency,
+health, keepalive, permissions, routing, benchmarks or model-process control.
+State is memory-only and disappears with the process. Share the manager instance
+across callers to apply the global resource limit; abandoned leases need explicit
+caller cleanup rather than silent reclamation of possibly active generation.
