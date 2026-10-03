@@ -7,7 +7,7 @@ TODO
 Phase 0 — Foundation
 
 ## Objective
-Create the minimal Python 3.11 FastAPI transport foundation for PHOENIX: an application factory, versioned API boundary, structured health contract, local development entry point, and targeted tests. Keep Phoenix core/business logic independent of FastAPI.
+Create the minimal Python 3.11 FastAPI transport foundation for PHOENIX: an application factory, clear API/transport boundary, structured health contract, local development entry point, and targeted tests. Keep Phoenix core/business logic independent of FastAPI.
 
 ## Authoritative documents
 - `/AGENTS.md`
