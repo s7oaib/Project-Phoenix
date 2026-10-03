@@ -1,7 +1,7 @@
 # PHX-006 — Event Bus Foundation
 
 ## Status
-TODO
+DONE
 
 ## Phase
 Phase 0 — Foundation
@@ -172,3 +172,65 @@ Report:
 - invariant IDs reviewed
 - decisions added, if any
 - known limitations
+
+### Verified completion — 2026-10-04
+
+- Added `phoenix/core/events.py`, `phoenix/core/event_bus.py`, and
+  `tests/test_events.py`. No dependencies added; `pyproject.toml` and `uv.lock`
+  unchanged. No API/configuration/persistence/desktop implementation changes.
+- `EventEnvelope`: UUID `event_id`, typed `event_type`, aware UTC `timestamp`,
+  optional string `task_id`/`agent_id`, JSON-object `payload`, typed `severity`,
+  and nonempty string `correlation_id`. IDs default to UUID4; supplied correlation
+  values are preserved. Supplied aware timestamps normalize to UTC; naive values
+  fail. Frozen envelope fields and recursively immutable payload containers
+  preserve snapshots, including default payloads; serialization restores JSON.
+- `EventType(StrEnum)` represents exactly the 32 names listed in this ticket and
+  `docs/14_EVENT_SYSTEM.md`, with exact string serialization and no added types.
+  Severity: debug/info/warning/error/critical, default info, without risk policy.
+- Payload validation uses Pydantic `JsonValue`: accepts nested JSON scalars,
+  lists and string-keyed objects; rejects Path/file/function/custom-object/bytes/
+  set payloads, invalid keys, and non-finite floats without arbitrary stringifying.
+- `await bus.subscribe()` returns a subscription; `await bus.publish(event)`
+  fans out the same immutable event. `await subscription.get()` receives in
+  publication order. `await subscription.close()` is idempotent and removes it
+  from the bus; future delivery stops, pending buffered events are discarded,
+  and waiting/future receivers raise `SubscriptionClosedError`.
+- Capacity is a positive integer, default 256 per subscriber. Under a lock all
+  queue capacities are checked before any enqueue, without intervening awaits.
+  `EventBusFullError` rejects publication atomically. Tests prove no partial
+  fan-out, successful retry after draining, complete ordered delivery at capacity,
+  and identical ordering across concurrent publishers. Zero subscribers succeeds.
+- Commands/results:
+  - `uv run --locked pytest tests/test_events.py`: PASS; 28 focused cases.
+  - `uv lock` / `uv sync --locked`: PASS; 34 packages, no dependency/lock changes.
+  - `uv run --locked pytest`: PASS; 78 tests, including API 8, configuration 19,
+    persistence 12, bootstrap 11, and events 28.
+  - `uv run --locked ruff check .`: PASS.
+  - `uv run --locked ruff format --check .`: PASS; 24 files.
+  - `uv run --locked mypy`: PASS; 22 source files.
+  - `uv build`: PASS; source distribution/wheel in ignored `dist/`.
+  - `npm test`: PASS; four workspace/rendering/security cases.
+  - `npm run typecheck --workspace @phoenix/desktop`: PASS.
+  - `npm run build --workspace @phoenix/desktop`: PASS.
+  - `git diff --check`: PASS.
+- Isolation: fresh interpreter blocks inappropriate framework/provider/subsystem
+  imports, file writes (including an audit hook), directory creation, SQLite,
+  socket bind/connect, subprocesses, threads, and hidden asyncio tasks. Import,
+  envelope/bus construction, subscribe/publish/get/close all pass and the temporary
+  directory remains empty. The caller creates its event loop before socket guards
+  because Windows asyncio itself creates an internal wakeup socket; its explicit
+  test coroutine runs before task creation is blocked. The bus creates no loop.
+- API health remains exactly status/service/version, and its isolated factory
+  tests pass. No schema/migration, event store/replay, WebSocket, fake producer,
+  logging backend, or hardware scanning introduced.
+- Security: no credentials, real dotenv, database/journal/WAL/SHM/model/log/cache/
+  build artifacts added; payload contents are not automatically logged. Events
+  carry information and do not execute actions or grant permissions.
+- Reviewed INV-001 through INV-024: preserved or unaffected, especially INV-001,
+  INV-003, INV-004, INV-008, INV-011, INV-017, INV-018, INV-019, INV-021, and
+  INV-024. ADR-021 records immutable events and atomic bounded fan-out.
+- Limitations: single event loop, no cross-thread/cross-process guarantees;
+  concurrent order follows lock acquisition. Close deliberately discards its
+  buffer. No persistence, transport, or producers. Existing Starlette HTTPX
+  deprecation warning remains; all tests pass.
+- All acceptance checks passed before marking DONE. PHX-007 remains TODO.

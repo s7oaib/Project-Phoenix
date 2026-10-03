@@ -8,7 +8,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-003 Tauri + React desktop foundation — DONE
 - PHX-004 Configuration system — DONE
 - PHX-005 SQLite/SQLAlchemy/Alembic foundation — DONE
-- PHX-006 Event bus foundation — TODO
+- PHX-006 Event bus foundation — DONE
 - PHX-007 Hardware scanner/BLAZE-6 — TODO
 
 ## Phase 1 — Model Runtime
