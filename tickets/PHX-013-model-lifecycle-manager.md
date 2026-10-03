@@ -1,6 +1,6 @@
 # PHX-013 — Model Lifecycle Manager
 
-Status: TODO
+Status: DONE
 
 Phase: 1 — Model Runtime
 
@@ -239,3 +239,75 @@ Use Python 3.11, asyncio, Pydantic v2 and existing PHOENIX contracts.
 ## Completion evidence
 
 When complete, append concise evidence covering implementation files, public API, lease/capacity semantics, lifecycle states/transitions if used, cancellation safety, provider neutrality, tests, regressions, security/invariants and known limitations.
+
+### Verified completion — 2026-10-04
+
+- Created `phoenix/models/lifecycle.py` and `tests/test_model_lifecycle.py`.
+  PHX-010/011/012 implementations, tests and completion records unchanged.
+  No dependency change; `pyproject.toml`/`uv.lock` unchanged after uv verification.
+- API: ModelLifecycleManager(heavy_generation_capacity=1), acquire_heavy() with
+  keyword provider_id/model_id/operation_id; capacity, active_count, available_count,
+  active_leases(), is_active(). GenerationLease exposes read-only snapshot/released,
+  synchronous idempotent release() and async context management. One small
+  ModelLifecycleError boundary; frozen extra-forbidden LeaseSnapshot with validated
+  neutral identities and UTC acquired_at, deterministic JSON serialization.
+- Capacity is global per shared manager, not provider/model. Strict positive
+  integer overrides accepted; zero/negative/bool/noninteger rejected. No hardware
+  discovery or model choice. available_count = capacity - committed active leases,
+  including transient waiter handoff slots; it does not promise immediate admission.
+  Active snapshot tuples sort by operation_id and never expose internal handles.
+- BoundedSemaphore suspends only callers. Duplicate active IDs reject before
+  waiting and after permit acquisition; released IDs may be reused. No await
+  between permit grant and validated registration. Pre-commit BaseException returns
+  capacity and propagates. Release checks actual handle identity and atomically
+  unregisters/returns capacity without await; stale/repeated release cannot inflate
+  capacity. Released/nested context entry rejects explicitly.
+- Deterministic events/checkpoints verify capacity 1/2, different provider/model
+  global blocking, duplicate races, queued and woken cancellation, remaining waiter
+  progress, immediate pending cancellation, holder repeated cancellation, original
+  RuntimeError/ModelProviderError propagation, construction failure/CancelledError,
+  context-exit cancellation, wrong-loop use, immutable inspection and ID reuse.
+  No arbitrary timed sleeps or hidden task machinery in production.
+- Coordination state is completely represented by active lease snapshots/counts;
+  no separate state enum or transition API needed. No physical loaded/unloaded,
+  residency, readiness or provider availability claim. No registry dependency or
+  mutation, provider probes/generation, load/unload/keepalive, routing, benchmark,
+  event, persistence, API, frontend, embedding or Colibri implementation.
+- Verification commands/results:
+  - `uv run --locked pytest tests/test_model_lifecycle.py`: PASS; 54 cases in each
+    of three consecutive final-code runs (0.55, 0.55, 0.61 seconds).
+  - `uv run --locked pytest tests/test_model_provider.py`: PASS; 61 unchanged cases.
+  - `uv run --locked pytest tests/test_ollama_provider.py`: PASS; 108 unchanged cases.
+  - `uv run --locked pytest tests/test_model_registry.py`: PASS; 83 unchanged cases.
+  - `uv lock` / `uv sync --locked`: PASS; 36 packages, no lockfile churn.
+  - `uv run --locked pytest`: PASS; 432 tests (API 8, bootstrap 11, config 19,
+    events 28, hardware 48, lifecycle 54, provider 61, registry 83, Ollama 108,
+    persistence 12). Existing Starlette deprecation warning only.
+  - `uv run --locked ruff check .`: PASS.
+  - `uv run --locked ruff format --check .`: PASS; 34 files.
+  - `uv run --locked mypy`: PASS; 32 source files, strict configuration unchanged.
+  - `uv build`: PASS; source distribution/wheel in ignored dist/.
+  - `npm test`: PASS; four tests; desktop workspace typecheck/build: PASS.
+- Fresh-interpreter isolation guards sockets, file writes/mkdir, SQLite,
+  subprocesses, threads, and task creation; blocks provider adapter/HTTP, registry,
+  hardware, events/core, API, persistence, agents, tools, permissions and voice
+  imports. Import/construct and explicit permit/context/release/inspection pass.
+  Harness alone creates the caller task via a saved public loop method; task
+  creation remains blocked for module/operations. No filesystem artifacts appear.
+  AST checks restrict production imports to asyncio, datetime, typing, Pydantic
+  and neutral provider validation contracts. No live provider operation performed.
+- Reviewed security and INV-001..INV-024: preserved or unaffected. PHOENIX remains
+  orchestrator; leases/capability/output grant no authority. No credentials,
+  prompts/responses/raw payload storage, logging, commands, process control or
+  frontend path. Exact health API, Alembic baseline, 32 events and desktop unchanged.
+  ADR-026 records the durable resource policy. Scope/whitespace and credential
+  signatures reviewed before commit; no generated/private files included.
+- Limitations: one event loop/process; all relevant callers must share the manager
+  and explicitly use leases. Manually abandoned leases require caller cleanup.
+  Queue waits require caller cancellation/deadlines; no scheduler fairness promise.
+  Manager owns no background resources and needs no close method. It does not
+  infer residency or implement neutral load/unload/keepalive absent from PHX-010.
+  Process restart loses memory-only coordination state. Existing warning remains.
+- All acceptance checks passed before marking DONE. Commit/push only PHX-013;
+  final SHA/remote verification are in the execution report. PHX-014..016 remain
+  TODO; PHX-014 was not started.
