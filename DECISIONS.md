@@ -115,3 +115,23 @@ Alembic is authoritative for schema evolution. Its environment uses a caller URL
 override or the PHX-004 settings-derived URL; it never prepares directories or
 starts the API. The schema-empty `0001` baseline introduces only Alembic's version
 tracking. Future domain tables require their own ticket and versioned migration.
+
+## ADR-021 — Immutable in-process events and atomic bounded fan-out
+Status: Accepted for PHX-006.
+
+The core event foundation uses Pydantic envelopes with the frozen 32 event names,
+UTC timestamps, UUID event IDs, caller-supplied/generated correlation strings,
+and debug/info/warning/error/critical severity. Payload JSON objects/arrays are
+snapshotted into read-only mappings/tuples and serialized back into JSON objects/
+arrays. Publication carries information only; it never authorizes execution.
+
+Use a memory-only asyncio bus on one event loop, with one bounded queue per
+subscriber (default capacity 256). Under a bus lock, check every active queue
+before enqueueing without intervening awaits. A full queue rejects the whole
+publication with `EventBusFullError`; no partial delivery or silent drop occurs.
+Concurrent publication order is the lock acquisition order shared by subscribers.
+
+Subscription close is explicit and idempotent: remove the subscription, discard
+its pending buffer, and wake receivers with `SubscriptionClosedError`. No hidden
+workers, retries, producers, or automatic logging exist. Transport and persistence
+remain outside the core bus; WebSocket streaming and durable audit are later work.
