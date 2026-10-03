@@ -135,3 +135,30 @@ Subscription close is explicit and idempotent: remove the subscription, discard
 its pending buffer, and wake receivers with `SubscriptionClosedError`. No hidden
 workers, retries, producers, or automatic logging exist. Transport and persistence
 remain outside the core bus; WebSocket streaming and durable audit are later work.
+
+## ADR-022 — Explicit read-only hardware facts and profile evidence
+Status: Accepted for PHX-007.
+
+Hardware scanning is an explicit in-memory operation, independent of transport,
+persistence, events, and model runtime. Use psutil for portable CPU counts, total
+RAM bytes, and local disk capacity/free-space facts. CPU model evidence comes
+from the read-only Windows processor registry or Linux `/proc/cpuinfo`; unsupported
+model discovery stays unavailable. Collect no account, network, or serial IDs.
+
+NVIDIA name, per-device VRAM MiB, and driver evidence come from one fixed
+`nvidia-smi` CSV query with `shell=False` and a five-second timeout. Missing,
+failed, empty, or malformed queries expose explicit issue codes without fabricated
+GPU evidence or raw diagnostic logging. Windows AdapterRAM is not used.
+
+BLAZE-6 assessment exposes six match/mismatch/unavailable checks. Any known
+contradiction yields `does_not_match`; otherwise missing evidence yields
+`insufficient_evidence`; all six matches yield `matches`. RAM tolerance is
+22..26 GiB inclusive; VRAM must be exactly 6144 MiB on the selected matching GPU.
+Normalize punctuation/case for CPU/GPU comparison, preserving substantive model
+tokens. GPU identity uses exact token comparison after removing optional leading
+NVIDIA/GeForce branding and compact integer GB/GiB capacity annotations (such as
+6GB or 6GiB). Capacity annotations are presentation only; the selected GPU's
+queried VRAM is independently checked. Ti/Super/Desktop and other substantive
+tokens remain significant. Disks/free space, driver versions, and Ollama versions
+are not identity checks. Hardware facts never grant authority or claim runtime
+readiness.
