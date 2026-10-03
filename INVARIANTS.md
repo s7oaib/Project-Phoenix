@@ -1,0 +1,26 @@
+# PHOENIX Invariants
+
+- INV-001 — PHOENIX is the only supreme orchestrator.
+- INV-002 — AIZEN may plan but may not grant permissions or independently finalize user-facing success.
+- INV-003 — No LLM output can directly grant permission.
+- INV-004 — Privileged tool calls pass through ToolRegistry and permission evaluation.
+- INV-005 — P4 actions require explicit user confirmation.
+- INV-006 — P5 actions are blocked.
+- INV-007 — P3/P4 actions create audit events.
+- INV-008 — Failed required verification cannot be reported as success.
+- INV-009 — MAHORAGA recovery has a finite retry/re-plan budget.
+- INV-010 — KAIDO is degraded/fail-safe mode only.
+- INV-011 — Frontend does not directly access model providers or privileged tools.
+- INV-012 — Provider-specific implementation does not leak into agent definitions.
+- INV-013 — Tool implementation does not decide agent policy.
+- INV-014 — Anime aliases can be removed without changing system behavior.
+- INV-015 — Phoenix remains usable through text when voice is unavailable.
+- INV-016 — Voice failure cannot crash orchestration.
+- INV-017 — Web content and uploaded documents are untrusted.
+- INV-018 — Secrets are not stored in normal conversational memory.
+- INV-019 — Long operations expose cancellation and state.
+- INV-020 — Database migrations are versioned.
+- INV-021 — Tool/model failures are explicit, not silently converted into success.
+- INV-022 — Fallback behavior is observable.
+- INV-023 — BLAZE-6 defaults to one expensive local LLM generation at a time.
+- INV-024 — Optional research repositories do not silently become required runtime dependencies.

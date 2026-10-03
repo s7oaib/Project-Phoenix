@@ -1,0 +1,45 @@
+# PHOENIX Documentation Manifest
+
+Frozen core documentation files plus execution scaffolding: **41 Markdown files**.
+
+- `AGENTS.md`
+- `CHANGELOG.md`
+- `DECISIONS.md`
+- `DESIGN.md`
+- `FEATURE_TICKETS.md`
+- `INVARIANTS.md`
+- `MANIFEST.md`
+- `MASTER_SPEC.md`
+- `MENTAL_MODEL.md`
+- `PRD.md`
+- `README.md`
+- `ROADMAP.md`
+- `RULES.md`
+- `docs/01_ARCHITECTURE.md`
+- `docs/02_SYSTEM_FLOW.md`
+- `docs/03_AGENT_ROSTER.md`
+- `docs/04_AGENT_ORCHESTRATION.md`
+- `docs/05_MODEL_STRATEGY.md`
+- `docs/06_HARDWARE_PROFILE.md`
+- `docs/07_TOOL_SYSTEM.md`
+- `docs/08_PERMISSION_MATRIX.md`
+- `docs/09_SECURITY.md`
+- `docs/10_MEMORY_SYSTEM.md`
+- `docs/11_RAG_SYSTEM.md`
+- `docs/12_DATABASE_SCHEMA.md`
+- `docs/13_API_CONTRACTS.md`
+- `docs/14_EVENT_SYSTEM.md`
+- `docs/15_COMPUTER_CONTROL.md`
+- `docs/16_WEB_RESEARCH.md`
+- `docs/17_VOICE_SYSTEM.md`
+- `docs/18_MEDIA_INTEGRATIONS.md`
+- `docs/19_DOCUMENT_SYSTEM.md`
+- `docs/20_UI_UX_SPEC.md`
+- `docs/21_FRONTEND.md`
+- `docs/22_RECOVERY_FAILSAFE.md`
+- `docs/23_OBSERVABILITY.md`
+- `docs/24_TEST_EVALUATION.md`
+- `docs/25_DEPENDENCIES.md`
+- `tickets/PHX-001-repository-bootstrap.md`
+- `tickets/README.md`
+- `tickets/_TEMPLATE.md`
