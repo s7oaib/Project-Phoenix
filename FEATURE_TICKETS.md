@@ -12,7 +12,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-007 Hardware scanner/BLAZE-6 — DONE
 
 ## Phase 1 — Model Runtime
-- PHX-010 ModelProvider interface — TODO
+- PHX-010 ModelProvider interface — DONE
 - PHX-011 Ollama provider — TODO
 - PHX-012 Model capability registry — TODO
 - PHX-013 Model lifecycle manager — TODO
