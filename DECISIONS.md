@@ -97,3 +97,21 @@ The portable data default is `<home>/.phoenix/data`; `D:/Phoenix/data` is only t
 optional BLAZE-6 example override. Directory creation belongs to a later runtime
 owner. FastAPI remains independent of loading settings until a concrete transport
 consumer requires them; `/health` exposes only its existing three fields.
+
+## ADR-020 — Local persistence ownership and explicit migrations
+Status: Accepted for PHX-005.
+
+The V1 structured database is `AppSettings.data_dir / "phoenix.db"`, using
+SQLAlchemy 2 and Python's built-in SQLite driver. SQLAlchemy URL construction,
+lazy engines, session factories, and the single declarative `Base` belong to
+`phoenix/persistence/`; core and FastAPI do not own database initialization.
+
+Directory preparation is a separate explicit operation. Imports, settings,
+URL/engine/session construction, and API construction do not connect or create
+database files. Callers explicitly prepare the location and connect or migrate;
+errors propagate without deleting/recreating data.
+
+Alembic is authoritative for schema evolution. Its environment uses a caller URL
+override or the PHX-004 settings-derived URL; it never prepares directories or
+starts the API. The schema-empty `0001` baseline introduces only Alembic's version
+tracking. Future domain tables require their own ticket and versioned migration.

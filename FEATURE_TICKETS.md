@@ -7,7 +7,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-002 FastAPI backend foundation — DONE
 - PHX-003 Tauri + React desktop foundation — DONE
 - PHX-004 Configuration system — DONE
-- PHX-005 SQLite/SQLAlchemy/Alembic foundation — TODO
+- PHX-005 SQLite/SQLAlchemy/Alembic foundation — DONE
 - PHX-006 Event bus foundation — TODO
 - PHX-007 Hardware scanner/BLAZE-6 — TODO
 
