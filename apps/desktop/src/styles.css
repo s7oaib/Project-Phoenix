@@ -1,0 +1,33 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #f3f4f6;
+  background: #17191d;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  min-width: 280px;
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: clamp(2rem, 8vw, 6rem) 1.5rem;
+}
+
+h1 {
+  color: #ffb76b;
+  font-size: clamp(2rem, 8vw, 3.5rem);
+  letter-spacing: 0.08em;
+  margin: 0 0 1rem;
+}
+
+p {
+  line-height: 1.6;
+}
+
+.tagline {
+  font-size: 1.25rem;
+}

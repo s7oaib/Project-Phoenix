@@ -62,3 +62,17 @@ Use a private root npm workspace containing `apps/desktop`, with a committed npm
 lockfile and a declared npm version. Node's built-in test runner validates workspace
 metadata without extra dependencies. PHX-003 introduces the approved Tauri 2 / React /
 TypeScript / Vite scaffold and dependencies; PHX-001 reserves its package boundary.
+
+## ADR-018 — Desktop application identity and initial IPC boundary
+Status: Accepted for PHX-003.
+
+Use `io.github.s7oaib.phoenix` as the stable Tauri application identifier, scoped
+to the Project Phoenix repository owner. The foundation enables no frontend IPC
+permissions, plugins, or custom Rust commands. Future backend functionality must
+continue through FastAPI and Phoenix's deterministic permission/tool boundaries;
+adding a Tauri capability requires an explicit, scoped feature requirement.
+
+Production CSP permits local scripts/styles and denies network connections. The
+development CSP allows the exact Vite React refresh preamble by SHA-256 hash,
+loopback HMR, and Vite's inline CSS updates. A targeted test checks the preamble
+hash against the installed plugin so dependency updates cannot silently break it.

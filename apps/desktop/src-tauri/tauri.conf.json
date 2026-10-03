@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "PHOENIX",
+  "version": "../package.json",
+  "identifier": "io.github.s7oaib.phoenix",
+  "build": {
+    "beforeDevCommand": "npm run dev --workspace @phoenix/desktop",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeBuildCommand": "npm run build --workspace @phoenix/desktop",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      { "label": "main", "title": "PHOENIX", "width": 800, "height": 600 }
+    ],
+    "security": {
+      "capabilities": [
+        {
+          "identifier": "desktop-foundation",
+          "description": "The static foundation screen requires no IPC permissions.",
+          "windows": ["main"],
+          "permissions": []
+        }
+      ],
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; connect-src 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'sha256-Z2/iFzh9VMlVkEOar1f/oSHWwQk3ve1qk/C2WdsC4Xk='; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-src 'none'; connect-src 'self' ws://127.0.0.1:5173"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.png", "icons/icon.ico"]
+  }
+}
