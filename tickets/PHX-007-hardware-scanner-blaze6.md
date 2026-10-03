@@ -1,6 +1,6 @@
 # PHX-007 — Hardware Scanner / BLAZE-6
 
-Status: TODO
+Status: DONE
 
 Phase: 0 — Foundation
 
@@ -242,3 +242,86 @@ Confirm:
 ## Completion evidence
 
 When complete, append concise evidence covering files, dependency changes, scanner API, live BLAZE-6 values, profile assessment, tests, regressions, security/invariants, and known limitations.
+
+### Verified completion — 2026-10-04
+
+- Added `phoenix/core/hardware.py` and `tests/test_hardware.py`; updated runtime
+  dependency assertion, `pyproject.toml`, `uv.lock`, and ADR-022. No API/events/
+  persistence/migration/desktop implementation or frozen profile changes.
+- Runtime: `psutil>=7,<8`, locked 7.2.2, for CPU counts, RAM and disk facts.
+  Development: `types-psutil>=7.2.2.20260906`, locked 7.2.2.20260906, preserves
+  strict mypy because psutil lacks bundled typing metadata. No GPU library added.
+- API: `scan_hardware()`, `assess_blaze6(snapshot)`, and deterministic CSV parser.
+  Frozen validated models: HardwareSnapshot, GpuInfo, DiskInfo, Blaze6Assessment,
+  and per-field ProfileCheck. Snapshot records aware UTC timestamp/platform,
+  optional CPU model/counts/RAM bytes, disk device/mount/total/free bytes, separate
+  GPU name/VRAM MiB/driver entries, and non-sensitive issue codes. Unknown numeric
+  readings remain None, not fake zeros. Import/model construction does not scan.
+- CPU model: Windows read-only ProcessorNameString, Linux `/proc/cpuinfo`, else
+  unavailable. psutil supplies physical/logical counts, total RAM, local partitions
+  and usage; remote/UNC Windows partitions are excluded and failed disk usage is
+  explicit. No write probes or WMIC used.
+- NVIDIA query: fixed argv `nvidia-smi --query-gpu=name,memory.total,driver_version
+  --format=csv,noheader,nounits`, `shell=False`, captured text output, timeout 5,
+  explicit return-code checks. Missing/timeout/failure/empty/malformed outputs
+  degrade GPU evidence without crashing the scan; valid individual rows survive
+  malformed row values. Raw stderr is not collected in the snapshot or logged.
+- Assessment: six stable checks (CPU identity, physical/logical counts, total RAM,
+  matching GPU model, its VRAM). Any mismatch takes precedence over unavailable
+  fields; otherwise missing evidence is insufficient, never match. RAM range is
+  22..26 GiB inclusive; VRAM is exactly 6144 MiB. Disks/free space, driver and
+  Ollama versions are excluded from identity. GPUs are not summed or assumed
+  to be index zero.
+- Live command: `uv run --locked python -c "from phoenix.core.hardware import
+  scan_hardware, assess_blaze6; snapshot=scan_hardware();
+  print(snapshot.model_dump_json(indent=2));
+  print(assess_blaze6(snapshot).model_dump_json(indent=2))"`: PASS; returned promptly.
+  Scan timestamp: 2026-10-03T21:23:15.211692Z.
+  - CPU: 13th Gen Intel(R) Core(TM) i7-13650HX.
+  - Physical cores: 14; logical processors: 20.
+  - RAM: 25,463,480,320 bytes (23.714714 GiB).
+  - GPU: NVIDIA GeForce RTX 3050 6GB Laptop GPU.
+  - VRAM: 6144 MiB; NVIDIA driver: 610.62; no scan issues.
+  - C: total 686,974,562,304 bytes; free 55,255,678,976 bytes.
+  - D: total 214,748,360,704 bytes; free 166,490,189,824 bytes.
+  - E: total 120,096,550,912 bytes; free 82,584,793,088 bytes.
+  - Profile: `does_not_match`. CPU/core/RAM checks match. GPU model check is a
+    mismatch because the observed name contains an additional `6GB` token absent
+    from the frozen model name. Profile VRAM association is unavailable because
+    no GPU matches that model comparison; the scan's actual VRAM remains 6144.
+    The profile/matcher was not changed to force a live match. A truthful profile
+    mismatch is supported scanner behavior, not a failed scanner smoke test.
+- Commands/results:
+  - `uv add "psutil>=7,<8"` / `uv add --dev types-psutil`: PASS.
+  - `uv run --locked pytest tests/test_hardware.py`: PASS; 37 deterministic cases.
+  - `uv lock` / `uv sync --locked`: PASS; 36 packages resolved.
+  - `uv run --locked pytest`: PASS; 115 tests. API 8, config 19, persistence 12,
+    events 28, bootstrap 11, hardware 37 all pass; health remains unchanged.
+  - `uv run --locked ruff check .`: PASS.
+  - `uv run --locked ruff format --check .`: PASS; 26 files.
+  - `uv run --locked mypy`: PASS; 24 source files.
+  - `uv build`: PASS; source distribution/wheel in ignored `dist/`.
+  - `npm test`: PASS; four desktop workspace/rendering/security tests.
+  - `npm run typecheck --workspace @phoenix/desktop`: PASS.
+  - `npm run build --workspace @phoenix/desktop`: PASS.
+  - `git diff --check`: PASS.
+- Isolation: fresh-process test blocks hardware probes/registry reads during
+  import/model construction. Explicit scan uses real read-only OS introspection
+  with a fixed mocked NVIDIA query while writes (audit hook), directory creation,
+  SQLite, sockets, subprocess launch, threads/tasks, and inappropriate subsystem
+  imports are blocked. Temporary directory stays empty. The live run additionally
+  exercised actual NVIDIA execution, without installing system utilities.
+- Security/privacy: only approved facts and drive roots collected/reported.
+  No username/hostname/serial/GUID/MAC/IP/account/environment dump, credentials,
+  real dotenv, DB/journal/WAL/SHM, logs/models or build artifacts included. No
+  network calls, shell strings, elevation, events, or permission decisions.
+- Reviewed INV-001 through INV-024: preserved or unaffected, especially INV-001,
+  INV-003, INV-004, INV-008, INV-011, INV-012, INV-017, INV-018, INV-021 and
+  INV-024. ADR-022 records explicit scanning and profile evidence semantics.
+- Limitations: CPU model discovery is Windows/Linux-specific; other platforms
+  retain unavailable CPU identity. GPU names with extra substantive tokens are
+  not inferred as aliases. Only NVIDIA discovery exists; no models/benchmarks,
+  persistence, automatic scans, or API hardware endpoint. Disk facts are transient.
+  Existing Starlette HTTPX deprecation warning remains; all tests pass.
+- All acceptance checks passed before marking DONE. Phase 0 tickets PHX-001 through
+  PHX-007 are DONE; PHX-010 remains TODO and was not started.
