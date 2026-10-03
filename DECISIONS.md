@@ -213,3 +213,20 @@ chunk. Consumers that stop early must close the iterator/provider. Explicit,
 bounded provider cleanup releases owned resources without shutting down Ollama.
 Registry, model lifecycle, events, routing, embeddings and benchmarks stay outside
 this adapter. Optional live smoke findings are separate from deterministic tests.
+
+## ADR-025 — Neutral memory-only capability snapshots and technical filtering
+Status: Accepted for PHX-012.
+
+Key the capability registry by (provider_id, model_id), retaining immutable,
+validated PHX-010 ModelCapabilities snapshots with UTC update timestamps.
+Identifiers follow the existing neutral contract; no provider-specific aliases
+or automatic model discovery/seeding occur. Only explicit refresh calls the
+supplied ModelProvider.capabilities(). Validate the returned identity and snapshot
+before replacing state; failed or cancelled refreshes preserve prior records.
+
+For one process/event loop, mutations contain no awaits and need no lock or worker.
+Concurrent refreshes query independently; the last successfully completed refresh
+wins for a shared key. Listings and all technical matches sort by provider/model.
+True boolean requirements demand support; false imposes no constraint. Unknown
+context cannot satisfy a positive minimum. No ranking, routing, health, lifecycle,
+persistence, events, benchmark evidence, or permission authority belongs here.
