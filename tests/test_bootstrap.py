@@ -33,5 +33,6 @@ def test_distribution_has_foundation_runtime_dependencies() -> None:
     assert {requirement.split("<")[0] for requirement in requirements} == {
         "fastapi",
         "pydantic",
+        "pydantic-settings",
         "uvicorn",
     }
