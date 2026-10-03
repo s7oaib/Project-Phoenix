@@ -76,3 +76,24 @@ Production CSP permits local scripts/styles and denies network connections. The
 development CSP allows the exact Vite React refresh preamble by SHA-256 hash,
 loopback HMR, and Vite's inline CSS updates. A targeted test checks the preamble
 hash against the installed plugin so dependency updates cannot silently break it.
+
+## ADR-019 — Typed configuration namespace and loading boundary
+Status: Accepted for PHX-004.
+
+Use `AppSettings` in `phoenix/core/config.py` with Pydantic v2 settings and only
+the `PHOENIX_ENVIRONMENT`, `PHOENIX_API_HOST`, `PHOENIX_API_PORT`, and
+`PHOENIX_DATA_DIR` fields. Precedence is explicit constructor values, process
+environment, UTF-8 `.env` in the working directory, then code defaults. Use
+`_env_file=None` to disable dotenv loading for isolated callers/tests.
+
+Unknown constructor/dotenv keys are rejected; the standard process source reads
+only declared fields and ignores other environment variables, including unknown
+Phoenix-prefixed keys. Tests lock down this distinction. Invalid declared values
+raise validation errors without a fallback. Configuration loading reads inputs
+without creating directories or initializing runtime subsystems. No import-time
+instance, singleton, or cache is provided.
+
+The portable data default is `<home>/.phoenix/data`; `D:/Phoenix/data` is only the
+optional BLAZE-6 example override. Directory creation belongs to a later runtime
+owner. FastAPI remains independent of loading settings until a concrete transport
+consumer requires them; `/health` exposes only its existing three fields.

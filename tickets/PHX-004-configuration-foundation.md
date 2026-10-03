@@ -1,7 +1,7 @@
 # PHX-004 — Configuration Foundation
 
 ## Status
-TODO
+DONE
 
 ## Phase
 Phase 0 — Foundation
@@ -102,3 +102,56 @@ Report:
 - invariant IDs reviewed
 - decisions added, if any
 - assumptions and known limitations
+
+### Verified completion — 2026-10-04
+
+- Added `phoenix/core/config.py` with `AppSettings`; updated `.env.example`,
+  `pyproject.toml`, `uv.lock`, and the bootstrap dependency assertion. Added
+  `tests/test_config.py` with 19 focused cases. No API or desktop files changed.
+- Runtime dependency: `pydantic-settings>=2,<3`, locked at 2.15.0; its dotenv
+  reader `python-dotenv` is locked at 1.2.4. Existing dependencies are unchanged.
+- Fields: `environment` (development/test/production, default development),
+  `api_host` (string, default 127.0.0.1), `api_port` (integer 1..65535, default
+  8000), `data_dir` (`Path`, default `<home>/.phoenix/data`). Authoritative names
+  are `PHOENIX_ENVIRONMENT`, `PHOENIX_API_HOST`, `PHOENIX_API_PORT`, and
+  `PHOENIX_DATA_DIR`. The safe example uses optional `D:/Phoenix/data` storage.
+- Precedence: constructor > process environment > working-directory UTF-8
+  `.env` > defaults. `_env_file=None` disables dotenv loading. Unknown constructor
+  and dotenv keys fail; unknown process keys are ignored by the standard source.
+  Invalid environments, ports, and path types raise explicit validation errors.
+- Isolation: fresh-interpreter tests block FastAPI/future subsystem imports,
+  directory creation/path writes, SQLite connections, sockets, processes, and
+  async tasks while importing/constructing settings and reading a temporary
+  `.env`. Configured directories remain absent; no module-global instance exists.
+  Existing API factory isolation and exact three-field health tests still pass.
+- Commands/results:
+  - `uv add 'pydantic-settings>=2,<3'`: PASS; added the runtime dependency.
+  - `uv lock`: PASS; 30 packages resolved.
+  - `uv sync --locked`: PASS.
+  - `uv run --locked pytest tests/test_config.py tests/test_api.py tests/test_bootstrap.py`:
+    PASS; 38 tests.
+  - `uv run --locked pytest`: PASS; 38 tests after final code changes.
+  - `uv run --locked ruff check .`: PASS.
+  - `uv run --locked ruff format --check .`: PASS; 16 files.
+  - `uv run --locked mypy`: PASS; 16 source files. Initial signature errors were
+    corrected with scoped `call-arg` annotations in tests for the library's
+    omitted `_env_file` static signature and an intentionally invalid keyword.
+  - `uv build`: PASS; source distribution and wheel in ignored `dist/`.
+  - `npm test`: PASS; four workspace/rendering/security checks.
+  - `npm run typecheck --workspace @phoenix/desktop`: PASS.
+  - `npm run build --workspace @phoenix/desktop`: PASS.
+  - `git diff --check`: PASS.
+- Security: `.env` and local overrides remain ignored; only `.env.example` is
+  tracked. No credentials, databases, models, logs, caches, or generated artifacts
+  included. No configuration diagnostics or health exposure added.
+- Reviewed INV-001 through INV-024: preserved or unaffected, especially INV-001,
+  INV-003, INV-004, INV-008, INV-011, INV-012, INV-018, INV-021, and INV-024.
+  Permission/authority boundaries and optional-provider status are unchanged.
+- Decision: ADR-019 records namespace, precedence, unknown-key behavior, portable
+  storage default, and loading boundary. No singleton/cache/loader abstraction.
+- Assumptions: dotenv location is the caller's working directory; callers may
+  disable it explicitly. Relative paths remain relative without filesystem work.
+- Limitations: settings do not bind/start the API or initialize persistence.
+  Standard process-variable filtering ignores undeclared keys. The existing
+  Starlette HTTPX test-client deprecation warning remains; all tests pass.
+- All acceptance criteria passed before updating status. PHX-005 remains TODO.
