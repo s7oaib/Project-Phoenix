@@ -31,8 +31,10 @@ def test_distribution_has_foundation_runtime_dependencies() -> None:
     assert set(distribution["Requires-Python"].split(",")) == {">=3.11", "<3.12"}
     requirements = distribution.get_all("Requires-Dist") or []
     assert {requirement.split("<")[0] for requirement in requirements} == {
+        "alembic",
         "fastapi",
         "pydantic",
         "pydantic-settings",
+        "sqlalchemy",
         "uvicorn",
     }
