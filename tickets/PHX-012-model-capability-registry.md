@@ -1,6 +1,6 @@
 # PHX-012 — Model Capability Registry
 
-Status: TODO
+Status: DONE
 
 Phase: 1 — Model Runtime
 
@@ -504,3 +504,67 @@ No live Ollama request is required for PHX-012. Deterministic mocked provider in
 ## Completion evidence
 
 When complete, append concise evidence covering files, public API, key semantics, refresh behavior, query/matching semantics, concurrency, tests, regressions, dependency status, security/invariants, and known limitations.
+
+### Verified completion — 2026-10-04
+
+- Created `phoenix/models/registry.py` and `tests/test_model_registry.py`.
+  PHX-010/011 contracts, implementations, tests and completion evidence unchanged.
+  No dependency changes; `pyproject.toml` and uv-generated `uv.lock` unchanged.
+- API: ModelCapabilityRecord, CapabilityRequirements, ModelCapabilityRegistry;
+  register(), get(), remove(), clear(), list_records(), matching(), async refresh().
+  Registry starts empty. Key is the exact neutral (provider_id, model_id) pair,
+  using PHX-010 strict nonempty, whitespace-normalized identifiers.
+- Frozen extra-forbidden records retain detached, revalidated ModelCapabilities,
+  consistent provider/model IDs and aware UTC refreshed_at. Each successful
+  registration/replacement captures datetime.now(UTC); supplied aware record
+  timestamps normalize UTC. Deterministic JSON round-trip verified. No raw objects,
+  provider payloads, prompts, scores, health or residency fields are stored.
+- Register atomically replaces only the exact key. Get returns record/None;
+  remove returns true/false; clear affects memory only. Listing/matching return
+  immutable tuples sorted by (provider_id, model_id), independent of insertion.
+- Refresh validates identifiers, awaits only provider.capabilities(model_id),
+  revalidates the snapshot and checks both identities before committing. Identity
+  contradictions raise ModelProviderError. Provider/validation exceptions remain
+  explicit; failed/cancelled refreshes preserve old record identity and timestamp.
+- One process/event-loop concurrency: no-await synchronous mutation after I/O,
+  no lock/background workers. Same-key last successfully completed refresh wins;
+  independent keys remain independent. Controlled completion races and late
+  failures are tested; reads remain available while refresh waits.
+- Requirements are frozen/extra-forbidden: five strict booleans default false,
+  positive strict min_context_tokens or None. True requires explicit support;
+  false imposes no exclusion. Known context must meet the inclusive minimum;
+  unknown context cannot satisfy a positive minimum. Return all matches, no winner.
+- Deterministic OllamaProvider + HTTPX MockTransport refresh through ModelProvider
+  registers neutral capabilities. Only POST /api/show is invoked; interpretation
+  remains in the adapter. No live model discovery, generation or inference run.
+- Verification:
+  - `uv run --locked pytest tests/test_model_registry.py`: PASS; 83 cases.
+  - `uv run --locked pytest tests/test_model_provider.py`: PASS; 61 unchanged cases.
+  - `uv run --locked pytest tests/test_ollama_provider.py`: PASS; 108 unchanged cases.
+  - `uv lock` / `uv sync --locked`: PASS; 36 packages, no lockfile churn.
+  - `uv run --locked pytest`: PASS; 378 tests (API 8, bootstrap 11, config 19,
+    events 28, hardware 48, ModelProvider 61, registry 83, Ollama 108, persistence 12).
+  - `uv run --locked ruff check .`: PASS.
+  - `uv run --locked ruff format --check .`: PASS; 32 files.
+  - `uv run --locked mypy`: PASS; 30 source files, strict settings unchanged.
+  - `uv build`: PASS; source distribution and wheel in ignored dist/.
+  - `npm test`: PASS; four tests; desktop workspace typecheck/build: PASS.
+- Executable fresh-process isolation guards sockets, writes/mkdir, SQLite,
+  subprocesses, threads and hidden tasks; blocks HTTPX/Ollama, hardware, event/core,
+  persistence, API, agents, permission/tool and voice imports. Import, construction,
+  local operations, JSON round-trip and explicit fake capability refresh pass
+  without artifacts. AST checks keep production imports neutral and minimal.
+- Security/invariants INV-001..INV-024 reviewed: preserved or unaffected. Capability
+  and tool-use facts grant no authority. No credentials, payload persistence,
+  prompts/responses, logging, direct frontend/provider path, events, migrations,
+  model discovery/loading or routing. Exact health API, Alembic baseline, 32 events
+  and desktop implementation unchanged. ADR-025 records the durable registry policy.
+- Scope/whitespace and credential-signature review passed. Only registry code,
+  its tests, ADR-025, this ticket and the PHX-012 index status change are included.
+- Limitations: memory-only snapshots may become stale; no availability/residency
+  inference, auto-refresh or routing. Single-process/event-loop use; refresh timing
+  and cancellation belong to caller/provider. UTC wall-clock timestamps are not
+  monotonic version counters. Existing Starlette deprecation warning remains.
+- All required acceptance checks passed before marking DONE. Commit/push only
+  the PHX-012 feature branch; final SHA and remote checks are in the execution
+  report. PHX-013..PHX-016 remain TODO; PHX-013 was not started.
