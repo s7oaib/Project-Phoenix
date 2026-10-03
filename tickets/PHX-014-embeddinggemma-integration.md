@@ -1,6 +1,6 @@
 # PHX-014 — EmbeddingGemma Integration
 
-Status: TODO
+Status: DONE
 
 Phase: 1 — Model Runtime
 
@@ -313,3 +313,77 @@ Run at minimum:
 ## Completion evidence
 
 When complete, append concise evidence covering files, neutral contract, adapter endpoint/config, request/response/vector validation, client lifecycle, errors, deterministic tests, optional live smoke, regressions, dependency status, security/invariants, and known limitations.
+
+### Verified completion — 2026-10-04
+
+- Created phoenix/models/embeddings.py, phoenix/models/ollama_embeddings.py and
+  tests/test_embeddings.py. Updated this ticket, FEATURE_TICKETS.md and ADR-027.
+  Generation provider, Ollama generation, capability registry, lifecycle manager,
+  prior tests/completion evidence and all foundations remain unchanged.
+- EmbeddingProvider ABC has validated read-only provider_id and async embed().
+  EmbeddingRequest contains generated/caller-supplied operation_id, model_id and
+  an ordered nonempty immutable text tuple. Identifiers reuse PHX-010 semantics;
+  text remains untrimmed and nonblank. Frozen public models forbid extra fields.
+- EmbeddingResponse preserves operation/provider/model correlation and exposes
+  ordered immutable vectors, dimensions, optional input_tokens/duration_ms only.
+  Numeric int/float components become finite floats; booleans, arbitrary float-
+  convertible objects, strings, NaN/infinities, empty/nonuniform vectors fail.
+  Adapter verifies exactly one vector per input and derives actual dimensions;
+  contradictory supplied dimension metadata fails. No padding or renormalization.
+- OllamaEmbeddingProvider uses POST /api/embed; sends model, input array and
+  truncate=false to enforce nontruncation against Ollama's documented default.
+  No operation ID, generation options, keepalive or requested dimensions sent.
+  Supplied model identity validates with ordinary default :latest equivalence;
+  missing identity preserves the request ID without claiming provider evidence.
+- Default http://127.0.0.1:11434; deterministic HTTP(S) URL normalization rejects
+  malformed/credential/query/fragment URLs. Owned HTTPX clients verify TLS,
+  disable ambient proxies and redirects; all calls enforce no redirects and
+  explicit timeout settings even for caller-owned borrowed clients.
+- Connect/read/write/pool defaults 3/120/10/5 seconds, total operation 300,
+  explicit cleanup five. All limits finite/positive and configurable. No hidden
+  worker; first explicit use binds one event loop. Native caller-task cancellation
+  propagates; request timeouts are unavailable errors. Owned clients close with
+  aclose()/async context exit; borrowed clients stay open, repeated close is safe.
+- Reported prompt_eval_count is a strict nonnegative input token count;
+  total_duration is strict nonnegative nanoseconds converted to milliseconds.
+  Missing metrics remain None; malformed/overflow metrics fail. No inferred
+  totals, TTFT, throughput, raw metadata, benchmark score or quality measurement.
+- EmbeddingProviderError / EmbeddingUnavailableError distinguish invalid provider
+  data/HTTP/protocol from network/timeouts. Public errors suppress raw context
+  display and contain no texts/vectors/private URLs/provider bodies. No logging.
+- Verification:
+  - uv lock / uv sync --locked: PASS; 36 packages; no dependency/lock changes.
+  - uv run --locked pytest tests/test_embeddings.py: PASS; 182 cases.
+  - Individual PHX-010/011/012/013 test files: PASS; 61/108/83/54 cases.
+  - uv run --locked pytest: PASS; 614 cases, one existing Starlette warning.
+    The first full run during competing builds had 613 passes and one existing
+    PHX-011 10 ms stream deadline test fail before its first chunk; isolated
+    rerun passed, then the full suite passed without code/test weakening.
+  - uv run --locked ruff check . / ruff format --check .: PASS; 37 formatted files.
+  - uv run --locked mypy: PASS; 35 source files under unchanged strict config.
+  - uv build: PASS; wheel/source distribution in ignored dist/.
+  - npm test: PASS; four cases; desktop typecheck/build: PASS.
+  - Whitespace/staged diff and credential-signature review: PASS before commit.
+- Fresh-interpreter tests block socket/network use, writes/mkdir, SQLite,
+  subprocesses, threads/tasks and imports of hardware/core/events/API/persistence/
+  agents/tools/permissions/voice/generation/registry/lifecycle. Contract/fake/default
+  adapter construction and explicit mocked embed/cleanup pass; temporary directory
+  stays empty. AST tests constrain imports and provider endpoints to this scope.
+- Optional bounded read-only /api/version and /api/tags: Ollama 0.35.1 HEALTHY;
+  neither embeddinggemma nor embeddinggemma:latest installed. Live embedding
+  smoke UNAVAILABLE; count/dimensions/finite validation unavailable, batch SKIPPED.
+  No model download, installation, service changes, or full vector printing.
+- Security/INV-001..INV-024 reviewed: preserved or unaffected. Embeddings are data
+  only; no permissions/tool execution or frontend provider access. No secrets,
+  input/vector logging, filesystem/database writes, events, Alembic/API/UI changes,
+  automatic leases, routing, discovery surface, RAG/VectorStore or persistence.
+  Exact health contract, canonical 32 events and Phase 0/desktop remain green.
+- All deterministic acceptance criteria met. Limitations: callers own in-flight
+  task cancellation/completion before close and borrowed-client security setup;
+  no dedicated embedding concurrency policy or live model evidence without an
+  installed candidate. Response order follows provider batch position, without
+  semantic quality claims. Existing timing sensitivity/deprecation remain.
+- Complete with a new feat: complete PHX-014 EmbeddingGemma integration commit
+  and normal push only to feature/PHX-014-embeddinggemma-integration. Final SHA and
+  remote verification are reported after push. No main push, PR, merge or force.
+  PHX-015 and PHX-016 remain TODO; PHX-015 is not started.
