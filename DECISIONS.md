@@ -256,3 +256,39 @@ health, keepalive, permissions, routing, benchmarks or model-process control.
 State is memory-only and disappears with the process. Share the manager instance
 across callers to apply the global resource limit; abandoned leases need explicit
 caller cleanup rather than silent reclamation of possibly active generation.
+
+## ADR-027 — Separate neutral embeddings with validated immutable vectors
+Status: Accepted for PHX-014.
+
+Keep PHX-010 ModelProvider/ModelCapabilities and PHX-012/013 unchanged. A separate
+EmbeddingProvider ABC exposes stable provider_id and explicit async embed().
+Frozen request/response models reuse neutral identifiers and forbid extra fields.
+Inputs preserve original text/order; vectors are immutable nonempty tuples of
+finite numeric floats, with one vector per input and uniform actual dimensions.
+No inferred dimensions, renormalization, arbitrary metadata or execution authority.
+
+Use a self-contained OllamaEmbeddingProvider with existing HTTPX/Pydantic only;
+do not import PHX-011 private helpers or refactor generation for aesthetic reuse.
+Match PHX-011 URL/client security and timeout policy: loopback default, validated
+HTTP(S) URL without credentials/query/fragment, TLS verification, no ambient proxy
+for owned clients, no redirects, finite connect/read/write/pool 3/120/10/5 seconds,
+300-second whole-operation timeout and five-second owned-client cleanup.
+Clients or transports may be injected; borrowed clients remain caller-owned and
+caller-configured. Callers await/cancel their embed task before provider close.
+No background task, construction probe or provider-wide cancellation API.
+
+POST /api/embed sends model, ordered input array and truncate=false. This last
+control is necessary because Ollama defaults to silent truncation; exceeding the
+context window must fail rather than change caller text. See the official API:
+https://docs.ollama.com/api/embed. No generation/options/keepalive/dimension control.
+Validate supplied model identity, permitting only ordinary default :latest
+equivalence; omitted identity retains the requested model without an evidence claim.
+Map reported prompt_eval_count and total_duration nanoseconds/1,000,000 only;
+unknown metadata remains None. Safe neutral errors distinguish unavailable
+transport from HTTP/protocol/identity/vector failures without exposing inputs,
+vectors, response bodies or private URLs.
+
+EmbeddingGemma remains the frozen candidate, not assumed installed. Discovery is
+only optional read-only smoke verification. No downloads, automatic heavy-generation
+leases, registry support flags, storage, RAG, ingestion, API/UI, events or benchmark
+policy belongs to this boundary. Resource policy remains future evidence-based work.
