@@ -26,7 +26,12 @@ def test_installed_package_boundary(boundary: str) -> None:
     assert module.__package__ == f"phoenix.{boundary}"
 
 
-def test_distribution_has_no_runtime_dependencies() -> None:
+def test_distribution_has_foundation_runtime_dependencies() -> None:
     distribution = metadata("phoenix")
     assert set(distribution["Requires-Python"].split(",")) == {">=3.11", "<3.12"}
-    assert not distribution.get_all("Requires-Dist")
+    requirements = distribution.get_all("Requires-Dist") or []
+    assert {requirement.split("<")[0] for requirement in requirements} == {
+        "fastapi",
+        "pydantic",
+        "uvicorn",
+    }
