@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "phoenix"
+version = "0.1.0"
+description = "PHOENIX local-first desktop assistant"
+requires-python = ">=3.11,<3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "mypy==1.18.2",
+    "pytest==8.4.2",
+    "ruff==0.13.3",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["phoenix"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["phoenix", "tests"]
