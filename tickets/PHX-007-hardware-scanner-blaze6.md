@@ -285,12 +285,9 @@ When complete, append concise evidence covering files, dependency changes, scann
   - C: total 686,974,562,304 bytes; free 55,255,678,976 bytes.
   - D: total 214,748,360,704 bytes; free 166,490,189,824 bytes.
   - E: total 120,096,550,912 bytes; free 82,584,793,088 bytes.
-  - Profile: `does_not_match`. CPU/core/RAM checks match. GPU model check is a
-    mismatch because the observed name contains an additional `6GB` token absent
-    from the frozen model name. Profile VRAM association is unavailable because
-    no GPU matches that model comparison; the scan's actual VRAM remains 6144.
-    The profile/matcher was not changed to force a live match. A truthful profile
-    mismatch is supported scanner behavior, not a failed scanner smoke test.
+  - Original assessment had a false-negative GPU identity comparison caused by
+    the non-identity `6GB` annotation. The review correction below supersedes
+    that assessment; the frozen profile and original observed name are unchanged.
 - Commands/results:
   - `uv add "psutil>=7,<8"` / `uv add --dev types-psutil`: PASS.
   - `uv run --locked pytest tests/test_hardware.py`: PASS; 37 deterministic cases.
@@ -325,3 +322,39 @@ When complete, append concise evidence covering files, dependency changes, scann
   Existing Starlette HTTPX deprecation warning remains; all tests pass.
 - All acceptance checks passed before marking DONE. Phase 0 tickets PHX-001 through
   PHX-007 are DONE; PHX-010 remains TODO and was not started.
+
+### Verified review correction — 2026-10-04
+
+- Replaced contiguous GPU-name substring matching with exact normalized token
+  identity. Ignore only compact integer GB/GiB capacity annotations and optional
+  leading NVIDIA/GeForce branding. Preserve all substantive tokens, including
+  Ti/Super/Desktop. No aliases, VRAM-derived identity, or frozen profile changes.
+  ADR-022 clarifies this rule; no new ADR or dependency was added.
+- Added 11 regression cases: exact/live/6GiB/punctuation names, independent VRAM
+  mismatch despite 6GB annotation, five substantive variant mismatches, and
+  nonzero-index matching GPU selection using that GPU's own measured VRAM.
+  Existing mismatch and isolation tests remain unchanged.
+- Re-ran the same explicit live scanner command above; returned promptly with
+  no issues at 2026-10-03T21:41:47.648897Z. CPU: 13th Gen Intel(R) Core(TM)
+  i7-13650HX; physical/logical cores: 14/20; RAM: 25,463,480,320 bytes
+  (23.714714 GiB). Exact NVIDIA name: NVIDIA GeForce RTX 3050 6GB Laptop GPU;
+  measured VRAM: 6144 MiB; driver: 610.62.
+  - C: total 686,974,562,304 bytes; free 53,641,297,920 bytes.
+  - D: total 214,748,360,704 bytes; free 166,490,050,560 bytes.
+  - E: total 120,096,550,912 bytes; free 82,584,793,088 bytes.
+  - Corrected profile: `matches`; CPU model, physical cores, logical processors,
+    RAM, GPU model, and VRAM all MATCH. This uses current scan evidence, not a
+    hard-coded live result. The original NVIDIA name remains in the snapshot.
+- Verification: `uv run --locked pytest tests/test_hardware.py`: 48 passed;
+  `uv lock` and `uv sync --locked`: PASS, unchanged 36-package lock;
+  `uv run --locked pytest`: 126 passed (API 8, bootstrap 11, config 19, events 28,
+  hardware 48, persistence 12). `uv run --locked ruff check .`,
+  `uv run --locked ruff format --check .`, `uv run --locked mypy`, and `uv build`:
+  PASS. `npm test`: four passed; desktop typecheck/build: PASS.
+- Health contract, Alembic baseline/revision, EventBus and desktop are unchanged.
+  No scan/query behavior, network, elevation, identifier collection, or future
+  runtime feature was added. Isolation/security/privacy and INV-001..INV-024
+  remain preserved. Existing Starlette deprecation warning remains.
+- Reviewed four-file diff and credential signatures; whitespace checks pass.
+  Ticket remains DONE and FEATURE_TICKETS.md is unchanged; Phase 0 complete,
+  PHX-010 not started.

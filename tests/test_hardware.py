@@ -171,6 +171,66 @@ def test_known_profile_and_free_disk_independence(blaze6: HardwareSnapshot) -> N
 
 
 @pytest.mark.parametrize(
+    "name",
+    [
+        "NVIDIA GeForce RTX 3050 Laptop GPU",
+        "NVIDIA GeForce RTX 3050 6GB Laptop GPU",
+        "NVIDIA GeForce RTX 3050 6GiB Laptop GPU",
+        "nvidia geforce rtx-3050 6gb laptop gpu",
+    ],
+)
+def test_gpu_stable_identity(name: str, blaze6: HardwareSnapshot) -> None:
+    snapshot = blaze6.model_copy(update={"gpus": (GpuInfo(name=name, vram_mib=6144),)})
+    assessment = assess_blaze6(snapshot)
+    assert assessment.status is ProfileStatus.MATCHES
+    assert assessment.checks[4].status is CheckStatus.MATCH
+    assert assessment.checks[4].observed == name
+    assert assessment.checks[5].status is CheckStatus.MATCH
+    assert assessment.checks[5].observed == 6144
+
+
+def test_gpu_annotation_cannot_override_measured_vram(blaze6: HardwareSnapshot) -> None:
+    snapshot = blaze6.model_copy(
+        update={"gpus": (GpuInfo(name="RTX 3050 6GB Laptop GPU", vram_mib=4096),)}
+    )
+    assessment = assess_blaze6(snapshot)
+    assert assessment.status is ProfileStatus.DOES_NOT_MATCH
+    assert assessment.checks[4].status is CheckStatus.MATCH
+    assert assessment.checks[5].status is CheckStatus.MISMATCH
+    assert assessment.checks[5].observed == 4096
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+        "NVIDIA GeForce RTX 3050 Super",
+        "NVIDIA GeForce RTX 3060 Laptop GPU",
+        "NVIDIA GeForce RTX 3050 Desktop GPU",
+        "NVIDIA GeForce RTX 3050 6GB Laptop GPU Ti",
+    ],
+)
+def test_gpu_substantive_tokens_remain_significant(
+    name: str, blaze6: HardwareSnapshot
+) -> None:
+    snapshot = blaze6.model_copy(update={"gpus": (GpuInfo(name=name, vram_mib=6144),)})
+    assessment = assess_blaze6(snapshot)
+    assert assessment.status is ProfileStatus.DOES_NOT_MATCH
+    assert assessment.checks[4].status is CheckStatus.MISMATCH
+
+
+def test_gpu_canonicalized_selection_uses_own_vram(blaze6: HardwareSnapshot) -> None:
+    other = GpuInfo(name="NVIDIA RTX 4090", vram_mib=24576)
+    matching = GpuInfo(name="NVIDIA GeForce RTX 3050 6GB Laptop GPU", vram_mib=6144)
+    snapshot = blaze6.model_copy(update={"gpus": (other, matching)})
+    assessment = assess_blaze6(snapshot)
+    assert assessment.status is ProfileStatus.MATCHES
+    assert assessment.checks[4].observed == matching.name
+    assert assessment.checks[5].observed == 6144
+    assert snapshot.gpus == (other, matching)
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("cpu_model", "Intel i9-13900H"),

@@ -218,6 +218,20 @@ def _normalized(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.lower())
 
 
+def _gpu_identity(value: str) -> tuple[str, ...]:
+    """Ignore compact GB/GiB annotations and optional NVIDIA branding only."""
+    tokens = [
+        token
+        for token in re.findall(r"[a-z0-9]+", value.lower())
+        if re.fullmatch(r"[0-9]+g(?:i)?b", token) is None
+    ]
+    if tokens and tokens[0] == "nvidia":
+        tokens.pop(0)
+        if tokens and tokens[0] == "geforce":
+            tokens.pop(0)
+    return tuple(tokens)
+
+
 def assess_blaze6(snapshot: HardwareSnapshot) -> Blaze6Assessment:
     """Six stable checks; RAM 22..26 GiB inclusive, VRAM exactly 6144 MiB."""
     checks: list[ProfileCheck] = []
@@ -268,7 +282,11 @@ def assess_blaze6(snapshot: HardwareSnapshot) -> Blaze6Assessment:
         and 22 * 2**30 <= snapshot.ram_bytes <= 26 * 2**30,
     )
     gpu = next(
-        (gpu for gpu in snapshot.gpus if "rtx3050laptopgpu" in _normalized(gpu.name)),
+        (
+            gpu
+            for gpu in snapshot.gpus
+            if _gpu_identity(gpu.name) == ("rtx", "3050", "laptop", "gpu")
+        ),
         None,
     )
     # Compare VRAM from the matching GPU, never add devices or assume index zero.

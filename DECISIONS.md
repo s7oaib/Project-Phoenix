@@ -155,5 +155,10 @@ contradiction yields `does_not_match`; otherwise missing evidence yields
 `insufficient_evidence`; all six matches yield `matches`. RAM tolerance is
 22..26 GiB inclusive; VRAM must be exactly 6144 MiB on the selected matching GPU.
 Normalize punctuation/case for CPU/GPU comparison, preserving substantive model
-tokens. Disks/free space, driver versions, and Ollama versions are not identity
-checks. Hardware facts never grant authority or claim runtime readiness.
+tokens. GPU identity uses exact token comparison after removing optional leading
+NVIDIA/GeForce branding and compact integer GB/GiB capacity annotations (such as
+6GB or 6GiB). Capacity annotations are presentation only; the selected GPU's
+queried VRAM is independently checked. Ti/Super/Desktop and other substantive
+tokens remain significant. Disks/free space, driver versions, and Ollama versions
+are not identity checks. Hardware facts never grant authority or claim runtime
+readiness.
