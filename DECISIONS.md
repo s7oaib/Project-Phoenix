@@ -393,3 +393,35 @@ acceptance does not prove remote computation stopped. No routing, winner choice,
 discovery/download, strategy freeze, persistence, API/UI, events, embedding or
 agent integration. Capability metadata is retained without claiming tool-use,
 structured-output, vision, planning or general coding quality was assessed.
+
+## ADR-030 — Immutable logical agent identities and display-only aliases
+Status: Accepted for PHX-020.
+
+AgentDefinition contains only internal_id, optional alias, and professional_role.
+Use frozen, extra-forbidden Pydantic models and strict trimmed nonempty strings,
+matching the existing neutral identifier semantics without importing model/runtime
+subsystems. Aliases are display metadata: None is valid, duplicate aliases are
+allowed, and removing/renaming aliases cannot change identity, order or role.
+
+AgentRegistry is an immutable in-memory tuple of revalidated definition snapshots.
+Reject duplicate internal IDs after whitespace normalization. get/require/contains
+use only internal ID, preserving case and never mapping aliases. Valid absent IDs
+return None/false or raise UnknownAgentError; invalid inputs fail validation.
+list_agents returns the immutable source order. The default factory creates a
+fresh registry from the fixed 30-entry roster in docs/03_AGENT_ROSTER.md, from
+phoenix through verifier. No mutable global registry or mutation API is added.
+
+Roles are descriptive metadata, never executable prompts or authorization.
+PHOENIX alone is supreme; AIZEN plans, LEVI verifies without default repair,
+MAHORAGA recovery is bounded and cannot bypass permissions, and KAIDO is degraded
+fail-safe only. GOJO/FUJITORA advise; PermissionEngine remains authoritative.
+LIGHT scenario analysis stays distinct from AIZEN planning, and LELOUCH active
+system intelligence stays distinct from ITACHI silent logs/anomaly monitoring.
+BROOK is the media agent; Spotify/YouTube remain tools. PUDDING memory and VEGAPUNK
+knowledge/RAG responsibilities do not implement storage. Later tickets enforce
+these boundaries; the registry implements no execution/security authority.
+
+One logical identity does not imply one model/client/process. No provider/model
+binding, tool/permission objects, memory storage, orchestration, routing, task
+graph, handoff, runtime state, events, persistence, API/UI or background work.
+Import/construction/build/read operations perform no I/O or runtime initialization.
