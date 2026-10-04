@@ -1,6 +1,6 @@
 # PHX-027 — MAHORAGA Recovery
 
-Status: TODO
+Status: DONE
 Phase: 2 — Orchestration
 
 ## Objective
@@ -285,3 +285,105 @@ Only after all deterministic gates pass:
 - commit exactly: `feat: complete PHX-027 MAHORAGA recovery`
 - push only `feature/PHX-027-mahoraga-recovery`
 - do not create a PR, merge, push main or start PHX-028
+
+## Completion evidence — 2026-10-05
+
+Created phoenix/agents/recovery.py and tests/test_mahoraga_recovery.py. ADR-037 records
+the bounded proposal boundary. Dependencies, lockfile and PHX-020 through PHX-026 code/
+tests remain unchanged. Required branch history was preserved: starting HEAD
+dd46ff0004454b3f9ebb5d62bd3a7286969c9880, zero behind main, with only this ticket in the
+pre-implementation net diff. No history rewrite, reset or force update was used.
+
+Public API: MahoragaRecovery(agent_registry=None), async recover(graph=..., handoff=...,
+trigger=..., failure_summary=..., attempts_used=..., max_attempts=..., max_replan_steps=...,
+responder=..., verification_result=None, recovery_id=None), async cancel(id), read-only
+recovery_agent_id and sorted immutable active_recovery_ids. Identity is adaptive_recovery;
+construction requires that registry internal ID. Removed/renamed aliases preserve
+behavior; MAHORAGA alias/role cannot supply authority. Registry values are detached.
+
+Frozen extra-forbidden nine-field request carries recovery/task/step/subject IDs, trigger,
+failure_summary and explicit strict integer budgets. IDs normalize outer whitespace,
+preserving case; meaningful failure/rationale/adjustment text preserves formatting.
+Omitted/None runtime ID generates UUID4; direct request None fails. Four exact triggers:
+execution_failure, verification_failure, timeout and resource_unavailable. Byte-string
+vocabulary coercion is rejected. No text creates policy, permission or executable code.
+
+The entire exact graph/steps and handoff revalidate against the same snapshotted registry.
+Task, existing selected step, target/owner, objective, ordered input refs and timeout
+must match; source/target IDs must be registered. No graph-owned overrides. Verification
+failure requires exact correlated FAILED LEVI evidence; passed, contradictory, extended,
+forged and mismatched evidence fail, including before exhaustion. Other triggers require
+no verification result and reject irrelevant supplied evidence. Original failed LEVI
+evidence remains unchanged and still fails the required-verification gate (INV-008).
+
+Exact six-action vocabulary: retry_same, adjust_parameters, switch_tool,
+switch_model_provider, switch_agent and replan_subgraph. Exclusive action fields require
+no options for retry, ordered meaningful adjustments for parameter guidance, a neutral
+tool ID, both neutral provider/model IDs, a different registered agent ID, or a bounded
+ordered replan tuple respectively. None means absence; empty sequences, sets, duplicates,
+malformed IDs and irrelevant fields fail. Replacement IDs are descriptions, never live
+objects, availability claims or execution eligibility. Replans contain only unique graph
+IDs, include the failed step, preserve responder order and respect max_replan_steps.
+
+Strict finite budgets reject bool/coerced numbers. Used >= max returns exhausted,
+proposal=None and attempt_number=None without responder or active registration. Eligible
+calls invoke RecoveryResponder.propose(request) exactly once and produce at most one
+validated proposal with attempt_number=used+1 <= max. No internal retry loop or global
+retry default. Caller-carried counts reach exhaustion deterministically (INV-009).
+Result preserves the original failure trigger/summary, correlated IDs, recovery_agent_id
+literal adaptive_recovery, attempt/replan budgets and proposed/exhausted evidence.
+Neither status means repaired execution, verified success, permission or user completion.
+
+Exact stored-field draft/nested proposal revalidation rejects extended contracts,
+copied/constructed extras, malformed values, action contradictions and ID mismatches.
+Active IDs coexist; duplicates preserve the original, including duplicate exhausted
+inputs; IDs are reusable after finally cleanup. Nested eligible operations sharing one
+task and cross-loop use fail. Cancellation accepts/not-found only, targets one caller
+task and cannot corrupt another operation. Recorded local cancellation prevents proposal
+finalization despite responder suppression or cancellation-counter clearing. Exceptions,
+malformed proposals, correlation/action errors and cancellation remain explicit; all
+terminal paths clean their own active entry. No hidden worker/task is created.
+
+Verification commands and results:
+
+- uv run --locked pytest tests/test_mahoraga_recovery.py: final three consecutive
+  runs each 790 passed, in 1.20s / 1.19s / 1.22s. Exhaustive six-action/optional-field
+  matrix, strict contracts, budgets, exact boundaries, LEVI failure preservation,
+  Event/wait_for concurrency/cancellation checkpoints and isolation pass.
+- Individual locked Phase-2 pytest: registry 96, orchestrator 101, planner 151,
+  router 213, graph/state 348, handoffs 214, LEVI 242: all 1,365 passed unchanged.
+- Individual locked Phase-1 pytest: provider 61, Ollama 108, registry 83,
+  lifecycle 54, embeddings 182, Colibri 194, benchmark 130: all 812 passed unchanged.
+- uv lock / uv sync --locked: 36 packages; no dependency/lockfile changes.
+- uv run --locked pytest: 3,093 passed, 16.06s; one existing Starlette/httpx
+  deprecation warning. Initial trigger-byte coercion was corrected; no tests weakened.
+- uv run --locked ruff check . / ruff format --check .: passed, 57 files;
+  uv run --locked mypy: 55 source files passed. New-test line-length and a chained
+  None-check annotation issue were corrected without changing prior implementations.
+- uv build: passed; wheel/source archives include agents/recovery.py.
+- Explicit locked foundation pytest (bootstrap/api/config/persistence/events/hardware):
+  126 passed; exact /health, Alembic revision 0001 and canonical 32 events unchanged.
+- npm test: four passed; npm run typecheck --workspace @phoenix/desktop and
+  npm run build --workspace @phoenix/desktop: passed; desktop files unchanged.
+- Fresh-interpreter recovery import/construction/serialization, all six explicit
+  proposal categories, correlated verification failure and equal/over-budget exhaustion
+  passed with writes, sockets, SQLite, subprocesses, threads, hidden tasks, task-state
+  transitions, HandoffBuilder/LeviVerifier invocation and forbidden subsystem imports
+  blocked. Harness-owned loop/task only; opaque file refs unread; directory stays empty.
+  AST import/call boundaries and exact public-field/API tests also pass.
+- Credential/signature scan: 144 repository files, zero matches; no credentials,
+  automatic failure/proposal logging, raw provider storage, callbacks, executable text,
+  permission grants/scope expansion or direct frontend path introduced.
+- INV-001 through INV-024 reviewed: preserved/unaffected. PHOENIX stays supreme, AIZEN
+  subordinate/uninvoked, failed verification unchanged, recovery budgets explicit and
+  bounded, aliases non-authoritative and failures observable. No tool/permission bypass,
+  model-generation policy change or required optional provider dependency introduced.
+
+Acceptance criteria: all met. No actual retry, repair, adjustment application, tool,
+model/provider/agent switch, AIZEN replan, router/LEVI invocation, task-state transition,
+event emission, persistence or API/frontend integration. Exhaustion activates no KAIDO.
+Known limitations: memory-only, one process/event loop, cooperative cancellation and
+caller-owned deadlines/count carry-forward. Proposals establish structural strategy
+evidence, not runtime availability, repaired execution or PHOENIX completion. No live
+provider/tool/hardware validation was needed. PHX-028 — KAIDO Fail-Safe is next and has
+not been started.
