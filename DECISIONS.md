@@ -596,3 +596,48 @@ degraded does not activate KAIDO. A completed marker alone does not establish
 user-facing execution/verification success. PHOENIX remains supreme, with the
 orchestrator, planner and router unchanged/uninvoked. Model/provider/lifecycle,
 tools, PermissionEngine, handoffs, recovery/fail-safe, API and desktop stay separate.
+
+## ADR-035 — Immutable graph-correlated handoff data without runtime authority
+Status: Accepted for PHX-025.
+
+HandoffEnvelope contains only the eleven documented evidence fields: task/step IDs,
+source/target internal IDs, objective, input_refs, constraints, expected_output_schema,
+timeout_seconds, permission_scope and verification_required. Frozen extra-forbidden
+contracts require strict nonempty normalized IDs/refs/scopes, meaningful original
+objective/schema/constraint text, finite positive numeric timeout (never bool or
+numeric strings), and strict verification bool. Ordered lists/tuples are snapshotted;
+sets and scalar containers fail. Empty refs/constraints/scopes are valid. Constraints
+and scopes reject duplicates after outer-whitespace normalization, without changing
+case or constraint formatting. Input refs may repeat and are never dereferenced.
+
+HandoffBuilder snapshots an exact PHX-020 registry at construction, then revalidates
+the entire exact PHX-024 graph against that same registry before selecting a step.
+All graph owners must remain registered, including owners on unselected steps.
+Derive task_id, step_id, target_agent_id, objective, input_refs and timeout_seconds
+from the selected step/graph; the normal API exposes no conflicting overrides.
+Only source ID and handoff-specific descriptive metadata are supplied by the caller.
+Unknown steps/agents fail explicitly, without alias/role fallback or replacement.
+Any registered internal ID may structurally participate, including control roles;
+this makes no operational authority claim. Normalized source and target must differ,
+including during standalone envelope validation. Standalone envelopes validate shape
+and distinctness; only builder construction establishes graph/registry correlation.
+
+Revalidate constructed/copied public models by stored field values, including fields
+that model_copy can inject but model_dump can omit. Reject extended/subclass graph,
+step, registry, definition and envelope payloads at the boundary; retain no mutable
+caller containers, runtime objects, callbacks or arbitrary metadata in envelopes.
+Registry snapshots are private builder inputs and are never attached to envelopes.
+
+Constraints and expected_output_schema are opaque untrusted descriptions, never
+executed, compiled, interpreted as JSON Schema or automatically logged. Requested
+permission_scope is neither consent nor approval/grant/denial; P3/P4/P5-style text
+creates no authority and future PermissionEngine policy remains authoritative.
+verification_required describes a later verification obligation, never LEVI execution
+or proof of verification; false likewise claims no successful verification.
+
+Construction/build is synchronous, read-only and memory-only. It changes no graph,
+dependency/readiness evidence, task state or history, and enforces no timer or
+scheduling policy. No dispatch, agent chat, inference, provider/model selection,
+lifecycle lease, tool/permission execution, events, persistence, API or desktop path.
+PHOENIX remains supreme; orchestrator, planner, router and graph/state implementations
+remain unchanged/uninvoked. LEVI, MAHORAGA and KAIDO runtimes stay PHX-026 through 028.

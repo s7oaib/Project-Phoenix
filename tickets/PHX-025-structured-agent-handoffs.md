@@ -1,6 +1,6 @@
 # PHX-025 — Structured Agent Handoffs
 
-Status: TODO
+Status: DONE
 Phase: 2 — Orchestration
 
 ## Objective
@@ -388,3 +388,89 @@ Only after all required gates pass:
 ## Known intentional limitations
 
 PHX-025 defines validated handoff data only. It does not dispatch, execute, enforce timeout, dereference inputs, authorize requested permission scope, validate expected outputs, verify completion, retry/recover, activate fail-safe behavior, emit events, or persist handoffs.
+
+## Completion evidence — 2026-10-05
+
+PASS. Created phoenix/agents/handoff.py and tests/test_structured_agent_handoffs.py.
+Updated only this ticket, FEATURE_TICKETS.md and one accepted decision, ADR-035.
+No dependencies/locks, prior implementation/tests, API, desktop, events or migrations
+changed. PHX-020 through PHX-025 are DONE; PHX-026 through PHX-028 remain TODO.
+
+Public API: HandoffEnvelope, HandoffBuilder(agent_registry=None), build() and
+HandoffError. The frozen extra-forbidden envelope has exactly task_id, step_id,
+source_agent_id, target_agent_id, objective, input_refs, constraints,
+expected_output_schema, timeout_seconds, permission_scope and verification_required.
+Strict nonempty IDs/refs/scopes trim outer whitespace, preserving case. Meaningful
+objective/schema/constraint text retains formatting. Timeout is finite positive
+numeric metadata, rejecting bool/numeric strings. Verification is a strict bool.
+Ordered lists/tuples become immutable snapshots; unordered/scalar containers fail.
+Empty refs/constraints/scopes are valid. Constraints/scopes reject duplicates after
+outer-whitespace normalization; ordered refs may repeat and are never dereferenced.
+
+Builder construction revalidates and snapshots exact PHX-020 registry definitions.
+build() revalidates the entire exact PHX-024 graph with that registry, selects an
+exact normalized step and validates source/target internal IDs. Graph task_id and
+selected step_id/owner_agent_id/objective/input_refs/timeout_seconds become the
+envelope's corresponding fields. Normal API exposes no conflicting overrides.
+Unknown steps/sources/owners fail explicitly without repair or fallback; malformed
+contracts may raise Pydantic ValidationError. Aliases never establish identity.
+Renamed/removed aliases preserve all 30 identities as both sources and targets,
+including structurally assigned control roles. A custom uppercase internal ID works
+only when genuinely registered, with no case folding or alias mapping. Normalized
+self-handoffs reject in both envelope and builder validation.
+
+Stored-field revalidation catches forged/constructed/copied values and unknown
+fields that model_dump can omit after model_copy. Extended/subclass graph, step,
+registry, definition and envelope payloads fail; caller containers are detached.
+Standalone envelopes establish shape/distinctness only, not graph/registry authority.
+Custom graphs must have every owner present in the builder's registry snapshot.
+
+Constraints/schema/scope are descriptive untrusted data only. Expected-output-schema
+text is never evaluated, parsed, compiled or used to validate an output. P3/P4/P5
+scope text creates no grant, approval, consent, tool authority or permission bypass.
+verification_required describes a later obligation, never LEVI execution or passed
+verification. No prompts/schema/objectives are logged. Graph data, dependencies,
+readiness, task state and history remain unchanged. No dispatch, autonomous chat,
+scheduling, timers, cancellation, inference, lifecycle lease, tools, permissions,
+events, persistence, PHOENIX/AIZEN/router invocation, MAHORAGA or KAIDO behavior.
+
+Verification commands and results:
+
+- uv run --locked pytest tests/test_structured_agent_handoffs.py: 214 passed,
+  final targeted run 0.55s. Strict validation, exact fields, graph derivation,
+  alias independence, self-handoffs, invalid/extended evidence, snapshots,
+  permission/verification separation, unchanged graph/state and isolation pass.
+- Individual locked Phase-2 pytest: registry 96, orchestrator 101, planner 151,
+  router 213, graph/state 348: all 909 passed unchanged.
+- Individual locked Phase-1 pytest: provider 61, Ollama 108, registry 83,
+  lifecycle 54, embeddings 182, Colibri 194, benchmark 130: all 812 passed unchanged.
+- uv lock / uv sync --locked: 36 packages, no dependency/lockfile changes.
+- uv run --locked pytest: 2,061 passed, 32.07s; one existing Starlette/httpx
+  deprecation warning. All targeted and regression test runs passed.
+- uv run --locked ruff check . and ruff format --check .: passed, 53 files;
+  uv run --locked mypy: 51 source files passed. Initial new-code/test type annotation
+  errors were corrected without weakening runtime validation or changing prior code.
+- uv build: passed; wheel/source archives verified to include agents/handoff.py.
+- Explicit locked foundation pytest (bootstrap/api/config/persistence/events/
+  hardware): 126 passed; exact /health, Alembic baseline and 32 events unchanged.
+- npm test: four passed; npm run typecheck --workspace @phoenix/desktop and
+  npm run build --workspace @phoenix/desktop: passed, desktop files unchanged.
+- Fresh interpreter blocks writes/mkdir, sockets, SQLite, subprocesses, threads,
+  hidden asyncio tasks, task-state transitions and forbidden subsystem imports
+  during handoff import/construction/build/serialization: passed. Opaque file,
+  URL, memory and SQLite references remain unread; temporary directory stays empty.
+  AST import/call allowlists and exact public-field/API boundary checks pass.
+- Credential/signature scan: 138 repository files, zero matches; git diff --check
+  passed. No credentials, executable callbacks, arbitrary-object transport, prompt/
+  output logging, provider objects or direct frontend runtime path introduced.
+- INV-001 through INV-024 reviewed: preserved/unaffected. PHOENIX remains supreme,
+  AIZEN subordinate, aliases non-authoritative and failures explicit. Future tool,
+  permission, verification, recovery/fail-safe enforcement is neither bypassed nor
+  claimed. No model-generation concurrency policy or optional dependency introduced.
+
+Acceptance criteria: all met. Known limitations: data-only, memory-only foundation;
+standalone envelope shape validation is not graph correlation. Entire-graph owner
+validation needs the same registry identity set; metadata does not establish task
+quality, feasible execution, authorization, output correctness or verified success.
+Runtime integration remains future work. No live provider/hardware call was needed.
+PHX-026 — LEVI Verification is next and has not been started.
