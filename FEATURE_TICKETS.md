@@ -21,7 +21,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-016 Local model benchmark harness — DONE
 
 ## Phase 2 — Orchestration
-- PHX-020 Agent registry — TODO
+- PHX-020 Agent registry — DONE
 - PHX-021 PHOENIX orchestrator — TODO
 - PHX-022 AIZEN planner — TODO
 - PHX-023 Agent/model router — TODO

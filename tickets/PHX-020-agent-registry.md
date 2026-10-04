@@ -1,6 +1,7 @@
 # PHX-020 — Agent Registry
 
-Status: TODO  
+Status: DONE
+
 Phase: 2 — Orchestration
 
 ## Objective
@@ -359,3 +360,76 @@ PHX-020 is DONE only when:
 ## Next ticket
 
 PHX-021 — PHOENIX Orchestrator. Do not start it from this ticket.
+
+## Verified completion — 2026-10-04
+
+- Created phoenix/agents/registry.py and tests/test_agent_registry.py. Updated
+  only this ticket, PHX-020 in FEATURE_TICKETS.md, and one accepted ADR-030.
+  Existing agent package initializer, model implementations/tests, dependencies/
+  locks, foundations, desktop and PHX-021 onward remain unchanged.
+- Public contracts: AgentDefinition(internal_id, alias=None, professional_role),
+  AgentRegistry(agents=...), get(), require(), contains(), list_agents(),
+  UnknownAgentError, DEFAULT_AGENT_DEFINITIONS, build_default_agent_registry().
+  Frozen extra-forbidden Pydantic models use strict trimmed nonempty strings.
+  No capability/routing/activation/permission/runtime fields were speculated.
+- The default registry contains exactly 30 logical identities, one PHOENIX and
+  29 specialists. An immutable source tuple preserves the exact documented IDs,
+  aliases, professional roles and order, beginning phoenix and ending verifier.
+  Tests compare every triple against docs/03_AGENT_ROSTER.md and freeze all IDs.
+- Authoritative lookup uses internal_id only, trims outer whitespace, preserves
+  case and has no alias fallback. get() returns None for valid missing IDs;
+  require() raises UnknownAgentError; contains() returns false. Invalid inputs
+  raise validation errors. Custom registries preserve explicitly supplied order.
+- Aliases may be removed or renamed without changing IDs, role metadata, ordering
+  or lookup. Tests remove/rename every canonical alias and check equivalence.
+  Alias collisions cannot shadow internal IDs; duplicate aliases are harmless
+  display metadata. Built-in aliases retain their documented spelling.
+- Duplicate IDs reject after normalization. Caller lists/dictionaries are
+  snapshotted into tuples and revalidated frozen definitions; later caller
+  mutation cannot change stored records. Forged invalid nested models reject.
+  Registry/definition assignment and extra fields reject; JSON round-trips and
+  independently built default registries serialize deterministically.
+- Frozen roles preserve PHOENIX as sole supreme orchestrator, AIZEN planning,
+  LEVI verification without default repair, bounded MAHORAGA recovery without
+  permission bypass, and KAIDO degraded fail-safe only. GOJO/FUJITORA are advisory,
+  not PermissionEngine authority. LIGHT scenario analysis and LELOUCH active
+  intelligence remain distinct from AIZEN planning and ITACHI silent monitoring.
+  BROOK is an agent while Spotify/YouTube are tools; PUDDING memory and VEGAPUNK
+  knowledge/RAG remain descriptive responsibilities with separate implementations.
+- Only typing and Pydantic are imported by registry code. No concrete providers,
+  model IDs/URLs, clients, lifecycle leases, tool objects, permission grants,
+  callbacks or per-agent processes/tasks are created or stored. No orchestration,
+  routing, task graph, handoffs, memory/storage, event production or API/UI added.
+  Role text and aliases grant no execution/permission authority.
+- Fresh-interpreter executable isolation blocks model/core/API/persistence/tool/
+  permission/memory/voice/recovery/hardware imports, sockets/network, subprocesses,
+  filesystem writes/mkdir, SQLite, threads and hidden asyncio tasks. Import,
+  custom definition/registry construction, default build, lookup/listing and JSON
+  serialization pass with an empty temporary directory. AST tests also restrict
+  production imports and rule out asynchronous runtime code/global registries.
+- Verification:
+  - uv run --locked pytest tests/test_agent_registry.py: PASS, 96 cases.
+  - Individual locked PHX-010/011/012/013/014/015/016 regressions: PASS,
+    61/108/83/54/182/194/130 cases, 812 total, prior tests unchanged.
+  - uv lock / uv sync --locked: PASS, 36 packages, no dependency/lock changes.
+  - uv run --locked pytest: PASS, 1,034 cases; one existing Starlette HTTPX
+    deprecation warning. Explicit six-file Phase-0 subset: 126 passing cases.
+  - uv run --locked ruff check . / ruff format --check .: PASS, 43 files.
+  - uv run --locked mypy: PASS, 41 source files under unchanged strict config.
+  - uv build: PASS, source distribution and wheel in ignored dist/.
+  - npm test: PASS, four cases; desktop workspace typecheck/build: PASS.
+- Security and INV-001 through INV-024 reviewed: preserved or unaffected.
+  Neutral identities and removable aliases satisfy INV-012/014; no model work
+  affects global heavy-generation limits. PermissionEngine/ToolRegistry authority
+  remains intact. No credentials, provider URLs, prompt/output storage, executable
+  callbacks, runtime calls or direct frontend runtime access added. /health remains
+  exact; Alembic baseline and canonical 32 event types remain unchanged/green.
+- All deterministic acceptance criteria met. Known limitations: metadata-only,
+  no runtime enforcement of role boundaries, no scheduling/routing, and no claim
+  that registered identities are online or initialized. Future orchestration owns
+  runtime behavior; future routing owns model/provider selection. No live runtime
+  call is required or performed. Phase 2 has begun; only PHX-020 is DONE.
+- Entire staged-diff, whitespace, credential-signature and exact-scope review
+  precede feat: complete PHX-020 agent registry and a normal push only to
+  feature/PHX-020-agent-registry. Final SHA, clean-tree and remote equality evidence
+  is reported after push. No main push, force, PR, merge or PHX-021 implementation.
