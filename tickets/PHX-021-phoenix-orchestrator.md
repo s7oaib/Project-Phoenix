@@ -1,6 +1,6 @@
 # PHX-021 — PHOENIX Orchestrator
 
-Status: TODO
+Status: DONE
 Phase: 2 — Orchestration
 
 ## Objective
@@ -418,3 +418,63 @@ Exact implementation commit message:
 `feat: complete PHX-021 PHOENIX orchestrator`
 
 Do not create a PR, merge, push main, force-push, or start PHX-022.
+
+## Completion evidence — 2026-10-05
+
+Acceptance: PASS. Implemented only phoenix/agents/orchestrator.py and focused
+tests, with ADR-031 and this ticket/index updated. No dependency or prior
+implementation changes. PHX-022 through PHX-028 remain TODO.
+
+PhoenixOrchestrator validates registry internal ID phoenix, independent of aliases
+and role text. Frozen extra-forbidden request/direct-response/result/cancellation
+values use strict normalized IDs and preserve meaningful text verbatim. UUID4 IDs
+default independently. The caller supplies direct/complex explicitly; PHOENIX
+alone wraps a correlated subordinate DirectResponse as completed. Complex returns
+planning_required with text None and invokes no responder/planner/router.
+
+Caller tasks own active operations on one event loop. Sorted immutable ID snapshots
+expose no tasks. Duplicate active IDs and nested operations sharing one caller task
+fail before changing state. Distinct caller tasks run concurrently. cancel reports
+accepted/not_found and targets only the matching task. CancelledError propagates;
+suppressed cancellation cannot finalize success. try/finally cleans terminal state
+and IDs may be reused. No hidden worker, provider/model selection, tools,
+permissions, persistence, events, API/UI or later Phase-2 runtime was added.
+
+Verification commands and final results:
+
+- uv run --locked pytest tests/test_phoenix_orchestrator.py: 101 passed on three
+  consecutive final runs (0.45s, 0.44s, 0.48s), using Events and bounded waits.
+- uv run --locked pytest tests/test_agent_registry.py: 96 passed.
+- Individual locked pytest runs for test_model_provider.py (61),
+  test_ollama_provider.py (108), test_model_registry.py (83),
+  test_model_lifecycle.py (54), test_embeddings.py (182),
+  test_colibri_provider.py (194), test_model_benchmark.py (130): all passed;
+  Phase-1 total 812. One initial benchmark timeout test transiently failed its
+  cancellation-count assertion; isolated rerun and both full suites passed.
+  Benchmark implementation/tests were not changed.
+- uv lock and uv sync --locked: 36 packages, manifests/lock unchanged.
+- uv run --locked pytest: 1,135 passed, twice; final run 20.92s. The existing
+  Starlette/httpx deprecation warning remains (one warning).
+- uv run --locked ruff check .: passed; ruff format --check .: 45 formatted files;
+  uv run --locked mypy: 43 source files passed.
+- uv build: wheel/source distribution built; archive inspection confirms both
+  include phoenix/agents/orchestrator.py.
+- Explicit locked pytest for bootstrap/api/config/persistence/events/hardware:
+  126 passed. Exact /health, Alembic baseline and 32 event types remain intact.
+- npm test: four passed; npm run typecheck --workspace @phoenix/desktop and
+  npm run build --workspace @phoenix/desktop: passed.
+- Fresh interpreter audit blocks writes, mkdir, sockets, SQLite, subprocesses,
+  threads, task creation and imports of provider/tool/permission/persistence/event
+  subsystems during import/construction/inspection: passed. Explicit execution
+  with loop task creation blocked also passed; AST import allowlist passed.
+- Credential/signature scan: 126 repository files, zero matches. git diff --check
+  passed. INV-001 through INV-024 reviewed: authority, aliases, explicit failures
+  and cancellation/state preserved; future permission/verification/recovery and
+  model-capacity boundaries remain unimplemented and unchanged, without claims
+  of their runtime enforcement.
+
+Limitations: explicit path supplied by caller; complex planning deferred to PHX-022.
+One event loop and one active operation per caller task per orchestrator. Cancellation
+is cooperative and local acceptance does not prove external computation stopped;
+callers own deadlines. Tests use fake responders; no live provider smoke was needed.
+No persisted history, event integration, tools, permissions, API or desktop feature.

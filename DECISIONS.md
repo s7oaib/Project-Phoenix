@@ -425,3 +425,40 @@ One logical identity does not imply one model/client/process. No provider/model
 binding, tool/permission objects, memory storage, orchestration, routing, task
 graph, handoff, runtime state, events, persistence, API/UI or background work.
 Import/construction/build/read operations perform no I/O or runtime initialization.
+
+## ADR-031 — PHOENIX finalization and caller-owned request lifetimes
+Status: Accepted for PHX-021.
+
+PhoenixOrchestrator validates the neutral registry's authoritative internal ID
+phoenix. Alias and role text never select authority, collaborators or permissions.
+Frozen extra-forbidden contracts contain strict nonempty IDs and meaningful text.
+IDs trim outer whitespace; user/response text retains its original whitespace.
+Requests default to UUID4 IDs, and supplied IDs remain stable after normalization.
+
+The caller explicitly supplies direct or complex. Direct execution awaits one
+provider-neutral DirectResponder and accepts only a revalidated DirectResponse
+with matching request ID. The collaborator supplies content, never a final result
+or arbitrary metadata. PHOENIX alone wraps successful direct content in a completed
+PhoenixResult whose orchestrator_id is the literal phoenix. Complex execution
+returns planning_required with no completion text and invokes no collaborator.
+No classification, AIZEN plan or later Phase-2 behavior is implied.
+
+Track active IDs only in memory, on one event loop, with the executing caller task.
+No worker/hidden task is created. Reject simultaneous duplicate IDs before altering
+state. Reject nested operations sharing one caller task so request-scoped task
+cancellation cannot affect a second tracked operation. Independent caller tasks
+may execute distinct IDs concurrently. Sorted immutable ID snapshots expose no
+tasks or mutable dictionaries. try/finally removes state after every terminal path;
+the ID may then be reused. Cross-loop execution/cancellation fails explicitly.
+
+cancel reports accepted or not_found and cancels only the matching caller task.
+Accepted acknowledges a local request, not remote computation termination.
+CancelledError propagates; a responder that suppresses cancellation cannot produce
+a completed result. Collaborator exceptions and malformed/mismatched responses
+remain failures. Cancellation requires cooperative responders; callers own their
+deadlines. No provider shutdown, process kill, model unload or persistent history.
+
+Import, construction and inspection perform no I/O, events or runtime work.
+No provider/model, tool, permission, persistence, API/UI, voice or memory coupling.
+PHX-022 through PHX-028 remain unimplemented; no task-state machine or recovery
+loop is added. The registry remains logical metadata, not per-agent runtimes.
