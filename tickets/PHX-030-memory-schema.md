@@ -1,6 +1,6 @@
 # PHX-030 — Memory Schema
 
-Status: TODO
+Status: DONE
 Phase: 3 — Memory & RAG
 
 ## Objective
@@ -621,3 +621,79 @@ Report at minimum:
 - commit/push/main safety
 - known limitations
 - next ticket: PHX-031 — PUDDING Memory Service
+
+## Verified completion — PHX-030
+
+- Created phoenix/memory/schema.py, phoenix/persistence/memory.py,
+  alembic/versions/0002_memory_schema.py and tests/test_memory_schema.py.
+  Modified memory package docstring, shared Base docstring, narrow Alembic model
+  registration, historical persistence tests, this ticket, index and ADR-039.
+- Public domain API: MemoryType and MemoryRecord. Exact classes: working,
+  episodic, semantic, user, project, agent. Frozen extra-forbidden record has
+  exactly id/type/content/source_type/source_ref/scope/confidence/importance/
+  created_at/updated_at/last_accessed_at/expires_at/embedding_ref/metadata.
+- IDs use strict nonempty trimmed strings and independent UUID4 defaults.
+  Meaningful content preserves formatting. Required source_type/scope remain
+  extensible normalized strings; optional source_ref/embedding_ref are strict
+  normalized opaque references with no dereference, foreign key or vector data.
+- Confidence/importance require ordinary finite int/float evidence in inclusive
+  [0,1], rejecting bool, numeric strings and nonfinite values. Scores are data only.
+- Required explicit creation/update timestamps have no clock defaults. Aware
+  datetimes/aware ISO representations normalize to UTC. Update/access/expiry
+  cannot precede creation; optional access/expiry default None.
+- UTCDateTime stores naive UTC internally and returns aware UTC from SQLite.
+  Tests independently bind non-UTC ORM values, preserve microseconds, round-trip
+  all four timestamp fields and reject naive binds. No fabricated local timezone.
+- Metadata defaults to a separate empty object; finite JSON-only nested data is
+  deeply detached and frozen into read-only maps/tuples. JSON serialization restores
+  ordinary objects/arrays. Reject non-string keys, bytes, sets, custom objects,
+  callbacks, nonfinite numbers and cycles. Exact stored-model revalidation rejects
+  copied malformed fields/extras and subclasses. Content/metadata are never logged
+  or executed; secret admission policy remains later service/security work.
+- MemoryRow uses shared Base and exactly one table, memories, with fourteen
+  matching columns. ORM memory_type/metadata_json map to type/metadata without
+  colliding with DeclarativeBase.metadata. No engine/session implementation added.
+- Exact constraints: pk_memories on id; ck_memories_type,
+  ck_memories_confidence, ck_memories_importance, ck_memories_metadata_object.
+  Database independently rejects invalid types, scores, nonfinite/invalid JSON and
+  non-object metadata. Nullable: source_ref/last_accessed_at/expires_at/embedding_ref.
+- Exact indexes: ix_memories_type, ix_memories_scope, ix_memories_created_at,
+  ix_memories_expires_at. No content uniqueness, foreign keys, vector/full-text index,
+  deduplication/upsert or contradiction reconciliation; duplicate content can coexist.
+- Revision 0002_memory_schema has down_revision 0001. Baseline file unchanged.
+  Explicit temporary lifecycle PASS: base -> 0001 (alembic_version only) -> head
+  (alembic_version/memories) -> 0001 (memories/indexes removed) -> head (restored).
+  Inspect exact columns/nullability/PK/checks/indexes, current revision and absence
+  of other domain tables; Alembic metadata comparison reports no mapping drift.
+- PHX-005 test evolution: head assertion becomes 0002_memory_schema and validates
+  its parent 0001; the baseline lifecycle upgrades specifically to 0001 rather than
+  head, retaining baseline-only table/revision assertions. Replace order-dependent
+  shared metadata emptiness assertion with proof no DB file exists. Fresh-process
+  no-domain-import empty metadata proof remains unchanged. All other coverage retained.
+- No PUDDING service/repository/admission, document/chunk tables, embedding/vector
+  tables/providers/indexes, retrieval/reranking/context assembly or citation rendering.
+  No events, API/frontend changes or Phase-1/Phase-2 production changes.
+- Fresh-process schema/ORM import and construction isolation PASS: block writes,
+  configured-directory creation, SQLite, network, subprocess, threads/tasks and
+  forbidden subsystem imports before loading PHOENIX/SQLAlchemy. Preinitialize only
+  stdlib platform metadata, as PHX-005 already requires on Windows. Temp path empty.
+- uv run --locked pytest tests/test_memory_schema.py: 244 passed in 4.93s.
+  Persistence regression: 12 passed. Individually ran all seven Phase-1 suites:
+  61/108/83/54/182/194/130 passed (812 total). All nine Phase-2 suites:
+  96/101/151/213/348/214/242/790/574 passed (2,729 total).
+- uv run --locked pytest: 3,911 passed in 23.44s; one existing Starlette/httpx
+  deprecation warning. Ruff check/format PASS (63 files); strict mypy PASS
+  (60 sources), plus explicit env/both-revision mypy PASS (3 files).
+- uv lock / uv sync --locked PASS (36 packages); pyproject.toml/uv.lock unchanged.
+  uv build PASS; wheel includes domain/ORM modules; source distribution also includes
+  the new migration. Foundation suites: 126 passed in 3.64s. Exact /health remains
+  status=ok/service=phoenix-api/version=0.1.0; canonical event vocabulary remains 32.
+- npm test: 4 passed; desktop typecheck/build PASS, implementation unchanged.
+- Credential/signature scan: 152 repository files, zero matches. INV-001 through
+  INV-024/security reviewed; versioned migration and explicit errors preserved.
+  All deterministic acceptance gates PASS; one decision recorded, ADR-039.
+- Limitations: schema validates shape, not source trust or semantic secret admission;
+  future callers must validate MemoryRecord before persistence. Raw ORM storage is
+  not a memory service. No conflict/admission/retrieval/vector/citation integration.
+  Alembic continues using repository assets; tests touch only temporary databases.
+  PHX-031 through PHX-035 remain TODO; PHX-031 was not started.
