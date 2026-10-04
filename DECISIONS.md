@@ -641,3 +641,58 @@ scheduling policy. No dispatch, agent chat, inference, provider/model selection,
 lifecycle lease, tool/permission execution, events, persistence, API or desktop path.
 PHOENIX remains supreme; orchestrator, planner, router and graph/state implementations
 remain unchanged/uninvoked. LEVI, MAHORAGA and KAIDO runtimes stay PHX-026 through 028.
+
+## ADR-036 — Graph-correlated LEVI evidence with a separate verification gate
+Status: Accepted for PHX-026.
+
+LEVI's authoritative internal ID is verifier; aliases/role descriptions are metadata.
+LeviVerifier snapshots an exact PHX-020 AgentRegistry at construction and requires
+verifier. Explicit verify() revalidates the entire exact PHX-024 TaskGraph and its
+steps against that snapshot, then the exact PHX-025 HandoffEnvelope. Require matching
+task ID, existing selected step, target/owner, objective, ordered input references
+and timeout metadata, and registered source/target IDs. Derive request IDs/objective
+and completion rule from the graph, expected_output_schema from the handoff, and
+candidate_output from the caller; expose no conflicting request-field overrides.
+
+VerificationRequest, VerificationCheck, VerificationDraft, VerificationResult and
+CancellationResult are frozen, extra-forbidden neutral values. IDs are strict,
+nonempty, outer-whitespace-normalized strings; meaningful text preserves formatting.
+Request construction generates UUID4 by default. Runtime omitted/None verification_id
+requests generation; all other supplied IDs validate strictly. A directly constructed
+request with verification_id=None is invalid. Candidate/schema/criterion/evidence
+text and input references remain untrusted data, never interpreted or dereferenced.
+
+Only explicit verify() awaits VerificationResponder.verify(request), exactly once.
+The responder returns only a correlated verification ID and nonempty ordered checks
+(check_id, criterion, strict passed bool, evidence_summary). Revalidate draft/checks
+by stored field values, including copied/constructed fields omitted by model_dump;
+reject extended models, extras, malformed booleans, duplicate normalized check IDs
+and correlation errors. Detach caller containers. The runtime derives passed iff
+every validated check passes; otherwise failed. Result verifier_id is exactly verifier,
+and result validation rejects a verdict contradicting its checks. A pass establishes
+only the supplied checks, never independent universal correctness or authentication.
+
+verification_requirement_satisfied() is a pure obligation check. Missing evidence
+or failed evidence cannot satisfy required verification. Any supplied result must
+match handoff task/step/target, even for an optional obligation. With no obligation,
+missing evidence or valid correlated evidence satisfies this requirement only;
+a correlated failed result does not create a requirement or establish overall success.
+No pass grants permissions or PHOENIX user-facing completion. PermissionEngine remains
+authoritative; P3/P4/P5 handoff scope text creates no authority.
+
+One verifier instance belongs to one process/event loop. Distinct IDs may coexist;
+active inspection returns a sorted immutable tuple, never task objects. Reject active
+duplicates without disturbing the original, permit reuse after finally cleanup and
+reject nested operations sharing one caller task. No hidden worker tasks. Cancellation
+targets the matching caller task, with only accepted/not_found acknowledgements.
+Record local cancellation independently of the task cancellation counter; even a
+responder that suppresses CancelledError and clears that counter cannot return a
+verification result after local cancellation. Exceptions/cancellation propagate after
+cleanup. Cancellation remains cooperative; accepted does not prove external compute
+stopped. Callers own deadlines; descriptive graph timeout starts no automatic timer.
+
+No retry, repair, re-plan, MAHORAGA/KAIDO activation, task-state transitions, events,
+logging, persistence, API, desktop, tools, permission evaluation, provider/model calls
+or lifecycle leases. PHOENIX remains supreme. PHX-020 through PHX-025 implementations
+remain unchanged; orchestration/event integration is deferred, recovery belongs to
+PHX-027 and degraded/fail-safe behavior to PHX-028.
