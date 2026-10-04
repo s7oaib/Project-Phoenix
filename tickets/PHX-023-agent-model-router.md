@@ -1,6 +1,6 @@
 # PHX-023 — Agent/Model Router
 
-Status: TODO
+Status: DONE
 Phase: 2 — Orchestration
 
 ## Objective
@@ -488,3 +488,76 @@ Only after every deterministic gate passes:
 - push only `feature/PHX-023-agent-model-router`
 
 Do not start PHX-024.
+
+## Completion evidence — 2026-10-05
+
+PASS. Implemented phoenix/agents/router.py with tests/test_agent_model_router.py.
+Updated only this ticket, FEATURE_TICKETS.md and one durable decision, ADR-033.
+No dependencies, existing implementations/tests, API, desktop or migrations changed.
+PHX-020 through PHX-023 are DONE; PHX-024 through PHX-028 remain TODO.
+
+Public API: RoutingDomain, DOMAIN_AGENT_IDS, PermissionRisk, ModelRouteCandidate,
+ProviderRouteHealth, RoutingRequest, RouteDecision, AgentModelRouter.route(),
+AgentModelRoutingError, MissingRouteAgentError and NoEligibleModelError.
+
+All 25 documented normal domains map to neutral specialist internal IDs. The map
+is immutable. Registry validation uses IDs only, without alias/role fallback.
+phoenix, strategist, verifier, adaptive_recovery and failsafe are excluded.
+Removing/changing aliases preserves every normal domain's route.
+
+Frozen extra-forbidden contracts normalize strict nonempty identifiers, snapshot
+ordered input containers and nested evidence, and revalidate forged/copied models.
+Requests default to UUID4 route IDs and require nonempty candidates, explicit
+capability requirements and descriptive P0-P5 risk. Empty health evidence is
+permitted and makes all candidates ineligible. Duplicate normalized candidate
+pairs and provider-health IDs fail even when their facts agree.
+
+Selection uses PHX-012 ModelCapabilityRegistry.matching and caller order. Every
+winner must have resource_eligible=true, explicit HEALTHY provider evidence and
+an exact provider/model record satisfying all technical requirements. DEGRADED,
+UNAVAILABLE, missing evidence and unsupported requirements do not trigger fallback.
+False requirements impose no constraint; unknown context fails positive minima;
+the exact minimum passes. Missing mapped agents/no eligible models fail explicitly.
+Detached RouteDecision evidence preserves correlation, domain, selected IDs,
+requirements and risk; identity contradictions fail validation.
+
+No provider/model winner is frozen. No health probe, capability refresh, discovery,
+generation, stream, cancel, benchmark ranking, hardware scan or lifecycle lease.
+No tool execution, grants, permission evaluation, orchestrator/planner invocation,
+task graph, handoff, LEVI, MAHORAGA, KAIDO, persistence, events, API or desktop work.
+P4/P5 routes describe proposed identities only; they do not authorize P4/P5 actions.
+
+Verification commands and results:
+
+- uv run --locked pytest tests/test_agent_model_router.py: 213 passed, 0.58s.
+- Individual locked pytest PHX-020 registry: 96 passed; PHX-021 orchestrator:
+  101 passed; PHX-022 planner: 151 passed. Existing code/tests unchanged.
+- Individual locked Phase-1 pytest suites: provider 61, Ollama 108, registry 83,
+  lifecycle 54, embeddings 182, Colibri 194, benchmark 130: all 812 passed.
+- uv lock and uv sync --locked: 36 packages; manifests/lock unchanged.
+- uv run --locked pytest: 1,499 passed, 24.80s; one existing Starlette/httpx
+  deprecation warning. No failed test run occurred during regression verification.
+- uv run --locked ruff check .: passed; ruff format --check .: 49 files formatted;
+  uv run --locked mypy: 47 source files passed under unchanged strict config.
+- uv build: passed; wheel/source archives verified to contain agents/router.py.
+- Explicit locked foundation pytest (bootstrap/api/config/persistence/events/
+  hardware): 126 passed. /health, Alembic baseline and canonical 32 events unchanged.
+- npm test: four passed; npm run typecheck --workspace @phoenix/desktop and
+  npm run build --workspace @phoenix/desktop: passed.
+- Fresh-interpreter import/construction/routing audit blocks filesystem writes,
+  mkdir, sockets, SQLite, subprocesses, threads, tasks and forbidden subsystem
+  imports: passed. AST import/call allowlist, synchronous execution and exact
+  public-field checks passed. Repeated routing produces equal decisions.
+- Credential/signature scan: 132 repository files, zero matches; git diff --check
+  passed. No secret/prompt logging, raw health detail, provider URL/client fields
+  or executable callbacks added; no frontend runtime path or permission bypass.
+- INV-001 through INV-024 reviewed: authority, aliases, explicit failures and
+  generation capacity separation preserved. Deferred permission/verification/
+  recovery/fail-safe enforcement is not claimed. No optional runtime dependency.
+
+Limitations: callers own candidate order, observation freshness and resource facts;
+eligibility does not reserve capacity or prove task quality. Technical capability
+matching does not assess benchmark quality. One process/thread, memory-only
+evidence. No text classification, model inference or runtime integration. All
+capability/health fixtures are local data; no live provider smoke was needed.
+PHX-024 — Task Graph / State Machine is next and has not been started.
