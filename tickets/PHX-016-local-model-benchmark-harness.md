@@ -1,6 +1,6 @@
 # PHX-016 — Local Model Benchmark Harness
 
-Status: **TODO**
+Status: **DONE**
 
 Phase: **1 — Model Runtime**
 
@@ -450,3 +450,103 @@ If and only if all gates pass:
 `feat: complete PHX-016 local model benchmark harness`
 
 Push only the PHX-016 feature branch. Do not create/merge a PR and do not start Phase 2.
+
+## Verified completion — 2026-10-04
+
+- Created phoenix/models/benchmark.py and tests/test_model_benchmark.py. Updated
+  this ticket, only PHX-016 in FEATURE_TICKETS.md, and one accepted ADR-029.
+  PHX-010 through PHX-015 implementations/tests, dependency manifests/locks,
+  frozen model strategy, foundations, desktop and PHX-020 remain unchanged.
+- Public entry point: BenchmarkRunner(shared_lifecycle, resource_probe=...,
+  clock_ns=...).run(provider, model_id, suite=PHASE1_SUITE, config=...). Frozen,
+  extra-forbidden models cover cases/suite/scoring/config, resource readings,
+  trial results, summaries and reports; reports JSON-round-trip. ResourceProbe
+  supports deterministic injection; SystemResourceProbe performs explicit local
+  observations. summarize() exposes measured-only numeric/scoring aggregates.
+- Suite phoenix-phase1-text / 1.0.0: ordered instruction, arithmetic, format,
+  code cases; literal expected PHOENIX_OK, 42, {"ok":true}, print(2 + 3).
+  Exact/contains/unscored rules do not normalize text. This is a tiny runtime
+  microbenchmark; final FYP quality evaluation remains PHX-091.
+- Defaults: one warm-up and three measured repetitions per case, per-trial
+  lease/generation deadline 60 seconds, preflight 10, cleanup five, temperature
+  zero and output limit 64. Integer fields reject booleans, invalid counts and
+  limits; finite positive timeouts and finite nonnegative temperature validate.
+- Explicit neutral health/capabilities preflight validates identities, strips
+  free-text health detail, records capabilities and reports unavailable/degraded/
+  invalid/timeout outcomes without fabricated trials or PHOENIX readiness claims.
+  No registry mutation, model-name capability inference or target discovery.
+- Every warm-up/measured operation acquires the caller's shared PHX-013 heavy
+  lease. Shared capacity one is enforced between runners and unrelated operations;
+  waiting deadlines/cancellation perform no generation or probes. There is no
+  extra semaphore, capacity manager, background generation task or sampler.
+- Streaming is preferred when supported; otherwise generate() returns TTFT None.
+  perf_counter_ns measures TTFT from immediately before provider execution to
+  first nonempty text, ignoring empty/usage/final-empty frames. Latency ends at
+  validated neutral is_final evidence, exactly once; malformed/missing/duplicate/
+  post-final frames fail. Adapters retain ownership of transport completion.
+  UTC start/end fields never calculate durations. Provider timing is not reused.
+- Retain only explicit input/output/total TokenUsage, including partial supplied
+  stream counts; missing totals are never inferred. Throughput is output_tokens /
+  ((completion_ns - first_text_ns) / 1e9) only with known TTFT, known output count
+  and positive interval. Missing, invalid or overflowing rate evidence is None.
+- Generated text remains transient for scoring and is absent from reports.
+  Retain exact UTF-8 SHA-256 and Python character count; invalid Unicode fails
+  explicitly. No prompt, API key, raw response, private URL or error body is
+  retained/logged. Neutral safe failure enums avoid provider error text.
+- Trial states are success/failed/timeout/skipped; warm-up and measured kinds
+  remain distinct. Successful measured values supply count/min/median/max;
+  absent evidence stays None. Success rate is successful/all measured slots.
+  Accuracy is passed/all scorable measured slots, including failed/timeout/
+  skipped scored attempts as failures; unscored slots are excluded. No scorable
+  trials means accuracy None. Warm-ups never enter any aggregate denominator.
+- Two explicit boundary resource snapshots report max_observed RAM-used bytes,
+  system disk read/write deltas, and separate GPU index/name/total/max observed
+  used MiB. Disk resets/missing counters yield None. RAM/disk may include unrelated
+  system activity; GPU maxima are sampled observations, not absolute peaks or
+  exclusive provider/model attribution. Zero GPUs is distinguishable from unknown.
+- NVIDIA queries use fixed argv, shell=False, captured output and one-second
+  timeout, with strict numeric CSV and multiple-GPU parsing. Missing/nonzero/
+  timed-out/malformed queries and optional probe exceptions yield unknown data,
+  without failing valid generation. Diagnostic probe windows are separate from
+  the lease/generation deadline; tests cover slow probes before and after work.
+- Timeout/caller cancellation unwinds generation, closes the iterator, attempts
+  bounded operation-specific cancellation when supported and releases the lease.
+  Subsequent operations remain usable. Cleanup failure raises safe BenchmarkError
+  and aborts the run; it cannot fabricate completion. Provider unavailability
+  skips remaining configured slots; ordinary trial failures continue. Caller
+  owns providers, and cancellation cannot prove server computation stopped.
+- Verification:
+  - uv lock / uv sync --locked: PASS, 36 packages, no lock/dependency churn.
+  - uv run --locked pytest tests/test_model_benchmark.py: PASS, 130 cases.
+    Three consecutive final runs: 130/130/130 in 1.13/1.17/1.18 seconds.
+  - Individual locked PHX-010/011/012/013/014/015 regressions: PASS,
+    61/108/83/54/182/194 cases, without editing any prior model tests.
+  - uv run --locked pytest: PASS, 938 cases; one existing Starlette HTTPX
+    deprecation warning. Explicit six-file Phase-0 subset: 126 passing cases.
+  - uv run --locked ruff check . / ruff format --check .: PASS, 41 files.
+  - uv run --locked mypy: PASS, 39 source files under unchanged strict config.
+  - uv build: PASS, source distribution and wheel in ignored dist/.
+  - npm test: PASS, four cases; desktop workspace typecheck/build: PASS.
+- Fresh-interpreter executable isolation blocks network, subprocesses, filesystem
+  writes/mkdir, SQLite, threads/tasks and adapter/core/API/persistence/agent/tool/
+  permission/voice imports. Import/construction passes with an empty temporary
+  directory. AST checks enforce neutral dependencies and prohibited integrations.
+- Optional bounded local probes: Ollama UNAVAILABLE, Colibri UNAVAILABLE.
+  No model selected, generation attempted or live metrics collected. Discovery,
+  model download, runtime start/install/stop/configuration were not performed.
+  Live unavailability is separate from deterministic ticket acceptance.
+- Security and INV-001 through INV-024 reviewed: preserved or unaffected.
+  PHOENIX/PermissionEngine/ToolRegistry authority remains intact; benchmark scores
+  grant no authority. /health, Alembic baseline and canonical 32 events remain
+  unchanged/green. No routing/winner/strategy change, persistence, API/UI, event,
+  embedding, provider process management or Phase-2 integration was added.
+- All deterministic acceptance criteria met. Known limitations: no live runtime
+  evidence; boundary sampling is approximate; synchronous probes need bounded
+  implementations and add diagnostic time outside the operation deadline;
+  provider cleanup must cooperate; local cancellation is not remote termination;
+  tool/structured/vision/planning/general-coding quality remains not assessed.
+- Entire staged-diff, whitespace and credential-signature review precede the
+  new feat: complete PHX-016 local model benchmark harness commit and normal push
+  only to feature/PHX-016-local-model-benchmark-harness. Final SHA, remote equality
+  and clean-tree evidence are reported after push. No main push, force, PR, merge
+  or PHX-020 work. PHX-010 through PHX-016 are DONE; Phase 1 is COMPLETE.

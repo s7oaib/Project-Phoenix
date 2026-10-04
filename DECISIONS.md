@@ -348,3 +348,48 @@ the caller-owned global heavy-generation coordinator; the adapter acquires no
 automatic leases and claims no physical residency/global readiness. Embeddings,
 events, permissions, persistence, API/UI and orchestration remain separate.
 Optional live smoke findings are reported independently of deterministic tests.
+
+## ADR-029 — Explicit Phase-1 local runtime benchmark evidence
+Status: Accepted for PHX-016.
+
+Use frozen, extra-forbidden, JSON-serializable neutral benchmark contracts and
+the fixed phoenix-phase1-text suite version 1.0.0. Four ordered harmless text
+cases exercise instruction following, arithmetic, literal formatting and tiny
+code output. Exact/contains scoring is literal; unscored cases remain explicit.
+This is a runtime microbenchmark, not the final PHX-091 FYP evaluation dataset.
+
+The caller supplies the provider/model and the shared PHX-013 lifecycle manager.
+Bounded health/capabilities preflight records neutral evidence, with free-text
+health detail removed. Each warm-up and measured operation uses one shared heavy
+lease. Warm-ups stay diagnostic and never enter measured aggregates. Ordinary
+failures continue; provider unavailability skips the remaining configured slots.
+Success rate includes every measured slot; accuracy includes every scorable
+measured slot, including failed/timeout/skipped attempts as failed scores.
+
+Prefer neutral streaming; nonstream TTFT is unknown. perf_counter_ns measures
+operation start to first nonempty text and validated neutral final completion.
+UTC timestamps are metadata only. Retain explicit neutral token counts without
+estimating totals; throughput is output_tokens divided by positive elapsed
+seconds between first text and completion, otherwise unknown. Provider timing
+and Colibri extensions are not benchmark timing authority. Output stays transient
+for scoring: reports contain character count and SHA-256 of exact UTF-8 text,
+never full outputs, prompts, provider payloads, private URLs or keys.
+
+Two explicit synchronous resource boundaries use existing psutil and fixed,
+read-only nvidia-smi argv with shell=False and a one-second subprocess timeout.
+RAM/disk are system-wide; disk resets/missing counters are unknown. Per-GPU
+identity and sampled maxima remain separate. Missing/failed/malformed telemetry
+is unknown, never fabricated zero. These observations are approximate and may
+include unrelated activity; sampled maxima do not prove absolute peaks or model
+attribution. Diagnostic probe windows are separate from the lease-and-generation
+deadline so optional telemetry cannot decide otherwise valid generation success.
+Custom probes must honor the bounded synchronous probe contract.
+
+Caller cancellation propagates after stream/scoped-cancellation cleanup and lease
+release. Cleanup failure aborts explicitly rather than inventing a report.
+No background sampler/generation worker or automatic provider close is added.
+Bounded cleanup relies on cooperative neutral providers; local cancellation
+acceptance does not prove remote computation stopped. No routing, winner choice,
+discovery/download, strategy freeze, persistence, API/UI, events, embedding or
+agent integration. Capability metadata is retained without claiming tool-use,
+structured-output, vision, planning or general coding quality was assessed.
