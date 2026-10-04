@@ -1,6 +1,6 @@
 # PHX-024 — Task Graph / State Machine
 
-Status: TODO
+Status: DONE
 
 Phase: 2 — Orchestration
 
@@ -578,3 +578,94 @@ Likely production/test changes:
 A small `phoenix/agents/__init__.py` export is acceptable if deliberate.
 
 Do not modify PHX-020/021/022/023 production code unless a genuine prior defect is discovered; if so, stop and report it rather than silently broadening scope.
+
+## Completion evidence — 2026-10-05
+
+PASS. Created phoenix/agents/task_graph.py and tests/test_task_graph_state_machine.py.
+Updated only this ticket, FEATURE_TICKETS.md and one accepted decision, ADR-034.
+No dependencies/lock changes or existing implementation/test changes. PHX-020
+through PHX-024 are DONE; PHX-025 through PHX-028 remain TODO.
+
+Public API: TaskStepDefinition, TaskGraph, TaskState, TASK_TRANSITIONS,
+TaskTransition, TaskStateMachine, UnknownStepError and TaskStateTransitionError.
+Graph queries: step(), root_step_ids, topological_step_ids, ready_step_ids().
+State API: task_id/state/history/is_terminal read-only properties, can_transition()
+and transition(), which returns the appended record. Graph IDs default to UUID4;
+state machines receive an explicit validated task ID and start CREATED/empty.
+
+Frozen extra-forbidden step/graph definitions snapshot caller containers and
+nested models by value, including copied/constructed inputs. Step IDs/owners/refs
+are strict normalized nonempty strings. Objective, expected_output and completion
+rule preserve meaningful original text; timeout_seconds is strict finite positive
+numeric metadata, rejecting bool. Dependencies and input refs retain source order;
+refs are opaque and no files/memory/tools are accessed. No timeout or rule is run.
+
+Every owner is validated through a revalidated PHX-020 AgentRegistry internal ID,
+without alias/role fallback. All 30 canonical owners work with renamed/removed
+aliases. Custom registries use explicit Pydantic validation context:
+context={"agent_registry": registry}. Custom owner JSON round-trips need the same
+context. Registry/runtime objects are not attached to graph records.
+
+Reject empty graphs, duplicate normalized IDs/dependencies, missing dependencies,
+self-dependencies and direct/indirect/disconnected cycles without repair. Iterative
+Kahn traversal uses source-position priority among all currently available nodes,
+including newly ready nodes. Roots/topological/readiness return immutable tuples.
+Roots/readiness retain source order. Exact normalized step lookup returns None for
+a valid unknown ID; malformed IDs fail. Readiness accepts ordered lists/tuples,
+excludes completed steps, requires every direct dependency completed, and rejects
+unknown/duplicate/malformed completed IDs. Queries never mutate or schedule work.
+
+Exactly eleven lowercase states: created, planning, ready, running,
+waiting_permission, verifying, completed, failed, recovering, degraded, cancelled.
+The immutable table implements exactly the 27 required edges above; self/unlisted
+edges and terminal escapes fail. completed/degraded/cancelled are terminal.
+Successful transitions append one frozen task_id/from_state/to_state/occurred_at
+record. Timestamps are aware and normalized to UTC; append order is authoritative
+even when the wall clock moves backwards. Validate and prepare everything before
+a single state/history snapshot replacement; illegal targets/edges and record
+creation failures leave both unchanged. Existing history snapshots stay immutable.
+
+State markers confer no authority: WAITING_PERMISSION/resumption grants nothing;
+VERIFYING invokes no LEVI or verification success; RECOVERING invokes no recovery;
+DEGRADED activates no KAIDO. A COMPLETED marker alone proves no execution or
+required verification. PHOENIX remains supreme. Orchestrator/planner/router remain
+unchanged and uninvoked; no agents/providers/models/tools/leases/handoffs, approvals,
+events, persistence, API or frontend work. Everything stays in memory on one
+process/thread, with no distributed/thread-safe claim, locks, tasks or timers.
+
+Verification commands and results:
+
+- uv run --locked pytest tests/test_task_graph_state_machine.py: 348 passed,
+  final targeted run 0.84s. Covers all 121 state pairs, record-failure atomicity,
+  1,536 four-node DAG/source-order cases, and a 1,500-node reverse-declared chain.
+- Individual locked Phase-2 pytest: registry 96, orchestrator 101, planner 151,
+  router 213: all 561 passed unchanged.
+- Individual locked Phase-1 pytest: provider 61, Ollama 108, registry 83,
+  lifecycle 54, embeddings 182, Colibri 194, benchmark 130: all 812 passed unchanged.
+- uv lock / uv sync --locked: 36 packages, no manifest/lock changes.
+- uv run --locked pytest: 1,847 passed, 28.94s, one existing Starlette/httpx
+  deprecation warning. No regression test failed during this run.
+- uv run --locked ruff check . and ruff format --check .: passed, 51 files;
+  uv run --locked mypy: 49 source files passed under unchanged strict config.
+- uv build: passed; wheel/source archives verified to include agents/task_graph.py.
+- Explicit locked foundation pytest (bootstrap/api/config/persistence/events/
+  hardware): 126 passed; exact /health, Alembic baseline and 32 events unchanged.
+- npm test: four passed; npm run typecheck --workspace @phoenix/desktop and
+  npm run build --workspace @phoenix/desktop: passed, implementation unchanged.
+- Fresh-interpreter audit during import, construction, graph queries and explicit
+  transitions blocks writes/mkdir, sockets, SQLite, subprocesses, threads/tasks and
+  forbidden subsystem imports: passed. Public-field and AST import/call boundaries
+  also pass; references remain undereferenced and markers invoke no subsystems.
+- Credential/signature scan: 135 repository files, zero matches. git diff --check
+  passed. No prompt/output logging, credentials, provider objects or executable
+  callbacks added; no ToolRegistry/PermissionEngine bypass or frontend runtime path.
+- INV-001 through INV-024 reviewed: preserved/unaffected. PHOENIX/AIZEN authority,
+  removable aliases, explicit failures and heavy-generation separation preserved;
+  future permission/verification/recovery/fail-safe enforcement is not claimed.
+
+Limitations: graph validation establishes structure/ownership, not task quality or
+execution feasibility. Callers supply completion/state evidence; queries do not
+validate historical execution. Timeouts/rules/refs are descriptive. Custom-owner
+revalidation needs explicit registry context. State history is memory-only and not
+an audit log or proof of execution/verification. Runtime integration remains future
+work. No live provider/hardware smoke was needed. PHX-025 is next, not started.

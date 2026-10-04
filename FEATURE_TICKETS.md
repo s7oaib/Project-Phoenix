@@ -25,7 +25,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-021 PHOENIX orchestrator — DONE
 - PHX-022 AIZEN planner — DONE
 - PHX-023 Agent/model router — DONE
-- PHX-024 Task graph/state machine — TODO
+- PHX-024 Task graph/state machine — DONE
 - PHX-025 Structured agent handoffs — TODO
 - PHX-026 LEVI verification — TODO
 - PHX-027 MAHORAGA recovery — TODO
