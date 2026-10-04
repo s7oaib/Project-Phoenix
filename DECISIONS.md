@@ -696,3 +696,70 @@ logging, persistence, API, desktop, tools, permission evaluation, provider/model
 or lifecycle leases. PHOENIX remains supreme. PHX-020 through PHX-025 implementations
 remain unchanged; orchestration/event integration is deferred, recovery belongs to
 PHX-027 and degraded/fail-safe behavior to PHX-028.
+
+## ADR-037 — Failure-preserving bounded recovery proposals without execution
+Status: Accepted for PHX-027.
+
+MahoragaRecovery requires authoritative internal ID adaptive_recovery in an exact
+snapshotted AgentRegistry. Aliases/role metadata cannot supply authority. Revalidate
+the entire exact TaskGraph/steps against that registry and the exact HandoffEnvelope;
+require task, selected step, target/owner, objective, ordered input references and
+timeout correlation plus registered source/target IDs. Derive request task/step/subject
+IDs without conflicting overrides. All descriptive failure/rationale/adjustment text
+remains untrusted data; references are opaque and never dereferenced.
+
+Frozen extra-forbidden RecoveryRequest has nine fields: recovery/task/step/subject IDs,
+trigger, failure_summary, attempts_used, max_attempts and max_replan_steps. Four typed
+triggers are execution_failure, verification_failure, timeout and resource_unavailable.
+Vocabulary accepts strings/their enum members without byte coercion; IDs are strict,
+nonempty and outer-whitespace-normalized. Meaningful text retains formatting. Omitted/
+None runtime recovery_id generates UUID4; directly supplying None to the request fails.
+Verification failure requires exact revalidated correlated FAILED VerificationResult
+evidence, including consistent checks. Reject passed/mismatched/extended/forged values.
+Other triggers require no verification evidence and reject an irrelevant supplied result.
+Neither input verification evidence nor its required-verification gate is modified.
+
+Attempt evidence is strict integers: used >= 0, max_attempts > 0, max_replan_steps > 0;
+bool/coerced numeric values fail. No universal retry default. Used >= max returns
+exhausted without responder invocation, active registration or proposal creation.
+Otherwise invoke RecoveryResponder.propose(request) once and validate one proposal.
+A valid proposal records attempt_number = used + 1 <= max_attempts. The caller owns
+carrying counts forward; this boundary has no persistent/global retry ledger or loop.
+Duplicate active IDs reject before either eligible or exhausted finalization.
+
+RecoveryDraft contains recovery_id, action, rationale and only six typed optional
+fields. None means absent. Action-specific fields are exclusive:
+retry_same has none; adjust_parameters requires nonempty ordered meaningful strings;
+switch_tool requires one neutral tool ID; switch_model_provider requires both provider
+and model IDs; switch_agent requires a different registered internal ID; replan_subgraph
+requires nonempty ordered step IDs. Reject irrelevant fields and duplicate normalized
+sequence entries, preserving order/meaningful formatting. Replan IDs must all exist in
+the input graph, include the failed step and number at most max_replan_steps. This
+separate finite size budget does not change attempt accounting. Availability, eligibility
+and execution policy remain later orchestration responsibilities; replacements grant
+no authority, instantiate nothing and perform no discovery or routing.
+
+Revalidate exact stored model fields, including constructed/copied fields omitted by
+model_dump; reject subclasses, injected extras, malformed optional values, action-field
+contradictions and recovery-ID mismatch. Snapshot nested proposal containers by value.
+RecoveryResult preserves failure trigger/summary, correlated IDs, literal recovery_agent_id
+adaptive_recovery, budgets and status proposed/exhausted. Proposed requires its correlated
+proposal and exact increment; exhausted requires used >= max, proposal=None and
+attempt_number=None. Neither status establishes repaired work, verified success,
+permission or PHOENIX completion. Exhaustion activates no KAIDO/degraded behavior.
+
+One process/event loop, with caller-owned eligible operations. Sorted immutable active
+ID inspection exposes no tasks. Distinct IDs coexist; duplicates preserve the original;
+cleaned IDs may be reused; nested eligible calls sharing a task and cross-loop use fail.
+No hidden workers/tasks. cancel targets only the matching caller task and returns
+accepted/not_found. Independent local cancellation recording prevents finalization even
+when a responder suppresses CancelledError and clears its task counter. finally cleans
+every terminal path; responder failures, invalid evidence and cancellation remain explicit.
+Cancellation is cooperative; acceptance does not prove external compute stopped. Callers
+own deadlines; graph timeout metadata creates no automatic timer.
+
+No retry, parameter application, tool/model/provider/agent switching, AIZEN replanning,
+router/LEVI invocation, task-state mutation, permission/scope expansion, events, logging,
+persistence, API or desktop integration. PHOENIX remains supreme. PHX-020 through PHX-026
+implementations are unchanged; future orchestration owns execution/state/events, and
+PHX-028 owns degraded/fail-safe decisions.
