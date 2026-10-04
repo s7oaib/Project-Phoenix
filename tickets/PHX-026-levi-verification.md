@@ -1,6 +1,6 @@
 # PHX-026 — LEVI Verification
 
-Status: TODO
+Status: DONE
 Phase: 2 — Orchestration
 
 ## Objective
@@ -243,3 +243,88 @@ Only after all deterministic requirements and regressions pass:
 - commit exactly: `feat: complete PHX-026 LEVI verification`
 - push only `feature/PHX-026-levi-verification`
 - do not create PR, merge, modify/push main, or start PHX-027
+
+## Completion evidence — 2026-10-05
+
+Implemented phoenix/agents/verifier.py and tests/test_levi_verification.py. ADR-036
+records the durable boundary; dependencies, lockfile and all prior implementations
+are unchanged. LeviVerifier exposes async verify(graph=..., handoff=...,
+candidate_output=..., responder=..., verification_id=...), async cancel(id), read-only
+verifier_id and sorted immutable active_verification_ids. The pure
+verification_requirement_satisfied(handoff, result) evaluates only the obligation.
+
+Authoritative identity is verifier. Constructor snapshots an exact AgentRegistry and
+requires that internal ID; removing/renaming aliases preserves behavior, and LEVI
+alias/role metadata cannot replace authority. Entire exact graph/step and handoff
+contracts revalidate against the same registry; source/target identities must exist.
+Require task/step/target-owner/objective/ordered-input-ref/timeout correlation before
+calling the responder. Request task/step/subject/objective/completion/schema fields
+are derived without conflicting overrides. Candidate text retains original formatting.
+
+The eight-field request is immutable and extra-forbidden, with strict normalized IDs
+and meaningful text. Omitted/None runtime ID generates UUID4; other supplied IDs are
+strict, and direct request verification_id=None fails. Checks contain only check_id,
+criterion, strict passed bool and evidence_summary. Draft contains only verification_id
+and nonempty ordered checks with unique normalized IDs. Exact stored-field revalidation
+rejects subclasses, extras, copied/constructed forgeries, malformed checks and mismatched
+verification IDs. Runtime derives passed iff all checks pass, otherwise failed; result
+contains verification/task/step/subject IDs, literal verifier_id, verdict and checks.
+Contradictory result verdict/check evidence is invalid, including at the pure gate.
+
+Required missing/failed evidence never satisfies verification (INV-008); required
+correlated passed evidence does. Supplied task/step/subject mismatches fail even when
+verification is optional. No obligation plus no result is satisfied only for this
+requirement; a valid correlated failed result likewise creates no new obligation.
+Neither result nor gate grants permission or reports PHOENIX final user-facing success.
+
+Distinct active IDs coexist; duplicate IDs fail without overwriting the original and
+IDs are reusable after cleanup. Caller tasks own work; same-task nesting and cross-loop
+reuse fail. Scoped cancellation returns only accepted/not_found, cannot cancel another
+ID, and propagates CancelledError after cleanup. A recorded local cancellation cannot
+be suppressed or cleared to finalize passed evidence. Responder exceptions and malformed
+drafts remain explicit. Every terminal path removes its own active entry in finally.
+Failed verification produces evidence without repair, retry, re-plan or recovery.
+
+Verification commands and results:
+
+- uv run --locked pytest tests/test_levi_verification.py: final three consecutive
+  runs each 242 passed, in 0.98s / 0.72s / 0.83s. Event/wait_for checkpoints cover
+  coexistence, duplicate preservation, all terminal cleanup paths, cancellation
+  isolation, suppressed cancellation and ID reuse; no arbitrary timing sleeps.
+- Individual locked Phase-2 pytest: registry 96, orchestrator 101, planner 151,
+  router 213, graph/state 348, handoffs 214: all 1,123 passed unchanged.
+- Individual locked Phase-1 pytest: provider 61, Ollama 108, registry 83,
+  lifecycle 54, embeddings 182, Colibri 194, benchmark 130: all 812 passed unchanged.
+- uv lock / uv sync --locked: 36 packages, no dependency/lockfile changes.
+- uv run --locked pytest: 2,303 passed, 33.28s; one existing Starlette/httpx
+  deprecation warning. All runtime test runs passed.
+- uv run --locked ruff check . / ruff format --check .: passed, 55 files;
+  uv run --locked mypy: 53 source files passed. Initial new-test line-length/type
+  annotation issues were corrected without weakening validation or changing prior code.
+- uv build: passed; wheel/source archives verified to include agents/verifier.py.
+- Explicit locked foundation pytest (bootstrap/api/config/persistence/events/hardware):
+  126 passed; exact /health, Alembic revision 0001 and canonical 32 events unchanged.
+- npm test: four passed; npm run typecheck --workspace @phoenix/desktop and
+  npm run build --workspace @phoenix/desktop: passed, desktop files unchanged.
+- Fresh-interpreter guarded import/construction/serialization/gate/explicit verification
+  passed with writes, sockets, SQLite, subprocesses, threads, hidden asyncio tasks,
+  task-state transitions and forbidden subsystem imports blocked. The test harness
+  supplies its own event loop/task; production creates neither workers nor hidden tasks.
+  Opaque file references remain unread and the temporary directory stays empty.
+  AST imports/calls and exact public-field/API boundary checks also pass.
+- Credential/signature scan: 141 repository files, zero matches. No credentials,
+  automatic prompt/output logging, raw provider payload storage, executable public
+  callbacks, arbitrary metadata or frontend runtime path introduced.
+- INV-001 through INV-024 reviewed: preserved/unaffected. PHOENIX remains supreme,
+  AIZEN subordinate, PermissionEngine deterministic/authoritative, aliases metadata
+  and failures explicit. No ToolRegistry/permission bypass or permission grant,
+  automatic task-state transition, event emission, persistence or integration with
+  orchestrator/planner/router. No repair/recovery/fail-safe runtime, provider call,
+  generation-concurrency policy or required optional dependency introduced.
+
+Acceptance criteria: all met. Known limitations: memory-only, one process/event loop,
+cooperative cancellation and caller-owned deadlines. Supplied responder checks are
+verification evidence, not universal correctness or PHOENIX completion. Schema/rule
+text is descriptive, never compiled or executed. Future orchestration owns truthful
+state, events and integration. No live provider/tool/hardware validation was needed.
+PHX-027 — MAHORAGA Recovery is next and has not been started; PHX-028 remains TODO.
