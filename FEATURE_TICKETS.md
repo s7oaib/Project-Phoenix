@@ -29,7 +29,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-025 Structured agent handoffs — DONE
 - PHX-026 LEVI verification — DONE
 - PHX-027 MAHORAGA recovery — DONE
-- PHX-028 KAIDO fail-safe — TODO
+- PHX-028 KAIDO fail-safe — DONE
 
 ## Phase 3 — Memory & RAG
 - PHX-030 Memory schema — TODO
