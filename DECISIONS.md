@@ -505,3 +505,45 @@ own deadlines. No hidden workers, global shutdown, process kill or model unload.
 Import/construction/inspection perform no I/O or runtime work. No provider/model,
 tool, permission, persistence, events, memory, API/UI or voice binding. Routing,
 task graph/state, handoffs, LEVI, MAHORAGA and KAIDO remain PHX-023 through PHX-028.
+
+## ADR-033 — Deterministic normal-specialist routing from explicit evidence
+Status: Accepted for PHX-023.
+
+Use 25 explicit RoutingDomain values and an immutable domain-to-internal-ID map
+for the documented normal specialists. Validate the mapped ID in a snapshotted
+PHX-020 AgentRegistry. Aliases and professional-role text never select authority;
+missing IDs fail with MissingRouteAgentError, without control-role fallback.
+phoenix, strategist, verifier, adaptive_recovery and failsafe are excluded.
+
+Frozen extra-forbidden RoutingRequest carries a generated/caller-provided route_id,
+domain, nonempty ordered candidate tuple, unique provider-health tuple, PHX-012
+CapabilityRequirements and descriptive PermissionRisk P0-P5. Identifiers are
+strict nonempty strings with outer whitespace normalization. Candidates contain
+only provider_id, model_id and strict resource_eligible bool. Health contains only
+provider_id and ProviderHealthStatus. Reject duplicate normalized candidate pairs
+and duplicate provider IDs, including contradictory evidence. Snapshot nested
+inputs and revalidate copied/constructed data at the routing boundary.
+
+Reuse ModelCapabilityRegistry.matching without duplicating technical rules:
+false requirements impose no constraint; unknown context cannot satisfy a positive
+minimum. Select the first caller-ordered candidate with resource eligibility,
+explicit HEALTHY provider evidence and an exact matching capability record.
+DEGRADED, UNAVAILABLE, missing health/records and failed requirements are
+ineligible. No candidate yields NoEligibleModelError, never a fabricated route.
+The caller-owned capability registry remains current in memory; later explicit
+registrations affect later routes. RouteDecision detaches requirements/capabilities
+and checks domain/agent and provider/model identity agreement.
+
+Caller ordering is temporary policy input, preserving the model-strategy freeze
+boundary. No provider preference, permanent model winner, benchmark score or model
+discovery is introduced. Health freshness and resource facts belong to the caller;
+the router neither probes nor reserves capacity. PHX-013 remains authoritative
+for heavy-generation capacity. Tool-use support and P0-P5 are technical/descriptive
+data, never tool execution or permission approval, denial or grants.
+
+Routing is synchronous, read-only and deterministic for the same request/evidence
+on one process/thread. Construction/import/routing do no I/O, provider calls,
+refresh, inference, events, persistence or background work. No cancellation API,
+locks, workers or lifecycle leases are needed. PHOENIX remains supreme; the router
+does not invoke the orchestrator, planner or specialists. Task graph, handoffs,
+LEVI, MAHORAGA and KAIDO remain PHX-024 through PHX-028.
