@@ -23,7 +23,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 ## Phase 2 — Orchestration
 - PHX-020 Agent registry — DONE
 - PHX-021 PHOENIX orchestrator — DONE
-- PHX-022 AIZEN planner — TODO
+- PHX-022 AIZEN planner — DONE
 - PHX-023 Agent/model router — TODO
 - PHX-024 Task graph/state machine — TODO
 - PHX-025 Structured agent handoffs — TODO

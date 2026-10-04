@@ -462,3 +462,46 @@ Import, construction and inspection perform no I/O, events or runtime work.
 No provider/model, tool, permission, persistence, API/UI, voice or memory coupling.
 PHX-022 through PHX-028 remain unimplemented; no task-state machine or recovery
 loop is added. The registry remains logical metadata, not per-agent runtimes.
+
+## ADR-032 — Subordinate AIZEN decomposition with exact neutral contracts
+Status: Accepted for PHX-022.
+
+AizenPlanner validates registry internal ID strategist, never alias AIZEN or role
+text. PHOENIX remains the sole supreme orchestrator. The planner is standalone:
+PhoenixOrchestrator complex execution still returns planning_required without
+calling AIZEN. AizenPlan means only a validated decomposition proposal, not user
+success, execution readiness, verified completion or permission to act.
+
+Frozen extra-forbidden PlanningRequest contains request_id and objective; PlanStep
+contains step_id and objective. IDs are strict nonempty strings with outer
+whitespace normalization. Objectives retain meaningful original text and are not
+logged. Independent request IDs default to UUID4. PlanDraft and AizenPlan contain
+ordered nonempty tuples of revalidated steps with unique normalized IDs. Caller
+lists/dictionaries are snapshotted; ordering is never sorted or inferred from IDs.
+Steps remain unassigned: no agents/models, dependencies, state, tool calls,
+permission grants, handoff envelopes, verification results or recovery policy.
+
+Explicit plan(request, responder=...) awaits the neutral PlanningResponder.propose
+once. Require exact PlanDraft and PlanStep contracts, revalidate even constructed
+or copied models, and reject extended models and mismatched correlation. Only
+AizenPlanner finalizes subordinate drafts as AizenPlan(planner_id="strategist").
+No PhoenixResult import or user-facing completion kind exists in this module.
+Validation establishes shape/correlation, not correctness or execution feasibility
+of natural-language objectives. Collaborator exceptions remain explicit failures.
+
+Use PHX-021's narrow caller-task pattern locally without extracting shared private
+infrastructure or changing the orchestrator. Bind explicit operations to one event
+loop. Track independent active IDs before responder awaits; reject duplicate IDs
+and nested operations sharing a caller task before changing ownership. Sorted
+immutable ID snapshots expose no tasks or mutable dictionaries. finally cleans
+state after success, failure or cancellation; cleaned IDs can be reused.
+
+cancel targets only the matching caller task and reports accepted/not_found.
+CancelledError propagates. Recorded local cancellation prevents finalization even
+if a responder suppresses cancellation or clears the task counter. Acceptance
+does not prove remote computation stopped; responders must cooperate and callers
+own deadlines. No hidden workers, global shutdown, process kill or model unload.
+
+Import/construction/inspection perform no I/O or runtime work. No provider/model,
+tool, permission, persistence, events, memory, API/UI or voice binding. Routing,
+task graph/state, handoffs, LEVI, MAHORAGA and KAIDO remain PHX-023 through PHX-028.

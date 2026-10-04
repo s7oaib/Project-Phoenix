@@ -1,6 +1,6 @@
 # PHX-022 — AIZEN Planner
 
-Status: TODO
+Status: DONE
 Phase: 2 — Orchestration
 
 ## Objective
@@ -685,3 +685,78 @@ Exact implementation commit message:
 `feat: complete PHX-022 AIZEN planner`
 
 Do not start PHX-023.
+
+## Completion evidence — 2026-10-05
+
+Acceptance: PASS. Created phoenix/agents/planner.py and tests/test_aizen_planner.py;
+updated only this ticket, the PHX-022 index entry and one accepted ADR-032.
+No dependencies, prior implementations/tests, orchestrator, API or desktop changed.
+PHX-023 through PHX-028 remain TODO.
+
+Public API: PlanningRequest, PlanStep, PlanDraft, PlanningResponder.propose(),
+AizenPlan, AizenPlanner.plan()/cancel(), read-only planner_id/active_request_ids,
+CancellationStatus/Result, AizenPlanningError and DuplicatePlanningRequestError.
+Construction revalidates registry metadata and requires internal ID strategist.
+Removed/renamed aliases work; alias AIZEN alone fails. PHOENIX stays supreme.
+
+Frozen extra-forbidden models use strict normalized nonempty identifiers and
+preserve meaningful original objective content. Requests default to independent
+UUID4 IDs. Steps contain only step_id/objective. Draft/final steps are immutable
+nonempty tuples, unique after normalization, retaining responder order. Caller
+containers are snapshotted. The neutral responder is called once; exact draft and
+nested step contracts are revalidated, including forged/copied models. Extended
+contracts, malformed output and correlation mismatch fail explicitly. Final plans
+have literal planner_id strategist and signify validated proposals only, never
+PhoenixResult/user success, permission or verified/executed work.
+
+Caller tasks own active planning operations on one event loop. Sorted immutable
+ID snapshots expose no tasks. Duplicate IDs and nested operations sharing a task
+fail without corrupting ownership. Independent requests coexist. cancel returns
+accepted/not_found, targets only matching ownership, and propagates CancelledError.
+Recorded cancellation prevents finalization even when the responder suppresses
+cancellation or clears the task counter. finally cleans every terminal path and
+IDs can be reused. No hidden workers or global provider/process shutdown.
+
+No planner integration: PHX-021 complex still returns planning_required, text None.
+No router, assignments, graph/state, handoffs, LEVI, MAHORAGA, KAIDO, provider/model,
+tool, permission, persistence, event, API, frontend, voice or memory runtime added.
+
+Verification commands and results:
+
+- uv run --locked pytest tests/test_aizen_planner.py: 151 passed on three
+  consecutive final runs, 0.51s/0.47s/0.48s; Events and bounded waits/checkpoints.
+- Individual locked pytest tests/test_agent_registry.py: 96 passed;
+  tests/test_phoenix_orchestrator.py: 101 passed, existing tests unchanged.
+- Individual locked Phase-1 pytest suites: provider 61, Ollama 108, registry 83,
+  lifecycle 54, embeddings 182, Colibri 194, benchmark 130; all 812 passed.
+- uv lock and uv sync --locked: 36 packages, manifests/lock unchanged.
+- uv run --locked pytest: final full run 1,286 passed, one existing Starlette/httpx
+  deprecation warning, 23.00s. Initial full run had 1,285 passes and the pre-existing
+  benchmark 10ms-deadline cancellation-count transient seen in PHX-021. Isolated
+  benchmark regression passed before it; full rerun passed without changing or
+  weakening prior code/tests. This transient remains a known regression limitation.
+- uv run --locked ruff check . and ruff format --check .: passed, 47 files;
+  uv run --locked mypy: 45 source files passed under unchanged strict config.
+- uv build: passed; wheel/source archives include phoenix/agents/planner.py.
+- Explicit locked foundation pytest (bootstrap/api/config/persistence/events/
+  hardware): 126 passed. /health, Alembic baseline and 32 event types unchanged.
+- npm test: four passed; npm run typecheck --workspace @phoenix/desktop and
+  npm run build --workspace @phoenix/desktop: passed.
+- Fresh-interpreter construction/import/inspection audit blocks filesystem writes,
+  mkdir, sockets, SQLite, subprocesses, threads, hidden tasks and forbidden subsystem
+  imports: passed. Explicit planning with loop task creation blocked: passed.
+  AST import allowlist and public field boundary evidence: passed.
+- Credential/signature scan: 129 repository files, zero matches; git diff --check
+  passed. No real .env, credentials, prompt/plan logging, executable callbacks,
+  permission bypass, provider URL/model fields or frontend runtime path added.
+- INV-001 through INV-024 reviewed: PHOENIX authority, subordinate planning,
+  aliases, explicit failures and cancellation/state preserved. Deferred permission,
+  execution, verification, recovery and fail-safe behavior is not claimed as
+  enforced. No new generation concurrency policy or optional runtime dependency.
+
+Limitations: schema/correlation validation does not assess plan quality or execution
+feasibility. Ordered proposals are unassigned and not executable graphs. Planner is
+standalone; future integration is deliberate. One event loop, one active operation
+per caller task per instance, memory-only state. Cancellation is cooperative;
+accepted does not prove external computation stopped, and callers own deadlines.
+All responders are test fakes; no live provider smoke is required or performed.
