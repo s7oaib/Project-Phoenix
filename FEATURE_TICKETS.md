@@ -17,7 +17,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-012 Model capability registry — DONE
 - PHX-013 Model lifecycle manager — DONE
 - PHX-014 EmbeddingGemma integration — DONE
-- PHX-015 Colibri provider adapter — TODO
+- PHX-015 Colibri provider adapter — DONE
 - PHX-016 Local model benchmark harness — TODO
 
 ## Phase 2 — Orchestration
