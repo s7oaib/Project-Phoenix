@@ -292,3 +292,59 @@ EmbeddingGemma remains the frozen candidate, not assumed installed. Discovery is
 only optional read-only smoke verification. No downloads, automatic heavy-generation
 leases, registry support flags, storage, RAG, ingestion, API/UI, events or benchmark
 policy belongs to this boundary. Resource policy remains future evidence-based work.
+
+## ADR-028 — Optional Colibri HTTP generation adapter
+Status: Accepted for PHX-015.
+
+Colibri remains an optional V1 runtime. ColibriProvider implements the unchanged
+PHX-010 ModelProvider using existing HTTPX/Pydantic and explicit local HTTP calls;
+PHOENIX does not import, embed, install, configure, launch or stop its engine.
+No SDK, dependency, model download, automatic discovery, routing or benchmark
+policy is added. The frozen candidate strategy stays unchanged; suitability of
+an already served deep model remains PHX-016 evidence, not an adapter claim.
+
+Default API base is http://127.0.0.1:8000/v1. Explicit HTTP(S) bases reject
+credentials, queries, fragments and malformed addresses. Owned clients verify
+TLS, disable ambient proxies and do not follow redirects. Optional explicit
+Bearer tokens use masked storage, without environment lookup or dummy keys.
+Borrowed clients remain caller-owned/configured. Finite connect/read/write/pool
+defaults are 3/600/10/5 seconds, generation overall 1800, metadata overall 10,
+cleanup five; longer generation limits accommodate optional deep inference.
+
+Use GET models, GET models/{encoded entire model ID}, and POST chat/completions.
+Official public API/source references:
+https://github.com/JustVugg/colibri/blob/main/docs/api.md and
+https://github.com/JustVugg/colibri/blob/main/c/openai_server.py.
+Valid model discovery establishes only adapter streaming/cancellation support.
+Tool use, structured output and vision stay false under the frozen text request
+contract. Context remains None because the current public model object provides
+no reliable context field. No family-name inference or Ollama :latest aliases.
+Supplied model identity must match exactly; missing completion identity retains
+the requested model without claiming independent identity evidence.
+
+Map only ordered role/content, model, stream, optional temperature/max_tokens/stop.
+Strict single-choice assistant responses and explicit nonnegative token counts
+map to neutral models; missing totals and all generation metrics remain unknown.
+Colibri performance/engine extensions are internal data, not PHX benchmark facts.
+Incremental SSE strictly decodes UTF-8 lines, validates data frames and requires
+[DONE] after a valid choice.
+Finish/usage frames alone never prove completion. A narrowly recognized non-choice
+envelope with a colibri object and optional matching model is ignored; its
+internal fields are unconstrained. Unknown/malformed envelopes fail explicitly.
+One empty final PHX chunk follows terminal evidence and resource/state cleanup.
+
+Generation and streams track independent caller operations on one event loop.
+Duplicate active IDs fail before state mutation; IDs may be reused after cleanup.
+Cancellation affects only the active operation's I/O task or suspended response,
+not the consumer's unrelated work, other requests or the server process. Acceptance
+acknowledges local cancellation, not proven cessation of server computation.
+No hidden workers. Consumers must exhaust or explicitly close their iterator,
+including in a finally block after consumer exceptions; provider close is bounded
+and closes owned clients only. Safe neutral errors never expose raw bodies,
+prompts, generated text, keys or private addresses, and no such data is logged.
+
+Registry interoperability uses explicit neutral refresh only. PHX-013 remains
+the caller-owned global heavy-generation coordinator; the adapter acquires no
+automatic leases and claims no physical residency/global readiness. Embeddings,
+events, permissions, persistence, API/UI and orchestration remain separate.
+Optional live smoke findings are reported independently of deterministic tests.

@@ -1,6 +1,6 @@
 # PHX-015 — Colibri Provider Adapter
 
-Status: TODO
+Status: DONE
 
 ## Objective
 
@@ -290,3 +290,93 @@ Commit message:
 `feat: complete PHX-015 Colibri provider adapter`
 
 Do not create a pull request, merge, push main, force-push, or start PHX-016.
+
+## Verified completion — 2026-10-04
+
+- Created phoenix/models/colibri.py and tests/test_colibri_provider.py. Updated
+  this ticket, only PHX-015 in FEATURE_TICKETS.md, and one accepted ADR-028.
+  PHX-010 through PHX-014 implementation/tests, dependencies/locks, desktop,
+  foundations, frozen model strategy and PHX-016 remain unchanged.
+- ColibriProvider subclasses ModelProvider unchanged with provider_id=colibri;
+  public health(), capabilities(model_id), generate(request), stream(request),
+  cancel(operation_id), aclose(), async context management and read-only tuple
+  active_operation_ids. No engine import/installation/process management or SDK.
+- Default http://127.0.0.1:8000/v1; normalized explicit HTTP(S) base rejects
+  credentials/query/fragment/malformed forms. Owned HTTPX verifies TLS, disables
+  ambient proxies and redirects; calls enforce no redirects even on borrowed
+  clients. Optional explicit Bearer key is masked, never read from environment,
+  never replaced by a dummy key, and never included in public errors/logging.
+- Finite positive configurable connect/read/write/pool defaults 3/600/10/5
+  seconds, whole generation/stream 1800, metadata 10, cleanup five. No network
+  during import/construction; one event loop, no hidden background worker.
+  Owned client/transport closes explicitly; borrowed client remains caller-owned.
+- GET models validates the OpenAI list and model records; an empty list is
+  healthy. Transport/timeouts map unavailable; reachable HTTP/malformed protocol
+  maps degraded, without claiming global PHOENIX readiness or loaded models.
+- GET models/{URL-encoded entire model ID} requires exact returned identity,
+  including no whitespace normalization/default :latest equivalence. Streaming
+  and local operation cancellation are true; structured output/tool use/vision
+  false. Context None: current public model metadata has no reliable context
+  field; arbitrary extension fields/model names are not capability evidence.
+- POST chat/completions maps model and ordered unmodified role/content messages,
+  stream=false/true and supplied temperature/max_tokens/stop only. Single valid
+  index-zero assistant choices validate before neutral response creation.
+  Missing completion identity retains the request model; supplied contradiction,
+  malformed content/choices/usage, HTTP/protocol failure cannot become success.
+- Strict explicit prompt_tokens/completion_tokens/total_tokens map to neutral
+  usage, with latest supplied stream values retained and no inferred total.
+  GenerationMetrics stays None. Provider performance/engine extensions never
+  become text, PHX metrics or benchmark evidence.
+- Incremental SSE strictly decodes UTF-8, handles fragmented characters/multiline
+  JSON, LF/CRLF/CR separators and comments; malformed bytes fail explicitly.
+  A non-choice colibri-object envelope with optional exact model
+  is ignored without inspecting internal telemetry; unknown/malformed envelopes
+  fail. [DONE] after a valid choice is required; finish/usage/extension frames or
+  premature EOF are not success. Exactly one empty final chunk retains supplied
+  finish/usage only after response close and operation unregister.
+- Executable first-chunk evidence: two source pieces consumed while later
+  content/terminal pieces remain unread. Cancellation tracks generation and
+  streaming per ID, affects only the matching I/O task/suspended response, and
+  returns accepted/not_found. Duplicate IDs fail without overwriting originals;
+  concurrent IDs remain independent, and stale cancelled iterators cannot remove
+  a newly reused ID. Success/failure/timeouts/cancellation/explicit iterator close
+  remove active state. Consumers own iterator close after early exit/exceptions.
+- Safe ModelProviderError / ProviderUnavailableError distinguish HTTP/protocol
+  from transport/timeouts, suppress raw exception display and expose no prompt,
+  response, key or private URL. No provider-data logging or permission authority.
+- Verification:
+  - uv lock / uv sync --locked: PASS, 36 packages; no dependency/lock changes.
+  - uv run --locked pytest tests/test_colibri_provider.py: PASS, 194 cases.
+    Three consecutive final targeted runs: 194/194/194, no timing failures.
+  - Individual locked PHX-010/011/012/013/014 regressions: PASS,
+    61/108/83/54/182 cases; combined prior-model run also PASS, 488 cases.
+  - uv run --locked pytest: PASS, 808 cases; one existing Starlette HTTPX
+    deprecation warning. Phase 0 foundation subset: 126 passing cases.
+  - uv run --locked ruff check . / ruff format --check .: PASS, 39 files.
+  - uv run --locked mypy: PASS, 37 source files under unchanged strict config.
+  - uv build: PASS, source distribution and wheel in ignored dist/.
+  - npm test: PASS, four cases; desktop workspace typecheck/build: PASS.
+- Fresh-interpreter evidence blocks sockets/network, filesystem writes/mkdir,
+  SQLite, subprocesses, threads/tasks and imports of engine/SDK/core/API/hardware/
+  persistence/agents/tools/permissions/voice/other model subsystems. Import,
+  default/mock construction, explicit mocked health/capabilities/generation and
+  cleanup pass with an empty temporary directory. AST checks constrain imports.
+- Neutral registry.refresh() interoperates with the discovered capability;
+  explicit caller-owned PHX-013 lease around generation works unchanged. No
+  registry policy, lifecycle scheduling, embeddings, routing or benchmarks added.
+- Optional bounded local health probe: UNAVAILABLE at 127.0.0.1:8000/v1.
+  Served model/capabilities unavailable; live nonstream/stream SKIPPED. No runtime
+  installation/start/stop/configuration/download/model preparation attempted.
+- Security and INV-001 through INV-024 reviewed: preserved or unaffected.
+  PHOENIX/PermissionEngine/ToolRegistry authority unchanged; data grants no
+  permissions. No frontend provider access, events, persistence, migrations,
+  API/UI, secret storage, uploads to an unconfigured endpoint or engine execution.
+  /health, Alembic baseline and canonical 32 event types remain unchanged/green.
+- All deterministic acceptance criteria met. Known limitations: no live model
+  evidence, context/metrics unknown, unsupported envelopes fail explicitly,
+  cancellation cannot prove remote computation stopped, stream consumers must
+  close abandoned iterators and callers own borrowed-client configuration.
+- Final whitespace/credential-signature and entire staged-diff review precede
+  the new feat: complete PHX-015 Colibri provider adapter commit and normal push
+  only to feature/PHX-015-colibri-provider-adapter. Final SHA/remote/clean-tree
+  evidence is reported after push. No main push, PR, merge, force or PHX-016 work.
