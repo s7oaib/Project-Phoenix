@@ -763,3 +763,41 @@ router/LEVI invocation, task-state mutation, permission/scope expansion, events,
 persistence, API or desktop integration. PHOENIX remains supreme. PHX-020 through PHX-026
 implementations are unchanged; future orchestration owns execution/state/events, and
 PHX-028 owns degraded/fail-safe decisions.
+
+## ADR-038 — Explicit least-scope degraded policy without execution authority
+Status: Accepted for PHX-028.
+
+KaidoFailSafe requires authoritative internal ID failsafe in an exact snapshotted
+AgentRegistry. KAIDO is removable display metadata; aliases/role text confer no
+authority. activate(request) is synchronous and pure, with no hidden work or state
+transition. PHOENIX remains the sole supreme orchestrator and completion authority.
+
+Five explicit caller triggers are primary_model_provider_unavailable,
+resource_pressure, deep_provider_unavailable, critical_subsystem_degradation and
+recovery_exhausted. Never infer conditions from untrusted reason text or perform
+health/resource probes. Every decision has literal failsafe identity and degraded
+mode; normal/healthy/high-quality activation is excluded.
+
+Four essential descriptive categories are basic_conversation, diagnostics,
+recovery_guidance and safe_limited_tool_routing. Require a nonempty unique ordered
+capability tuple and return precisely that requested tuple, preserving order.
+No hidden capability expansion. Safe limited tool routing neither selects/executes
+tools nor grants permission. Future execution still requires ToolRegistry and
+deterministic PermissionEngine; P4 confirmation and P5 blocking remain unchanged.
+
+Frozen extra-forbidden request/decision contracts have five/seven fields. Strict
+nonempty IDs normalize outer whitespace; request IDs default independently to
+UUID4. Meaningful reason formatting remains intact and is never logged/executed.
+Revalidate exact stored model fields, including copied/constructed injected fields,
+reject subclasses and snapshot caller containers and nested recovery evidence.
+recovery_exhausted alone requires an exact PHX-027 RecoveryResult revalidated by its
+own contract: exhausted, used >= max, positive finite integer budgets, no proposal
+and no attempt number. Preserve its recovery ID; other triggers reject recovery
+evidence and carry no recovery reference. Proposed/contradictory evidence fails.
+Exhaustion remains failure, never repaired work, verified success or completion.
+
+Explicit immutable mode/trigger/reason/capabilities/recovery reference satisfy
+INV-022 without event production. No provider/model work, tool/permission calls,
+registered agent execution, LEVI/MAHORAGA/AIZEN/router/orchestrator invocation,
+task-state mutation, persistence, API, frontend, voice or startup integration.
+Those integrations remain later work; PHX-020 through PHX-027 remain unchanged.
