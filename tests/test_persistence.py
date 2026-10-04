@@ -17,7 +17,6 @@ from sqlalchemy.orm import Session
 from alembic import command
 from phoenix.api.app import create_app
 from phoenix.core.config import AppSettings
-from phoenix.persistence.base import Base
 from phoenix.persistence.database import (
     create_engine_for_settings,
     create_session_factory,
@@ -60,7 +59,9 @@ def test_path_url_and_lazy_construction(settings: AppSettings) -> None:
         with factory() as session:
             assert isinstance(session, Session)
         assert not settings.data_dir.exists()
-        assert not Base.metadata.tables
+        # Metadata registration does not initialize a database. Other tests may
+        # intentionally import domain mappings into the shared Base.
+        assert not database_path(settings).exists()
     finally:
         engine.dispose()
 
@@ -104,11 +105,13 @@ def test_alembic_baseline_lifecycle(
     settings: AppSettings, migration_config: Config
 ) -> None:
     scripts = ScriptDirectory.from_config(migration_config)
-    assert scripts.get_heads() == ["0001"]
+    assert scripts.get_heads() == ["0002_memory_schema"]
     baseline = scripts.get_revision("0001")
     assert baseline is not None and baseline.down_revision is None
+    memory_revision = scripts.get_revision("0002_memory_schema")
+    assert memory_revision is not None and memory_revision.down_revision == "0001"
     prepare_data_directory(settings)
-    command.upgrade(migration_config, "head")
+    command.upgrade(migration_config, "0001")
     engine = create_engine_for_settings(settings)
     try:
         with engine.connect() as connection:
@@ -121,7 +124,7 @@ def test_alembic_baseline_lifecycle(
         with engine.connect() as connection:
             assert MigrationContext.configure(connection).get_current_revision() is None
             assert inspect(connection).get_table_names() == ["alembic_version"]
-        command.upgrade(migration_config, "head")
+        command.upgrade(migration_config, "0001")
         with engine.connect() as connection:
             assert (
                 MigrationContext.configure(connection).get_current_revision() == "0001"

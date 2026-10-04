@@ -1,4 +1,4 @@
-"""Authoritative metadata owner; domain models belong to later tickets."""
+"""Authoritative metadata owner; intentional model imports register domain tables."""
 
 from sqlalchemy.orm import DeclarativeBase
 

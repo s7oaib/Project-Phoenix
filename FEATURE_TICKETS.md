@@ -32,7 +32,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-028 KAIDO fail-safe — DONE
 
 ## Phase 3 — Memory & RAG
-- PHX-030 Memory schema — TODO
+- PHX-030 Memory schema — DONE
 - PHX-031 PUDDING memory service — TODO
 - PHX-032 Document ingestion — TODO
 - PHX-033 VectorStore/sqlite adapter — TODO

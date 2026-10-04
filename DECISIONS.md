@@ -801,3 +801,53 @@ INV-022 without event production. No provider/model work, tool/permission calls,
 registered agent execution, LEVI/MAHORAGA/AIZEN/router/orchestrator invocation,
 task-state mutation, persistence, API, frontend, voice or startup integration.
 Those integrations remain later work; PHX-020 through PHX-027 remain unchanged.
+
+## ADR-039 — Neutral memory evidence and the first versioned domain table
+Status: Accepted for PHX-030.
+
+MemoryType has exactly working, episodic, semantic, user, project and agent.
+MemoryRecord is a frozen, extra-forbidden fourteen-field contract: id, type,
+content, source_type, source_ref, scope, confidence, importance, created_at,
+updated_at, last_accessed_at, expires_at, embedding_ref and metadata. Revalidate
+exact stored model fields, including copied extras; reject extended records.
+IDs are strict nonempty outer-whitespace-normalized strings, with independent
+UUID4 defaults. Content retains meaningful original formatting and remains data.
+source_type and scope are required extensible normalized strings; optional source
+and embedding references are opaque normalized strings, without foreign keys,
+dereferencing, vectors or verified-citation claims.
+
+Confidence/importance are explicit ordinary finite int/float evidence normalized
+to floats in inclusive [0,1], rejecting booleans/coerced strings. Creation and
+update timestamps are required caller values, with no clock defaults. All logical
+datetimes must be aware and normalize to UTC; aware ISO representations support
+serialization. Updated, accessed and expiry timestamps cannot precede creation.
+Wall-clock evidence is not a monotonic version counter. UTCDateTime binds aware
+datetimes as naive UTC in SQLite's DateTime representation and restores UTC
+awareness on reads, preserving microseconds. Naive persistence binds fail.
+
+Metadata defaults independently to an empty JSON object with string keys and
+finite JSON values. Recursively detach and freeze maps/arrays into read-only maps
+and tuples; serialize back to ordinary JSON objects/arrays. Reject arbitrary
+runtime objects, bytes, sets, callbacks, nonfinite numbers and cycles. Metadata
+and content confer no executable, permission or trust authority.
+
+MemoryRow intentionally registers memories in PHX-005's shared Base; registration
+and construction perform no I/O. Python memory_type/metadata_json map to database
+type/metadata, preserving DeclarativeBase.metadata. Exactly fourteen columns,
+named id primary key, checks for six types, inclusive score bounds and valid JSON
+object metadata, plus four ordinary indexes on type/scope/created_at/expires_at.
+No content uniqueness, silent overwrite or reconciliation. ORM mapping is storage,
+not admission validation; future callers validate domain records explicitly.
+
+Alembic 0002_memory_schema follows unmodified schema-empty 0001 and creates only
+memories and its constraints/indexes. A narrow model import registers migration
+target metadata without connecting or running migrations on app startup. Real
+temporary lifecycle tests preserve 0001's empty domain schema and verify upgrade,
+downgrade and re-upgrade, inspection and mapping agreement. PHX-005 tests identify
+the new head while explicitly targeting 0001 for baseline-only assertions.
+
+PUDDING service/admission/semantic-secret rejection/conflict policy, document
+ingestion, VectorStore, embedding generation, retrieval/context and citation
+rendering remain PHX-031 through PHX-035. No secret-specific fields/type/storage,
+logging, events, API, frontend or agent/provider/tool/permission execution.
+Schema validation cannot reliably identify every secret inside arbitrary text.

@@ -7,6 +7,9 @@ from alembic import context
 from phoenix.core.config import AppSettings
 from phoenix.persistence.base import Base
 from phoenix.persistence.database import database_url
+from phoenix.persistence.memory import (
+    MemoryRow,  # noqa: F401 — register target metadata
+)
 
 
 def run_migrations() -> None:
