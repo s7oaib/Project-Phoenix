@@ -547,3 +547,52 @@ refresh, inference, events, persistence or background work. No cancellation API,
 locks, workers or lifecycle leases are needed. PHOENIX remains supreme; the router
 does not invoke the orchestrator, planner or specialists. Task graph, handoffs,
 LEVI, MAHORAGA and KAIDO remain PHX-024 through PHX-028.
+
+## ADR-034 — Immutable source-ordered DAGs and canonical task-state evidence
+Status: Accepted for PHX-024.
+
+TaskStepDefinition holds only strict normalized step/owner IDs, meaningful original
+objective/expected-output/completion text, ordered dependency/input-reference tuples
+and a finite positive numeric timeout (never bool). These are descriptive metadata;
+input references are opaque and no timeout/completion rule is executed. TaskGraph
+contains only task_id (generated UUID4 or caller-preserved) and nonempty ordered
+steps. Frozen extra-forbidden contracts snapshot nested definitions by value,
+including copied/constructed inputs; duplicate normalized IDs/dependencies,
+self-dependencies, missing edges and cycles fail without repair.
+
+Validate every owner through a revalidated PHX-020 AgentRegistry. Default graph
+construction uses the canonical roster; an explicit custom registry uses Pydantic
+model_validate/model_validate_json context={"agent_registry": registry}. Custom
+owner round-trips need that same context. Registry objects/aliases/roles are not
+attached to graphs. Any legitimately registered internal ID may structurally own
+a step, including control roles, without creating runtime or permission authority.
+
+Declared source order is the deterministic tie-break. Use iterative Kahn traversal
+with a min-heap of source positions across all currently available nodes, including
+newly ready nodes; do not alphabetize IDs or emit nondeterministic set order.
+Roots retain source order. step() performs strict normalized exact lookup, returning
+None for a valid absent ID. ready_step_ids() accepts ordered lists/tuples, rejects
+invalid/unknown/duplicate completed IDs and returns uncompleted nodes whose direct
+dependencies are supplied as completed, in source order. This query trusts caller
+completion evidence; it neither validates execution history nor schedules work.
+
+TaskState has exactly eleven lowercase values: created, planning, ready, running,
+waiting_permission, verifying, completed, failed, recovering, degraded, cancelled.
+An immutable explicit table defines the ticket's 27 legal transitions. completed,
+degraded and cancelled are terminal; self-transitions and unlisted edges fail.
+TaskStateMachine requires a strict task ID and starts created with empty history.
+Read-only properties expose task_id/state/history/is_terminal; can_transition is
+pure and transition returns one immutable TaskTransition per successful change.
+Validate the target/edge and prepare its record and history before a single
+state/history snapshot replacement. Any failure preserves both state and history.
+Records hold only task_id/from_state/to_state/UTC-normalized aware occurred_at;
+append order, never wall-clock ordering, determines history sequence.
+
+One process/thread, synchronous, in-memory only; no distributed/thread-safe claim,
+locks, workers, background tasks, timers, events or persistence. State values are
+caller-reported evidence: waiting_permission/resumption grant nothing; verifying
+does not invoke LEVI or prove verification; recovering performs no MAHORAGA work;
+degraded does not activate KAIDO. A completed marker alone does not establish
+user-facing execution/verification success. PHOENIX remains supreme, with the
+orchestrator, planner and router unchanged/uninvoked. Model/provider/lifecycle,
+tools, PermissionEngine, handoffs, recovery/fail-safe, API and desktop stay separate.
