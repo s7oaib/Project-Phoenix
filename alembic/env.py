@@ -5,6 +5,9 @@ from sqlalchemy.engine import make_url
 
 from alembic import context
 from phoenix.core.config import AppSettings
+from phoenix.persistence.audit import (
+    AuditEventRow,  # noqa: F401 — register target metadata
+)
 from phoenix.persistence.base import Base
 from phoenix.persistence.database import database_url
 from phoenix.persistence.documents import (
