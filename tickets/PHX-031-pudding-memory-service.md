@@ -1,6 +1,6 @@
 # PHX-031 — PUDDING Memory Service
 
-Status: TODO
+Status: DONE
 Phase: 3 — Memory & RAG
 
 ## Objective
@@ -785,3 +785,93 @@ Report at minimum:
 - commit/push/main safety
 - known limitations
 - next ticket: PHX-032 — Document Ingestion
+
+## Verified completion — 2026-10-05
+
+- Added phoenix/memory/service.py and tests/test_pudding_memory_service.py;
+  changed only this ticket, its index status and one accepted ADR-040.
+  Starting prepared feature HEAD: bb1994b8a312e1da44428d4d1962c67b0c001a40.
+- Public API: MemoryAdmissionVerdict, MemoryAdmissionDecision,
+  MemoryAdmissionPolicy.evaluate(record), MemoryListQuery, MemoryEventDelivery,
+  MemoryCreateResult, PuddingMemoryService and explicit safe input/admission/
+  secret/policy/conflict/not-found/persistence/data/event errors. Service methods:
+  async create(record), get(memory_id), list_records(query=None), replace(record),
+  delete(memory_id); read-only agent_id is memory.
+- Construction exact-revalidates AgentRegistry and requires internal ID memory.
+  Removed/renamed/PUDDING aliases behave identically; alias-only/missing identity
+  fails. Borrowed sessionmaker/EventBus and mandatory policy remain caller-owned.
+  No constructor DB access, migration, directory, event subscription or worker.
+- Create/replace revalidate exact record snapshots and detached nested metadata,
+  then evaluate policy once. Exact frozen decision must correlate by memory_id;
+  accepted/rejected_secret/rejected_policy is the closed vocabulary. Rejected,
+  malformed, extended, forged, mismatched or failed admission never opens a
+  session or publishes an event. No production allow-all default or regex/model
+  secret detector. Policy mutation cannot alter persistence evidence.
+- Create inserts one row under an explicit transaction; duplicate ID and actual
+  SQLite primary-key race raise conflict without overwrite. Different IDs may
+  have identical/contradictory content. No upsert, merge or reconciliation.
+- Session commit and close precede one canonical memory.created attempt. A test
+  observes after_commit and close ordering, then verifies the durable row from
+  an independent session inside publish. Event INFO, agent_id memory, correlation
+  ID equals record ID, task_id None; payload exactly memory_id/memory_type, with
+  no content, metadata or private references. Frozen result detaches the record.
+- Real EventBus capacity rejection returns rejected_full while preserving the
+  committed row; no retry or partial subscriber delivery. Real lock-blocked bus
+  cancellation propagates after commit with the row intact. Other publication
+  failures raise a safe MemoryEventError stating memory committed. Cancellation
+  during admission propagates before session access.
+- Get uses a strict normalized exact ID, returns None if absent, otherwise a
+  revalidated frozen record. List uses exact type/scope/source_type filters,
+  created_at ASC/id ASC, strict limit default 100/max 500 and offset >= 0; result
+  is a tuple. Neither changes last_accessed_at or hides expired records.
+- Replace admits again, requires an existing exact ID, preserves created_at and
+  rejects updated_at earlier than stored; equality/later updates succeed. Only
+  the requested row changes. Delete commits only the exact ID, returns True/False
+  for present/absent and preserves other rows. Neither emits invented events.
+- Central row/domain mapping preserves all fourteen fields, UTC microseconds,
+  opaque references and deeply detached metadata. No ORM object escapes. Invalid
+  stored fields, JSON and timestamp decoding raise safe errors. Commit failures
+  roll back and close without publishing; formatted errors omit SQL parameters,
+  private content and database paths. Missing directories are never recreated.
+- No chat extraction/hooks, ingestion/parsers/chunkers, document/vector tables,
+  embedding calls, retrieval/ranking/FTS/context/citations, providers/models/tools/
+  permissions, API/frontend or startup integration. Canonical event count is 32.
+- uv run --locked pytest tests/test_pudding_memory_service.py -q:
+  167 passed in 26.47s. PHX-030 schema regression: 244 passed in 20.22s.
+  Persistence: 12 passed in 2.24s. Timings include concurrent verification load.
+- Individual locked Phase-1 suites passed: model_provider 61, ollama_provider
+  108, model_registry 83, model_lifecycle 54, embeddings 182, colibri_provider
+  194, model_benchmark 130 (812 total). Individual Phase-2 suites passed:
+  agent_registry 96, phoenix_orchestrator 101, aizen_planner 151,
+  agent_model_router 213, task_graph_state_machine 348, structured_agent_handoffs
+  214, levi_verification 242, mahoraga_recovery 790, kaido_failsafe 574
+  (2,729 total). Existing production/test files remain unchanged.
+- uv lock / uv sync --locked passed, 36 packages; manifests and locks unchanged.
+  uv run --locked pytest -q: 4,078 passed in 34.59s; one pre-existing
+  Starlette/httpx deprecation warning. Ruff check/format passed (65 files).
+  Strict mypy passed (62 source files). uv build produced wheel and sdist.
+- Foundation bootstrap/API/config/persistence/events/hardware: 126 passed in
+  6.49s. Exact /health remains status=ok/service=phoenix-api/version=0.1.0.
+  npm test: 4 passed. Desktop workspace typecheck and build passed.
+- Alembic ScriptDirectory has exactly one head, 0002_memory_schema. Temporary
+  SQLite has only alembic_version/memories at that revision. Both existing
+  migration files and PHX-030 domain/ORM are byte-equivalent to origin/main;
+  no table, column, constraint, index, revision or event vocabulary change.
+- Fresh-interpreter isolation blocks writes, DB connections/session acquisition,
+  network/subprocess, forbidden subsystem imports, subscriptions/publication,
+  hidden tasks/threads. Import/constructor/contracts pass with an empty temporary
+  directory; only stdlib platform metadata is preinitialized for Windows as in
+  PHX-005. AST scope checks pass. Credential-signature scan: 155 repository files,
+  zero matches. INV-001 through INV-024 and permission/security implications
+  reviewed; evidence remains untrusted and grants no permission or tool authority.
+- All deterministic acceptance criteria pass. ADR-040 records the admission,
+  storage, administrative inspection and post-commit observability boundaries.
+  Full staged diff reviewed: only these five intended files; no unrelated changes,
+  runtime integration, dependency/schema churn or hidden execution. Diff check PASS.
+- Limitations: trusted admission policy must classify secrets correctly; PHX-045
+  owns broader secret handling. Caller owns permissions/schema/dependencies.
+  Synchronous SQLite work has no background worker, optimistic version counter
+  or semantic conflict resolution. Post-commit publication has no durable outbox,
+  replay or retry, so cancellation/full/failure may leave storage without an event.
+  No live model/provider calls were needed. PHX-032 through PHX-035 remain TODO;
+  next ticket PHX-032 — Document Ingestion was not started.
