@@ -1,6 +1,6 @@
 # PHX-040 — ToolRegistry
 
-Status: TODO
+Status: DONE
 Phase: 4 — Tools, Permissions & Security
 Branch: `feature/PHX-040-tool-registry`
 
@@ -835,3 +835,94 @@ Push only:
 `feature/PHX-040-tool-registry`
 
 Do not create a PR, merge, push main, force-push, or start PHX-041.
+
+## Verified PHX-040 completion
+
+Created `phoenix/tools/registry.py` and `tests/test_tool_registry.py`.
+Supporting changes: this ticket, only PHX-040 in `FEATURE_TICKETS.md`, and
+one accepted ADR-045 in `DECISIONS.md`. Existing tools package initializer,
+historical production/tests, manifests, migrations and desktop remain unchanged.
+
+Public API: ToolRiskLevel, ToolResultStatus, ToolDefinition, ToolRegistry,
+ToolRegistryError, DuplicateToolError, UnknownToolError; registry get/require/
+contains/list_tools and immutable tool_ids inspection. Risk vocabulary is exactly
+P0..P5; future result vocabulary is success/partial_success/denied/timeout/
+cancelled/failure/unavailable_dependency. No tool result is fabricated.
+
+ToolDefinition has exactly the eleven documented fields and is frozen,
+extra-forbidden and stored-value-revalidated. Tool IDs are strict, nonempty,
+outer-trimmed, case-preserving and alias-free. Descriptions retain meaningful
+original formatting. Permission/audit strings are strict nonempty normalized
+descriptive data, including approved/hidden strings, with no runtime authority.
+Timeouts are ordinary finite positive int/float values normalized to float;
+cancellation is strict bool. Platform/environment declarations are ordered,
+nonempty unique tuples of strict normalized case-preserving strings. No runtime
+support probing, timers or cancellation work.
+
+Schemas require top-level ordinary JSON objects with string keys, finite numbers
+and JSON values. Validate and deeply detach maps into private read-only views
+and arrays into tuples; accepted nested tuples serialize as JSON arrays. Fresh
+serialization returns ordinary detached dict/list JSON data. Reject bytes, sets,
+custom objects/containers, functions/classes/coroutines/generators, nonfinite
+numbers and cycles. Shared acyclic data is valid; excessive nesting fails
+explicitly. Schema strings/$ref/paths/URLs remain inert and are never evaluated,
+dereferenced, imported or used as permission policy.
+
+ToolRegistry is a frozen slotted value over a private tuple. Construction accepts
+ordered list/tuple exact definitions, revalidates stored fields/extras/enums/schema
+evidence, preserves declaration order and detaches caller containers. Duplicate
+normalized IDs raise DuplicateToolError, with no first/last-wins or partial
+published state; case-distinct IDs coexist. An empty/default registry has no
+tools. Reinitializing a constructed registry is rejected. A new set requires a
+new registry. No mutable public registry map, register/unregister/replace/reload/
+discovery operation, handler/callback or execution API exists.
+
+get/require/contains use the same strict normalized lookup ID contract. Valid
+unknown IDs yield None/UnknownToolError/False; malformed IDs fail validation.
+list_tools/tool_ids preserve declaration order as immutable tuples. Identical
+inputs produce equivalent metadata. No aliases, default tools or hidden fallback.
+
+Validation commands and results:
+
+- `uv run --locked pytest tests/test_tool_registry.py -q`: **204 passed**,
+  final focused run 0.53s. All strict contract, schema, lookup, immutability,
+  duplicate and separation cases pass, including guarded uncached import.
+- Individually ran all Phase-3 suites: PHX-030 **244**, PHX-031 **167**,
+  PHX-032 **300**, PHX-033 **273**, PHX-034 **367**, PHX-035 **173** passed
+  (**1524 total**), plus persistence **12 passed**. Historical tests unchanged.
+- All seven Phase-1 suites individually: **812 passed**; all nine Phase-2
+  suites individually: **2729 passed**. No model/agent/runtime changes.
+- Final `uv run --locked pytest -q --junitxml=<temporary report>`:
+  **5395 passed**, exit 0, 92.83s; exactly 5191 baseline + 204 new tests.
+  Log/XML outside the repository. One existing Starlette/httpx warning.
+- `uv run --locked ruff check .`: passed; `uv run --locked ruff format --check .`:
+  **81 files** passed; `uv run --locked mypy`: **76 source files** passed.
+- `uv lock`, `uv sync --locked`, `uv build`: passed; **36 packages**,
+  manifests/lock unchanged; source distribution and wheel built.
+- Foundation bootstrap/API/config/persistence/events/hardware command:
+  **126 passed**, 3.55s, including unchanged exact `/health`.
+- Desktop `npm test`: **4 passed**; desktop workspace typecheck/build passed.
+
+Guarded uncached import/construction/lookups/serialization run in memory with
+file/source access, directories, SQLite, sockets, subprocesses, threads, task
+creation and OS probing blocked. Registry imports only data/validation libraries;
+dependency imports are restricted to already loaded validation modules. Static
+checks rule out eval/exec/dynamic plugin imports and runtime subsystem coupling.
+No tool execution, PermissionEngine, grants/approval, audit implementation,
+filesystem/terminal/concrete tools, secrets handling, agent/provider/model calls,
+events, persistence, API/frontend, workers or dependency changes. PHX-041 through
+PHX-045 remain TODO; no privileged integration begins in this ticket.
+
+Alembic head stays `0004_embedding_records`; four revisions and env.py unchanged.
+EventType remains **32**. Compared **100 historical protected files** with
+origin/main: unchanged. Credential/signature scan: **176 files, zero matches**.
+Reviewed INV-001 through INV-024 and security/permission implications: preserved.
+Risk/permission metadata grants no authority; PHOENIX remains supreme; external
+schema/description strings remain untrusted data. Acceptance criteria 1–19 pass.
+DONE follows all deterministic gates. Complete staged review and exact normal
+feature-branch commit/push evidence are reported in the final lifecycle report.
+
+Limitations: metadata inspection only; no JSON-Schema request evaluation,
+permission enforcement, timeout/cancellation execution or audit semantics.
+Recursive schema validation rejects excessive nesting explicitly. Lookup is a
+simple deterministic linear scan. PHX-041 PermissionEngine P0-P5 is not started.
