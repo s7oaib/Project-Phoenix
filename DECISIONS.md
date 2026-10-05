@@ -969,3 +969,73 @@ and temporary upgrade/downgrade/re-upgrade tests prove memory preservation and
 document constraints. No provider/model/tool/permission/API/frontend execution,
 PUDDING call, vectors, retrieval/context or citations. PHX-033 through PHX-035
 remain separate work; PHOENIX remains supreme and document evidence subordinate.
+
+## ADR-042 — Portable vector evidence and bounded exact SQLite cosine
+Status: Accepted for PHX-033.
+
+VectorStore is a synchronous provider-neutral ABC with add/add_many/get/delete/
+search. SqliteVectorStore borrows the caller's sessionmaker and requires a strict
+positive max_search_candidates. Import/construction opens no connection, file,
+subscription or worker. Caller owns schema setup, permissions and engine lifetime.
+No sqlite-vec, FAISS, Chroma, NumPy or SciPy dependency/extension is introduced;
+sqlite-vec remains a possible optimized adapter behind the same boundary.
+
+Frozen extra-forbidden VectorRecord has exactly nine fields: id, source_kind,
+source_id, source_hash, provider_id, model_id, dimensions, vector and created_at.
+Identifiers normalize only outer whitespace and preserve case; source_kind is
+extensible. SHA-256-shaped source hashes and source IDs are opaque evidence,
+never source existence, freshness or authority. Finite ordinary numbers become
+immutable floats; reject booleans, malformed/empty/zero vectors and dimension
+disagreement. Creation is explicit aware UTC evidence, without a clock default.
+Exact snapshots reject subclass extensions, copied extras and forged values.
+No source text/metadata/secret field or semantic secret detector. Callers must
+generate vectors only after the applicable trusted admission/security boundary.
+
+VectorBatch snapshots ordered exact records, requiring a nonempty batch, unique
+IDs and source_kind/source_id/provider_id/model_id keys, plus one dimension for
+each exact provider/model pair. Add is insert-only; duplicate durable identity
+fails without overwrite. One explicit BEGIN IMMEDIATE transaction reserves the
+SQLite writer before conflict/dimension reads, inserts all records and commits.
+This serializes cooperating writes' dimension checks. Internally inconsistent
+stored dimensions fail; manual writes can still corrupt evidence. Constraint/
+commit failures roll back the whole batch, preserving earlier rows. No retries.
+Get returns a detached revalidated record or None. Delete uses only the exact ID
+and returns actual deletion evidence, without reconstructing malformed vectors.
+Re-embedding requires explicit delete followed by add; no replace/update API.
+
+VectorSearchQuery requires provider/model/vector/strict limit 1..100 and optional
+exact source_kind/ordered unique source_ids, capped at 2000 IDs. None means no
+source-ID filter; an empty supplied tuple selects no sources. Validate the entire
+selected provider/model dimension space before source filtering; disagreeing
+stored dimensions fail even outside a selected source subset. Require query
+dimensions to agree when filtered candidates exist; absent candidates return an
+empty tuple. No inferred scope, source lookup, freshness check or query text.
+
+Use an explicit SQLite read transaction so dimension/count/vector reads share one
+snapshot, including under concurrent WAL writes. Count exact filtered candidates
+before loading vectors or calculating similarity. Overflow raises
+VectorSearchLimitError, without approximation/truncation; independently bound
+fetch by that validated count. Revalidate every candidate before returning any
+result; never silently skip corruption. Use standard-library scaled temporary
+unit arithmetic, hypot and fsum for cosine, handling finite extreme/subnormal
+values without changing stored vectors. Reject nonfinite/grossly out-of-range
+scores; clamp only overshoot within 1e-12. Sort score DESC then record ID ASC and
+apply limit after scoring the complete bounded set. VectorMatch has seven fields:
+record_id, source_kind, source_id, source_hash, provider_id, model_id and score.
+Similarity is low-level evidence, not truth, verification or final relevance.
+
+EmbeddingRecordRow shares Base and the existing UTCDateTime convention. Revision
+0004_embedding_records follows unchanged 0003 and adds only embedding_records:
+nine columns, JSON vector arrays, named PK/source-model uniqueness/dimension/
+array checks and three exact ordinary indexes. No source foreign keys, virtual
+tables or extensions. Domain reconstruction owns finite/nonzero/shape checks.
+Safe errors suppress raw SQL, vectors, private paths and exception details; no
+logging, database repair or borrowed-engine disposal. Historical tests keep their
+0001/0002/0003 schema semantics; only current-head assertions advance to 0004.
+
+No embedding/model/provider invocation, automatic indexing, EventBus, source
+resolution/mutation, PUDDING call, memory embedding_ref update, ingestion change,
+API/frontend, permissions/tools, reranking/context or citations. PHOENIX remains
+supreme. PHX-034 owns retrieval/freshness/query embedding/context policy and
+PHX-035 citations. This bounded exact adapter is a portable correctness baseline,
+not a large-scale ANN engine; callers own synchronous execution and resource scope.

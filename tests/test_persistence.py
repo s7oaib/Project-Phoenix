@@ -105,7 +105,7 @@ def test_alembic_baseline_lifecycle(
     settings: AppSettings, migration_config: Config
 ) -> None:
     scripts = ScriptDirectory.from_config(migration_config)
-    assert scripts.get_heads() == ["0003_document_ingestion"]
+    assert scripts.get_heads() == ["0004_embedding_records"]
     baseline = scripts.get_revision("0001")
     assert baseline is not None and baseline.down_revision is None
     memory_revision = scripts.get_revision("0002_memory_schema")

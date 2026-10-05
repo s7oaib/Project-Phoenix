@@ -704,17 +704,18 @@ def test_stored_corruption_fails_closed(
 
 def test_schema_unchanged(database: Engine) -> None:
     scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
-    assert scripts.get_heads() == ["0003_document_ingestion"]
+    assert scripts.get_heads() == ["0004_embedding_records"]
     assert inspect(database).get_table_names() == [
         "alembic_version",
         "document_chunks",
         "documents",
+        "embedding_records",
         "memories",
     ]
     with database.connect() as connection:
         assert (
             MigrationContext.configure(connection).get_current_revision()
-            == "0003_document_ingestion"
+            == "0004_embedding_records"
         )
     for path in (
         "alembic/versions/0001_baseline.py",
