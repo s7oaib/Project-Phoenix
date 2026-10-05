@@ -34,7 +34,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 ## Phase 3 — Memory & RAG
 - PHX-030 Memory schema — DONE
 - PHX-031 PUDDING memory service — DONE
-- PHX-032 Document ingestion — TODO
+- PHX-032 Document ingestion — DONE
 - PHX-033 VectorStore/sqlite adapter — TODO
 - PHX-034 Retrieval/context assembly — TODO
 - PHX-035 Provenance/citations — TODO

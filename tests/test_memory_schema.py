@@ -128,7 +128,7 @@ def migration_config(settings: AppSettings) -> Config:
 def database(tmp_path: Path) -> Iterator[Engine]:
     # Pydantic's synthesized signature omits this BaseSettings option.
     settings = AppSettings(data_dir=tmp_path, _env_file=None)  # type: ignore[call-arg]
-    command.upgrade(migration_config(settings), "head")
+    command.upgrade(migration_config(settings), "0002_memory_schema")
     engine = create_engine_for_settings(settings)
     try:
         yield engine
@@ -408,7 +408,9 @@ def test_extended_record_rejected() -> None:
 
 def test_orm_uses_shared_base_and_handles_reserved_metadata_name() -> None:
     assert issubclass(MemoryRow, Base)
-    assert set(Base.metadata.tables) == {"memories"}
+    # Other legitimate domain imports may also register tables in this process.
+    # The fresh-process test below still proves memory-only registration exactly.
+    assert Base.metadata.tables["memories"] is MemoryRow.__table__
     assert (
         isinstance(MemoryRow.metadata, MetaData) and MemoryRow.metadata is Base.metadata
     )
@@ -420,9 +422,11 @@ def test_orm_uses_shared_base_and_handles_reserved_metadata_name() -> None:
 
 def test_migrated_schema_matches_mapping_without_drift(database: Engine) -> None:
     assert_memory_schema(database)
+    memory_metadata = MetaData()
+    Base.metadata.tables["memories"].to_metadata(memory_metadata)
     with database.connect() as connection:
         assert (
-            compare_metadata(MigrationContext.configure(connection), Base.metadata)
+            compare_metadata(MigrationContext.configure(connection), memory_metadata)
             == []
         )
 
@@ -578,7 +582,7 @@ def test_real_alembic_upgrade_downgrade_reupgrade_lifecycle(tmp_path: Path) -> N
     settings = AppSettings(data_dir=tmp_path, _env_file=None)  # type: ignore[call-arg]
     config = migration_config(settings)
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["0002_memory_schema"]
+    assert scripts.get_heads() == ["0003_document_ingestion"]
     baseline = scripts.get_revision("0001")
     revision = scripts.get_revision("0002_memory_schema")
     assert baseline is not None and baseline.down_revision is None
@@ -597,7 +601,7 @@ def test_real_alembic_upgrade_downgrade_reupgrade_lifecycle(tmp_path: Path) -> N
             assert (
                 MigrationContext.configure(connection).get_current_revision() == "0001"
             )
-        command.upgrade(config, "head")
+        command.upgrade(config, "0002_memory_schema")
         assert_memory_schema(engine)
         with engine.connect() as connection:
             assert (
@@ -610,7 +614,7 @@ def test_real_alembic_upgrade_downgrade_reupgrade_lifecycle(tmp_path: Path) -> N
             assert (
                 MigrationContext.configure(connection).get_current_revision() == "0001"
             )
-        command.upgrade(config, "head")
+        command.upgrade(config, "0002_memory_schema")
         assert_memory_schema(engine)
         with engine.connect() as connection:
             assert (

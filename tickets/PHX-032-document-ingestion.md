@@ -1,6 +1,6 @@
 # PHX-032 — Document Ingestion
 
-Status: TODO
+Status: DONE
 Phase: 3 — Memory & RAG
 
 ## Objective
@@ -947,3 +947,108 @@ Only after all required gates pass:
 - push only `feature/PHX-032-document-ingestion`
 
 Do not create a PR, merge, push main, force-push, or start PHX-033.
+
+## Verified completion — 2026-10-05
+
+- Starting prepared feature HEAD: cd076cd9244f762fd2a22ec5253679560deb8b86;
+  branch feature/PHX-032-document-ingestion. Added five files: rag package marker,
+  ingestion contracts/service, document ORM mappings, migration 0003 and focused
+  tests. Supporting changes register Alembic metadata and update current-head/
+  historical migration assertions. Production PHX-030/031 files are unchanged.
+- Public API: DocumentSource, DocumentIngestionLimits, ParsedSegment,
+  ParsedDocument, DocumentParser.parse(source), DocumentRecord,
+  DocumentChunkRecord, DocumentAdmissionVerdict, DocumentAdmissionDecision,
+  DocumentAdmissionPolicy.evaluate(document, chunks), DocumentEventDelivery,
+  DocumentIngestionResult, DocumentCancellationStatus/Result and
+  DocumentIngestionService. Methods are async ingest(source=..., parser=...) and
+  cancel(document_id); read-only agent_id and sorted active_document_ids. Explicit
+  safe input/limit/parser/admission/secret/policy/conflict/duplicate-active/
+  persistence/event errors distinguish failures without content or SQL disclosure.
+- Registry exact-revalidation requires knowledge_rag. Removed, renamed and
+  VEGAPUNK aliases behave identically; alias-only/missing identity fails. Frozen,
+  extra-forbidden contracts use strict identifiers, UTC-aware timestamps and
+  deeply detached finite JSON metadata. Exact snapshots reject copied extras,
+  subclass extensions and forged nested evidence. Nonempty bytes are required;
+  source_ref stays opaque and is never read, opened or resolved.
+- Source-byte limits precede the single explicit parser invocation. Parsed ID
+  must correlate, segments retain order, total parsed characters are bounded.
+  Chunk windows advance size-overlap and stop on reaching the segment end; skip
+  whitespace-only windows. NFKC/whitespace-collapse/casefold comparison dedups
+  within one document, keeping first original content and path/page/section.
+  Retained count is bounded and indices are contiguous from zero. Hash exact
+  source bytes and retained UTF-8 content with SHA-256; UUID5(NAMESPACE_URL,
+  canonical JSON [document_id, final_index, content_hash]) gives stable chunk IDs.
+- Mandatory admission evaluates detached document/chunk evidence exactly once
+  before opening a session. Exact decision correlates document_id and uses only
+  accepted/rejected_secret/rejected_policy. Rejected, failed, malformed, extended
+  or mismatched decisions leave no rows/events. No allow-all production default;
+  policy mutation cannot change storage. Broader secret classification is PHX-045.
+- Both ORM models share Base and PHX-030 UTCDateTime, preserving UTC microseconds.
+  Python metadata_json maps database metadata. Documents has exactly eleven
+  columns; document_chunks has exactly eleven. Named PKs, document FK, unique
+  (document_id, chunk_index), positive chunk_count/page, nonnegative chunk_index
+  and valid JSON-object checks are independently exercised. Five ordinary indexes
+  cover source_type/source_ref/indexed_at/document_id/content_hash. No vectors,
+  source-bytes column, source-reference/hash uniqueness or cascade policy.
+- Revision 0003_document_ingestion follows 0002_memory_schema; 0001 and 0002 are
+  byte-equivalent to origin/main. Real temporary SQLite lifecycle proves
+  0001 -> 0002 -> 0003 -> 0002 -> 0003, exact schemas/constraints/indexes and
+  preservation of seeded memory. Full-head ORM/migration comparison has no drift.
+  PHX-030 memory-only lifecycle stays at explicit 0002; current-head assertions
+  alone advance in persistence and PHX-031 tests. Fresh memory registration
+  isolation retains its original exact-table assertion.
+- Accepted ingestion checks durable ID, flushes the parent inside one transaction,
+  inserts all chunks, commits and closes. Real chunk-trigger/commit failures roll
+  back parent and children; actual PK races conflict without overwrite. Distinct
+  document IDs may share source_ref/content without cross-document deduplication.
+  Foreign-key tests explicitly enable SQLite connection enforcement.
+- Exactly one canonical document.indexed attempt follows commit and close. INFO,
+  knowledge_rag, correlation ID=document ID, task_id=None; payload exactly
+  document_id/chunk_count. Independent-session reads inside publication prove
+  durability. Real EventBus-full rejection preserves rows with rejected_full,
+  no retry or partial delivery. Real lock-blocked post-commit cancellation leaves
+  rows intact; ordinary failure reports committed evidence through a safe error.
+- Active state is visible while parsing. Duplicate active IDs fail before another
+  parser call; cancel accepted/not_found uses exact IDs. Gated concurrent tests
+  prove cancellation isolation, cleanup and ID reuse. Independent cancellation
+  state prevents suppressed CancelledError and cleared task counters from writing
+  or finalizing. One service owns one process/event loop, with no hidden worker.
+- uv run --locked pytest tests/test_document_ingestion.py -q passed three
+  consecutive times: 300 in 21.13s, 300 in 19.85s, 300 in 22.48s. Cancellation
+  checkpoints use explicit events and bounded waits, without timing sleeps.
+  PHX-030: 244 passed in 6.03s; PHX-031: 167 in 27.00s; persistence: 12 in 2.16s.
+- Individual locked Phase-1 suites passed: model_provider 61, ollama_provider
+  108, model_registry 83, model_lifecycle 54, embeddings 182, colibri_provider
+  194, model_benchmark 130 (812 total). Individual Phase-2 suites passed:
+  agent_registry 96, phoenix_orchestrator 101, aizen_planner 151,
+  agent_model_router 213, task_graph_state_machine 348, structured_agent_handoffs
+  214, levi_verification 242, mahoraga_recovery 790, kaido_failsafe 574
+  (2,729 total). Production Phase-1/2 files remain unchanged.
+- uv lock / uv sync --locked passed, 36 packages, no manifest/lock changes.
+  uv run --locked pytest -q: 4,378 passed in 119.44s; one pre-existing
+  Starlette/httpx deprecation warning. uv run --locked ruff check . and
+  ruff format --check . passed (70 files). uv run --locked mypy passed
+  (66 sources); explicit mypy for Alembic env/all three migrations passed
+  (four sources). uv build produced wheel and sdist.
+- Foundation bootstrap/API/config/persistence/events/hardware: 126 passed in
+  4.60s. Exact /health remains status=ok/service=phoenix-api/version=0.1.0.
+  npm test: four passed; npm run typecheck --workspace @phoenix/desktop and
+  npm run build --workspace @phoenix/desktop passed. Desktop/API files unchanged.
+- Fresh-interpreter isolation blocks filesystem writes/source reads, connection/
+  session acquisition, network/subprocess, forbidden subsystem imports, hidden
+  tasks/threads and EventBus publication/subscription. Imports, contracts, ORM
+  registration and construction pass without files. Only stdlib Windows platform
+  metadata is preinitialized, following PHX-005. Runtime/AST isolation passes.
+  Canonical event vocabulary remains exactly 32. Credential-signature scan:
+  161 repository files, zero matches. INV-001 through INV-024 and permission/
+  security implications reviewed; document content never grants authority.
+- All 100 acceptance criteria pass. ADR-041 records the supported boundaries.
+  Entire staged diff reviewed: twelve intended files, including this ticket,
+  index and ADR. No unrelated/generated files or forbidden integrations;
+  git diff --check and git diff --cached --check passed.
+- Limitations: caller owns permissions, schema, dependencies, SQLite connection
+  foreign-key configuration and cooperative parser deadlines. Trusted admission
+  must classify secrets correctly. Synchronous SQLite operations are explicit;
+  no background worker/outbox/replay/retry. Post-commit cancellation/backpressure/
+  failure can leave rows without an event. Concrete parsers/routing remain PHX-072.
+  PHX-033/034/035 remain TODO; PHX-033 — VectorStore/sqlite Adapter is not started.

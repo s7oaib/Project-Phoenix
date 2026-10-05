@@ -904,3 +904,68 @@ schema/dependency changes, automatic chat extraction, API/frontend integration,
 provider/model/lifecycle work, ToolRegistry bypass or permission implementation.
 Document ingestion, VectorStore, retrieval/context and citations remain PHX-032
 through PHX-035; PHOENIX remains supreme and PUDDING remains subordinate.
+
+## ADR-041 — Admitted, bounded document ingestion with atomic provenance
+Status: Accepted for PHX-032.
+
+DocumentIngestionService requires AgentRegistry's internal ID knowledge_rag.
+VEGAPUNK aliases remain display metadata and confer no authority. Borrow an
+explicit sessionmaker, EventBus, mandatory synchronous admission policy and
+explicit limits. Import/construction performs no I/O, migration, subscription or
+worker startup. Caller owns schema setup, dependencies and permissions.
+
+DocumentSource holds caller-supplied nonempty bytes and an opaque source_ref;
+ingestion never opens or resolves that reference. Strict source identities,
+aware UTC timestamps and detached finite JSON metadata remain untrusted data.
+The explicit parser collaborator runs once after the source-byte gate. Exact
+revalidation rejects extended, forged, mismatched or malformed parsed evidence.
+Concrete binary parsers and routing remain PHX-072; no parser dependency/default.
+
+Bound total parsed Python characters before deriving source-ordered windows.
+Explicit chunk_size and chunk_overlap advance by size minus overlap, stopping
+when a window reaches the segment's end. Skip whitespace-only windows. Within
+one document, compare NFKC/whitespace-collapsed/casefolded window text, retaining
+the first original content, locators and metadata. Bound the retained chunk count
+and assign contiguous indices from zero. No cross-document deduplication. SHA-256
+hashes exact source bytes and each retained chunk's UTF-8 bytes. UUID5 in
+NAMESPACE_URL names a canonical JSON array of document ID, final index and exact
+content hash, giving stable IDs without ambiguous delimiter concatenation.
+
+Required DocumentAdmissionPolicy.evaluate(document, chunks) receives detached
+frozen snapshots once before session acquisition. Require an exact correlated
+DocumentAdmissionDecision and accepted/rejected_secret/rejected_policy verdict.
+Reject secret/policy evidence, malformed decisions and policy failures before
+persistence. No allow-all default or semantic secret detector. INV-018 depends on
+the trusted policy correctly classifying secrets; broader handling is PHX-045.
+Admission grants no permission and policy mutation cannot change stored evidence.
+
+Alembic 0003_document_ingestion follows immutable 0002_memory_schema and adds only
+documents/document_chunks, named constraints and five indexes. Reuse shared Base
+and UTCDateTime without PUDDING service/domain calls. metadata_json maps SQL
+metadata. Source references/hashes are not unique. A short transaction checks the
+document ID, flushes the parent inside that same transaction, inserts all chunks,
+commits and closes before publication. Any pre-commit database failure rolls back
+all rows. Duplicate durable IDs, including SQLite primary-key races, fail without
+overwrite. Connection-level SQLite foreign-key enforcement remains caller-owned;
+tests enable it and independently prove the foreign key and full atomicity.
+
+Attempt exactly one canonical document.indexed event after commit: INFO,
+agent_id knowledge_rag, correlation_id document ID, no task ID, and payload only
+document_id/chunk_count. Full queues return rejected_full with rows intact; no
+retry or partial delivery. Post-commit cancellation propagates with durable rows.
+Other publication failures explicitly report committed rows through safe errors.
+No durable outbox, replay or fabricated rollback is supplied.
+
+One service belongs to one process/event loop. Caller tasks own parsing; no hidden
+task/thread. Sorted read-only active IDs expose progress, duplicate active IDs
+fail, and cancel targets only the specified caller operation. An independent
+cancellation flag prevents a parser swallowing CancelledError or clearing the
+task counter from persisting/finalizing. Finally removes each active registration
+on every exit; callers own deadlines and parser cooperation.
+
+Historical memory tests explicitly retain their 0002 schema expectations; only
+current-head assertions advance to 0003, including PHX-031. New full-head mapping
+and temporary upgrade/downgrade/re-upgrade tests prove memory preservation and
+document constraints. No provider/model/tool/permission/API/frontend execution,
+PUDDING call, vectors, retrieval/context or citations. PHX-033 through PHX-035
+remain separate work; PHOENIX remains supreme and document evidence subordinate.
