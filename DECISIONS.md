@@ -1163,3 +1163,58 @@ claim extraction or entailment. Citations preserve the retrieval snapshot;
 they do not establish source truth, newer freshness or answer correctness.
 Downstream consumers must keep labels as untrusted plain text and independently
 authorize any future source interaction. No new dependency is required.
+
+## ADR-045 — Immutable tool declarations without execution or authorization
+Status: Accepted for PHX-040.
+
+ToolRegistry stores only exact detached ToolDefinition metadata in caller
+declaration order. Tools remain distinct from agents and models; PHOENIX is
+supreme. The frozen future flow remains ToolRegistry -> validation ->
+PermissionEngine -> execution -> result -> audit/event. This ticket implements
+only metadata construction and resolution, with an empty default registry.
+No concrete or speculative tool IDs are registered automatically.
+
+ToolRiskLevel is exactly P0..P5 descriptive metadata. ToolResultStatus is exactly
+success/partial_success/denied/timeout/cancelled/failure/unavailable_dependency;
+no tool result is fabricated. Risk, permission_requirement and audit_behavior
+strings do not grant, approve, deny, suppress audits or create consent. PHX-041
+owns authorization; PHX-042 audit; PHX-043/044 concrete filesystem/terminal tools.
+P5 metadata is representable here because no definition can execute.
+
+ToolDefinition has exactly eleven frozen extra-forbidden fields: tool_id,
+description, input_schema, output_schema, risk_level, permission_requirement,
+timeout_seconds, cancellation_supported, audit_behavior, supported_platforms,
+supported_environments. IDs and declaration strings are strict, outer-trimmed,
+nonempty and case-preserving; descriptions retain meaningful original formatting.
+Timeouts are ordinary finite positive int/float values normalized to float,
+without timers. Cancellation is strict bool metadata. Support sequences are
+ordered nonempty unique tuples of strict normalized strings, with no closed
+vocabulary or OS/environment probing.
+
+Schema evidence requires ordinary string-keyed JSON objects, finite numbers and
+JSON scalar/array/object values. Validate recursively without arbitrary object
+conversion, rejecting cycles, custom containers, callables and non-JSON values.
+Accept nested lists/tuples as JSON arrays; copy maps into private read-only
+MappingProxyType views and arrays into tuples. Serialization returns fresh
+ordinary dict/list JSON data. Repeated acyclic shared containers remain valid;
+excessive nesting fails explicitly at the interpreter's safe recursion boundary.
+This is data validation, not JSON-Schema evaluation: no $ref dereference,
+expression execution, validator/plugin import, file opening or URL resolution.
+
+Registry construction accepts ordered list/tuple exact ToolDefinition instances,
+snapshots and revalidates their stored values, rejecting subclasses, copied extras,
+forged enums and malformed nested evidence. Duplicate normalized IDs raise
+DuplicateToolError; case-distinct IDs remain distinct. Publish the private tuple
+only after every definition validates. The registry is a frozen slotted value;
+reinitializing an existing registry is rejected to prevent capability replacement.
+A different tool set requires constructing a new registry.
+
+get/require/contains share the strict normalized ID validator. Valid unknown IDs
+return None/UnknownToolError/False respectively; malformed lookup IDs fail
+validation. list_tools returns the declaration-order tuple; tool_ids is immutable
+inspection. No alias fallback, mutable public map, registration, replacement,
+hot-reload, discovery or execution API. No handlers, grants, provider clients,
+agent runtime, events, persistence, schema/migration, secrets, audit writes,
+API/frontend integration or new dependencies. Import/construction/inspection
+perform no I/O or worker creation. All schema/description text remains untrusted
+inert metadata for later permissioned concrete-tool integration.
