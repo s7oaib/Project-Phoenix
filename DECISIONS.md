@@ -1218,3 +1218,55 @@ agent runtime, events, persistence, schema/migration, secrets, audit writes,
 API/frontend integration or new dependencies. Import/construction/inspection
 perform no I/O or worker creation. All schema/description text remains untrusted
 inert metadata for later permissioned concrete-tool integration.
+
+## ADR-046 — Deterministic permission evidence over immutable tool risk
+Status: Accepted for PHX-041.
+
+PermissionEngine snapshots exact PHX-040 ToolRegistry metadata and an ordered,
+immutable PermissionPolicy. Resolve each exact request through ToolRegistry.require;
+only that ToolDefinition's ToolRiskLevel determines risk. Preserve descriptive
+permission_requirement without interpretation. PHOENIX remains supreme and owns
+future orchestration; models, agents and untrusted text cannot grant authority.
+
+Requests, user decisions, grants, policy rules/policies and output decisions are
+frozen and extra-forbidden. Revalidate stored values, including copied extras and
+nested rules; reject subclasses, foreign or unregistered enums, malformed times/
+shapes and duplicate authority. Accept only declared enum member identities or
+exact textual vocabulary values. Identity/action/resource strings are strict,
+outer-trimmed and case-preserving. Meaningful reason text retains its original
+formatting and matches exactly. Resources are opaque: no path, URL, wildcard or
+semantic scope expansion.
+Aware explicit timestamps normalize to UTC; no wall-clock reads or implicit expiry.
+
+Validate request, resolve registry risk, then validate all supplied evidence and
+user correlation before applying precedence. P5 always yields blocked/p5_blocked.
+For P0-P4 correlated explicit denial overrides all ordinary allow paths. P0 then
+yields allowed/p0_internal. P4 requires explicit approved evidence for that exact
+request ID; grants and policies never satisfy P4. Correlated explicit approval can
+satisfy P1-P3. Without it, P1 requires an exact matching P1 grant; P2/P3 select an
+exact same-risk policy before a qualifying same-risk grant, otherwise require
+approval. Decision status/reason/risk and the single applicable evidence ID must
+agree structurally; decisions establish neither execution nor success.
+
+Grants require literal approved and only P1/P2/P3 risks. once binds one request,
+task binds one task, session binds one session, persistent carries no context IDs;
+contradictory context fields reject. P1/P2 accept all four durations. P3 accepts
+only task/session grants; request-specific explicit approval remains available.
+WHO actor, WHAT tool/action, WHERE resource, WHY reason and risk match exactly.
+issued_at must not exceed request time; expiry, when present, must exceed both
+issuance and request time. Duplicate grant IDs/effective scope-risk-duration-context
+combinations reject even when times differ. Ordered valid nonmatching grants are
+ignored; the first qualifying grant supplies evidence. Policy allows only P2/P3,
+rejects duplicate IDs/effective exact scope-risk rules and defaults to empty.
+
+UserPermissionDecision is trusted caller-supplied approved/denied evidence with
+exact request correlation and decided_at >= requested_at. It is never inferred
+from text or converted into a reusable grant. Future trusted UI/settings integration
+owns evidence authenticity and distinct request-ID admission; this pure boundary
+does not authenticate origins or implement consumption/replay storage.
+
+No tool execution, handler, grant minting/refresh, model/provider/agent call,
+filesystem/terminal implementation, secrets handling, logging, EventBus activity,
+audit writes, persistence, migrations, API/frontend or dependency is added.
+PHX-042 owns audit integration; INV-007 remains mandatory for future P3/P4
+execution, while PHX-041 executes no action. PHX-043/044/045 remain separate.

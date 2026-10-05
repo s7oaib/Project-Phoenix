@@ -1,6 +1,6 @@
 # PHX-041 — PermissionEngine P0-P5
 
-Status: TODO
+Status: DONE
 
 Phase: 4 — Tools, Permissions & Security
 
@@ -577,3 +577,101 @@ Only after every deterministic gate passes:
 - push only `feature/PHX-041-permission-engine-p0-p5`.
 
 Do not create a PR, merge, push main, force-push, or start PHX-042.
+
+## Completion evidence — 2026-10-06
+
+Implemented `phoenix/security/permissions.py`, the security package boundary and
+`tests/test_permission_engine.py`. No prior production/test file changed.
+`PermissionEngine(registry, policy=None).evaluate(request, *, grants=(),
+user_decision=None)` returns exact frozen PermissionDecision evidence. Registry
+and policy snapshots are immutable, detached and revalidated; reinitialization
+cannot replace engine authority. ToolRegistry.require resolves exact tool IDs;
+ToolRiskLevel comes only from that definition. Descriptive permission_requirement
+is preserved and never interpreted as consent. Unknown tools fail explicitly.
+
+All six public contracts have the exact required fields, frozen/extra-forbidden
+validation and stored-value revalidation, including nested rules/copied extras.
+Reject subclasses, foreign/unregistered enum objects, malformed timestamps and
+contradictory evidence. IDs/action/resource are strict, outer-trimmed,
+case-preserving strings; meaningful untrusted reason formatting is preserved.
+Aware explicit timestamps normalize to UTC without wall-clock access. User
+decisions accept only approved/denied, correlate to the exact request ID and
+require decided_at >= requested_at. Correlation errors are explicit even for P5.
+
+After validating evidence, P5 always blocks; explicit denial overrides P0-P4;
+P0 allows internal work. P4 needs explicit approval for that distinct request;
+no grant/policy authorizes it. Explicit approval may satisfy P1-P3. Otherwise
+P1 requires a same-risk exact grant, and P2/P3 prefer exact same-risk policy over
+qualifying grant, else require approval. Closed status/reason vocabulary and
+evidence IDs are structurally correlated; contradictory decisions reject.
+
+Grants require literal approved, P1/P2/P3 risk and exact WHO/WHAT/WHERE/WHY/risk.
+once/task/session/persistent have mutually consistent correlation shapes; P1/P2
+accept all four, P3 only task/session. Issuance cannot follow request time;
+optional expiry must follow issuance and strictly exceed request time. Duplicate
+IDs/effective scope-risk-duration-context reject, even with differing times.
+Valid nonmatching grants are ignored; qualifying grant selection preserves input
+order. Policy is an ordered immutable tuple, empty by default, P2/P3 only,
+rejecting duplicate IDs/effective exact scope-risk rules. No wildcard, prefix,
+case-folding, path containment, host or semantic expansion is performed.
+
+### Commands and final results
+
+- `uv run --locked pytest tests/test_permission_engine.py -q`: **926 passed**.
+  Covers strict contracts, all P0-P5 rules/precedence, exact scope/context/time,
+  duplicate and forged evidence, registry-derived risk, P4 approval specificity,
+  P5 resistance, exhaustive decision structure and guarded uncached import/runtime.
+- `uv run --locked pytest tests/test_tool_registry.py -q`: **204 passed**.
+- Individually ran each of the six Phase-3 feature suites and persistence with
+  `uv run --locked pytest tests/test_<suite>.py -q`: memory_schema **244**,
+  pudding_memory_service **167**, document_ingestion **300**, vector_store_sqlite
+  **273**, retrieval_context **367**, provenance_citations **173**, persistence
+  **12**; all PASS. Feature aggregate **1,524** plus persistence **12**.
+- Individually ran all seven Phase-1 suites with the same locked pytest command:
+  model_provider **61**, ollama_provider **108**, model_registry **83**,
+  model_lifecycle **54**, embeddings **182**, colibri_provider **194**,
+  model_benchmark **130**; all PASS, aggregate **812**.
+- Individually ran all nine Phase-2 suites with the same locked pytest command:
+  agent_registry **96**, phoenix_orchestrator **101**, aizen_planner **151**,
+  agent_model_router **213**, task_graph_state_machine **348**,
+  structured_agent_handoffs **214**, levi_verification **242**,
+  mahoraga_recovery **790**, kaido_failsafe **574**; all PASS, aggregate **2,729**.
+- `uv run --locked pytest -q` with external JUnit report/log: final
+  **6,321 passed, 1 existing warning**, 192.99 seconds; baseline 5,395 + 926.
+  Final run repeated after enum hardening; no remaining failed/skipped tests.
+- `uv lock`; `uv sync --locked`: PASS, **36 packages**, manifests/lock unchanged.
+- `uv run --locked ruff check .`: PASS.
+- `uv run --locked ruff format --check .`: PASS, **84 files** formatted.
+- `uv run --locked mypy`: PASS, **79 source files**.
+- `uv build`: PASS, source distribution and wheel, repeated after final code edit.
+- `uv run --locked pytest tests/test_bootstrap.py tests/test_api.py
+  tests/test_config.py tests/test_persistence.py tests/test_events.py
+  tests/test_hardware.py -q`: **126 passed**, existing warning only; exact health
+  remains `status=ok`, `service=phoenix-api`, `version=0.1.0`.
+- `npm test`: **4 passed**; `npm run typecheck --workspace @phoenix/desktop`
+  and `npm run build --workspace @phoenix/desktop`: PASS.
+- Historical byte comparison against origin/main: **102** existing runtime,
+  test, schema, desktop and manifest files unchanged. Credential/signature scan:
+  **180 files**, zero matches. `git diff --check`: PASS.
+
+### Security, invariants and limitations
+
+Reviewed INV-001 through INV-024: PASS. INV-003/004/005/006/011/017 are enforced
+by typed evidence, registry-derived risk, exact matching, request-specific P4
+approval and unconditional P5 blocking. No model/agent/text self-authorization,
+risk override, request/reason logging, credential fixtures, eval/exec, dynamic
+evidence import, privileged frontend path, runtime tool API or grant minting exists.
+Guarded uncached import/construction/evaluation across all risks forbids filesystem,
+SQLite, network, process, thread/task, OS probing and EventBus calls; static imports
+exclude agent/provider/model/audit/persistence/API integrations. No execution means
+no P3/P4 execution audit is produced; INV-007 still governs future execution, with
+PHX-042 owning audit implementation. INV-020 is preserved: Alembic head remains
+`0004_embedding_records`; migrations and **32** canonical EventType values unchanged.
+
+ADR-046 records precedence, exact scope, immutable authority and separation.
+Trusted future callers own user-evidence authenticity and distinct request-ID
+admission. This ticket implements no consumption/replay storage, grant refresh,
+audit trail, concrete tool, secrets store, persistence/cache, API/frontend,
+event producer or model/provider call. No dependencies changed. All acceptance
+criteria PASS; PHX-042 through PHX-045 remain TODO. Next: PHX-042 Audit trail,
+not started in this run.

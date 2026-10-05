@@ -41,7 +41,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 
 ## Phase 4 — Tools, Permissions & Security
 - PHX-040 ToolRegistry — DONE
-- PHX-041 PermissionEngine P0-P5 — TODO
+- PHX-041 PermissionEngine P0-P5 — DONE
 - PHX-042 Audit trail — TODO
 - PHX-043 Filesystem tool — TODO
 - PHX-044 Terminal tool — TODO
