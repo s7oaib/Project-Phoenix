@@ -1,6 +1,6 @@
 # PHX-034 — Retrieval/context assembly
 
-Status: TODO
+Status: DONE
 Phase: 3 — Memory & RAG
 
 ## Objective
@@ -926,3 +926,105 @@ When complete, append concise evidence for:
 ## Known intended limitations
 
 V1 retrieval uses the caller-selected embedding provider/model, PHX-033's bounded vector primitive, explicit source scopes and deterministic formula-based reranking. It does not provide lexical/hybrid search, learned rerankers, distributed snapshots, exact tokenizer accounting, automatic re-indexing, source truth verification, or citation rendering. Those capabilities require later explicit tickets/decisions.
+
+## Completion evidence — 2026-10-05
+
+Implemented `phoenix/rag/retrieval.py`; added only
+`tests/test_retrieval_context.py`. Supporting changes are this ticket,
+`FEATURE_TICKETS.md` and accepted ADR-043 in `DECISIONS.md`.
+No dependency, historical production file, schema or migration changed.
+
+Public API: `RetrievalContextService.retrieve`, `cancel`, `agent_id`,
+`active_retrieval_ids`; `MemoryRankingPolicy`, `ContextBudget`,
+`RetrievalRequest`, `ContextItem`, `RetrievalDiagnostics`,
+`RetrievalContextResult`, `RetrievalCancellationStatus` and
+`RetrievalCancellationResult`, with explicit safe domain errors.
+The neutral owner is registry ID `knowledge_rag`; aliases confer no authority.
+
+Frozen extra-forbidden exact-revalidated contracts carry explicit provider,
+model, UTC `as_of`, unique ordered memory scopes/types and document IDs,
+caller-declared document authority, candidate limit 1..100, similarity threshold,
+ranking weights/half-life and item/character budgets. At least one family must
+be scoped; authority must be a subset of requested documents. Source IDs remain
+case-sensitive. Memory expiry <= as_of is excluded without deletion.
+Initial read-only queries enforce 2000 source IDs per family by fetching at most
+2001; overflow fails before embedding/search, without silent truncation.
+
+Exactly one neutral `EmbeddingProvider.embed` request carries only original
+query text and retrieval/provider/model correlation. Exact response validation
+requires one ordered finite nonzero vector and truthful dimensions. No provider
+discovery/routing or generation occurs. Search uses only neutral `VectorStore`,
+at most once per nonempty eligible family, with explicit IDs, embedding space
+and private candidate bound. All matches are revalidated before filtering,
+including below-threshold matches; duplicates and scope/correlation errors fail.
+
+Close the initial source session before embedding. Resolve current sources in
+a fresh short explicit SQLite read snapshot, reconstructing existing memory,
+document and chunk contracts. Recheck scope/type/expiry and document membership.
+Memory freshness uses SHA-256 of exact UTF-8 content; chunk freshness compares
+its current persisted content_hash. Stale and orphaned evidence is excluded;
+eligibility changes have a separate diagnostic count. All eight aggregate
+diagnostic counters reconcile exactly; no query text or raw vectors appear.
+
+Memory score is the explicit weighted mean of relevance `(similarity+1)/2`,
+recency `2**(-max(0, as_of-updated_at)/half_life_seconds)` and importance.
+Temporary weight scaling preserves that formula without overflow. Confidence
+remains provenance. Document score is normalized similarity. Merge order is
+authority first, then score descending, similarity descending, source kind,
+source ID and vector ID ascending. Authority grants knowledge precedence only;
+retrieved text remains untrusted executable input, never permission/instruction
+authority. Raw source identity/hash/reference, document locators/parser/index/
+timestamp and memory type/scope/confidence are preserved without citation output.
+
+Explicit max_items 1..100 and max_chars 1..1000000 select whole original texts,
+count Python characters exactly and skip nonfitting items while considering
+later smaller items. No truncation, prompt construction or tokenizer claim.
+Active IDs are sorted immutable inspection; duplicates and nested task ownership
+fail explicitly. Cancellation returns accepted/not_found and targets only the
+matching caller task. An independent cancellation flag prevents progress after
+a provider suppresses cancellation and clears its task counters. Every terminal
+path cleans active state; IDs become reusable. Callers own dependency lifetimes,
+authorization, deadlines and synchronous resource scope.
+
+Validation commands and results:
+
+- `uv run --locked pytest tests/test_retrieval_context.py -q`: final three
+  consecutive runs, **367 passed** each (46.52s, 49.07s, 39.72s). Event-driven
+  cancellation tests have no timing sleeps. No focused flakiness observed.
+- Individual PHX-014/030/031/032/033/persistence pytest suites: **182/244/167/
+  300/273/12 passed**, with historical tests unchanged.
+- All seven Phase-1 suites individually: **812 passed**; all nine Phase-2
+  suites individually: **2729 passed**, unchanged.
+- `uv run --locked pytest -q --junitxml=<temporary report>`: **5018 passed**
+  in 112.04s, exit 0; log/XML saved outside the repository. One existing
+  Starlette/httpx deprecation warning; no dependency change made to suppress it.
+- `uv run --locked ruff check .`: passed; `uv run --locked ruff format --check .`:
+  **77 files** passed; `uv run --locked mypy`: **72 source files** passed.
+- `uv lock`, `uv sync --locked`, `uv build`: passed, lock/manifests unchanged;
+  **36 packages** resolved/synced, wheel and source archive built.
+- Foundation bootstrap/API/config/persistence/events/hardware pytest command:
+  **126 passed**, including unchanged `/health`, in 3.74s.
+- Desktop `npm test`: **4 passed**; desktop workspace typecheck and build passed.
+
+Real SQLite integration snapshots all four source/vector tables and observes
+read-only statements; last_accessed_at and source/vector contents are unchanged.
+Fresh-process guards block database/network/provider/event/process/thread/task
+side effects during import/contracts/construction. No events, tools/permissions,
+generation, API/frontend, cache, background work or automatic re-indexing added.
+Alembic head remains `0004_embedding_records`; all four migrations, schema
+models, previous runtime modules and dependency manifests match origin/main.
+EventType remains 32. Credential-signature scan: **168 files, zero matches**.
+Reviewed INV-001 through INV-024 and permission/security implications; preserved.
+All **20 acceptance criteria pass**; ADR-043 records the supporting decisions.
+Reviewed the complete staged diff for all five intended files, including all
+new production and test lines. Every change traces to PHX-034 or its completion
+evidence; prior tests remain unchanged. `git diff --cached --check` passes.
+
+Limitations: caller-selected providers and upstream admission/authorization;
+cooperative cancellation cannot prove remote inference stopped. Bounded source
+reads/search remain synchronous. Final-source snapshots do not create a
+distributed transaction across providers, vectors and source phases. Stored
+chunk hashes require coherent source writers; freshness is not source truth.
+Character budgets are tokenizer-neutral. No lexical/learned reranking, automatic
+indexing, citation renderer or source-truth verification. PHX-035 stays TODO and
+has not been started.
