@@ -1,6 +1,6 @@
 # PHX-042 — Audit trail
 
-Status: TODO
+Status: DONE
 
 Phase: 4 — Tools, Permissions & Security
 
@@ -1026,3 +1026,105 @@ Push only:
 `feature/PHX-042-audit-trail`
 
 Do not create a PR, merge, push main, force-push or start PHX-043.
+
+## Completion evidence — 2026-10-06
+
+Implemented phoenix/security/audit.py, phoenix/persistence/audit.py, Alembic
+0005_audit_events and tests/test_audit_trail.py. Registered only AuditEventRow in
+alembic/env.py and evolved nine historical current-head tests. No prior production
+behavior, historical migration, dependency, API or desktop file changed.
+
+AuditTrail exposes record_permission_decision, record_tool_outcome, get and
+list_records. It snapshots ToolRegistry metadata and borrows caller sessions
+without construction I/O or ownership transfer. Exact stored request/decision
+contracts are revalidated before acquiring a session; request ID, actor, tool,
+registry-derived risk and permission requirement must correlate. Frozen records
+have exactly 20 fields; queries exactly nine. Copied/injected extras, malformed
+extra containers, subclasses and foreign/unregistered enums reject explicitly.
+
+All four permission states append with no result. Tool outcomes require allowed
+non-P5 evidence and canonical non-denied ToolResultStatus; all six admitted
+statuses work for P0/P3/P4. Evidence IDs and task/session/caller correlation are
+preserved; they provide no execution, permission or verification authority.
+The helper is true only for canonical P3/P4 risk members. Explicit aware times
+normalize to UTC and cannot precede request time. IDs are strict, trimmed and
+case-preserving; omitted append identities use independent UUID4 values.
+Resources remain opaque. Only SHA-256 of the exact UTF-8 request reason persists;
+plaintext reason, arbitrary payloads and automatic record logging are absent.
+
+Each append commits one row in a short caller-factory session and closes it.
+Failures roll back, close and raise small errors with private exception chains
+suppressed, without retry. Duplicate IDs preserve existing history, including a
+simulated primary-key race. get/list return detached validated records; corruption
+fails explicitly. Exact equality filters, bounded pagination and occurred_at/ID
+ordering produce immutable tuples with no wildcard or prefix matching.
+
+### Commands and final results
+
+- `uv run --locked pytest tests/test_audit_trail.py -q`: **302 passed**. Covers
+  contracts, correlation, all decision states, P3/P4/P5, outcomes, UTC, hashing,
+  evidence preservation, append-only storage, duplicates, corruption, exact lists,
+  private formatted errors, guarded fresh-process imports and separation.
+- `uv run --locked pytest tests/test_permission_engine.py -q`: **926 passed**.
+- `uv run --locked pytest tests/test_tool_registry.py -q`: **204 passed**.
+- Individually ran each Phase-3 feature suite and persistence with
+  `uv run --locked pytest tests/test_<suite>.py -q`: memory_schema **244**,
+  pudding_memory_service **167**, document_ingestion **300**, vector_store_sqlite
+  **273**, retrieval_context **367**, provenance_citations **173**, persistence
+  **12**; all PASS. Feature aggregate **1,524**, plus persistence **12**.
+- Individually ran all seven Phase-1 suites using the same locked command:
+  model_provider **61**, ollama_provider **108**, model_registry **83**,
+  model_lifecycle **54**, embeddings **182**, colibri_provider **194**,
+  model_benchmark **130**; all PASS, aggregate **812**.
+- Individually ran all nine Phase-2 suites using the same locked command:
+  agent_registry **96**, phoenix_orchestrator **101**, aizen_planner **151**,
+  agent_model_router **213**, task_graph_state_machine **348**,
+  structured_agent_handoffs **214**, levi_verification **242**,
+  mahoraga_recovery **790**, kaido_failsafe **574**; all PASS, aggregate **2,729**.
+- `uv run --locked pytest -q` with external JUnit/log: final **6,623 passed**,
+  **1 existing warning**, **184.25 seconds**; baseline 6,321 plus 302 new cases.
+  Final complete run includes the malformed-extra-container correction.
+- `uv lock`; `uv sync --locked`: PASS, **36 packages**, manifests/lock unchanged.
+- `uv run --locked ruff check .`: PASS.
+- `uv run --locked ruff format --check .`: PASS, **88 files** formatted.
+- `uv run --locked mypy`: PASS, **82 source files**.
+- `uv build`: PASS, source distribution and wheel, repeated after final code edit.
+- `uv run --locked pytest tests/test_bootstrap.py tests/test_api.py
+  tests/test_config.py tests/test_persistence.py tests/test_events.py
+  tests/test_hardware.py -q`: **126 passed**, existing warning only.
+- `npm test`: **4 passed**; `npm run typecheck --workspace @phoenix/desktop`
+  and `npm run build --workspace @phoenix/desktop`: PASS.
+- Temporary SQLite lifecycle **0001 → 0002 → 0003 → 0004 → 0005 → 0004 → 0005**:
+  PASS. At 0004 audit state is absent; at 0005 exact 20-column schema, named PK,
+  **11 checks**, **four nonunique indexes**, both named triggers and full shared
+  metadata have no drift. All four earlier tables' seeded rows and schemas
+  survive downgrade/re-upgrade. Raw SQL and ORM UPDATE/DELETE each fail and
+  preserve the original row. No real PHOENIX database was accessed.
+- Revisions 0001–0004 byte-match origin/main. Protected runtime/tests/schema/
+  desktop/manifests: **95 files** unchanged, plus ten narrow reviewed exceptions
+  for env registration and historical head tests. Retrieval's historical env
+  assertion permits exactly the three-line registration and checks every other
+  byte; historical migration assertions and source semantics remain intact.
+- Repository credential/signature scan: **185 files**, zero matches.
+  `git diff --check`: PASS. Verification logs/build outputs remain outside staging.
+
+### Security, invariants, decisions and limitations
+
+Reviewed INV-001 through INV-024: PASS within ticket scope. Audit evidence grants
+no authority, does not re-evaluate PermissionEngine, execute a handler, mint a
+grant, override P5, or finalize success. P4 approval remains request-specific
+PHX-041 authority. No EventBus integration; canonical EventType remains **32**.
+Guarded fresh-process import/construction denies DB sessions/connections, file
+writes/directory changes, network/process/thread/task creation, permission
+evaluation and EventBus publishing. Static imports exclude provider/model/agent,
+API/frontend, filesystem/terminal and secrets implementations.
+
+ADR-047 records exact evidence correlation, privacy minimization, append-only
+storage, explicit transaction failures, migration and future integration scope.
+All **20 acceptance criteria PASS**. INV-007 now has durable P3/P4 primitives;
+PHX-043/044 must wire them into execution and handle audit failures. Global
+execution enforcement, approval-origin authentication, EventBus/API/UI integration,
+secrets storage and protection against a DB-schema administrator are not provided.
+The SHA-256 digest minimizes stored reason text; it is not a secret store.
+The existing Starlette/httpx deprecation warning is unchanged.
+PHX-043/044/045 remain TODO. Next: PHX-043 Filesystem tool, not started.

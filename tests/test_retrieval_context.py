@@ -1986,9 +1986,10 @@ def test_scope_ast_schema_dependencies_and_protected_sources_unchanged(
     database: Engine,
 ) -> None:
     scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
-    assert scripts.get_heads() == ["0004_embedding_records"] and len(EventType) == 32
+    assert scripts.get_heads() == ["0005_audit_events"] and len(EventType) == 32
     assert inspect(database).get_table_names() == [
         "alembic_version",
+        "audit_events",
         "document_chunks",
         "documents",
         "embedding_records",
@@ -2019,9 +2020,17 @@ def test_scope_ast_schema_dependencies_and_protected_sources_unchanged(
         previous = subprocess.check_output(
             ["git", "show", f"origin/main:{path}"], cwd=ROOT
         )
-        assert (ROOT / path).read_bytes().replace(b"\r\n", b"\n") == previous.replace(
-            b"\r\n", b"\n"
-        )
+        current = (ROOT / path).read_bytes().replace(b"\r\n", b"\n")
+        if path == "alembic/env.py":
+            # PHX-042 permits only this exact new metadata registration.
+            registration = (
+                "from phoenix.persistence.audit import (\n"
+                "    AuditEventRow,  # noqa: F401 — register target metadata\n"
+                ")\n"
+            ).encode()
+            assert current.count(registration) == 1
+            current = current.replace(registration, b"", 1)
+        assert current == previous.replace(b"\r\n", b"\n")
     allowed = {
         "asyncio",
         "hashlib",

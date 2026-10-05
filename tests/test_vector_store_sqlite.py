@@ -980,6 +980,7 @@ def assert_embedding_schema(database: Engine) -> None:
     inspector = inspect(database)
     assert inspector.get_table_names() == [
         "alembic_version",
+        "audit_events",
         "document_chunks",
         "documents",
         "embedding_records",
@@ -1039,6 +1040,7 @@ def test_shared_base_mapping_exact_schema_and_full_head_no_drift(
         EmbeddingRecordRow.__table__.columns["created_at"].type, UTCDateTime
     )
     assert set(Base.metadata.tables) == {
+        "audit_events",
         "memories",
         "documents",
         "document_chunks",
@@ -1201,7 +1203,7 @@ def test_real_migration_lifecycle_preserves_all_previous_sources(
 ) -> None:
     migration = config(tmp_path)
     scripts = ScriptDirectory.from_config(migration)
-    assert scripts.get_heads() == ["0004_embedding_records"]
+    assert scripts.get_heads() == ["0005_audit_events"]
     revision = scripts.get_revision("0004_embedding_records")
     assert revision is not None and revision.down_revision == "0003_document_ingestion"
     for path in (
@@ -1260,7 +1262,7 @@ def test_real_migration_lifecycle_preserves_all_previous_sources(
         with engine.connect() as connection:
             assert (
                 MigrationContext.configure(connection).get_current_revision()
-                == "0004_embedding_records"
+                == "0005_audit_events"
             )
             assert (
                 compare_metadata(MigrationContext.configure(connection), Base.metadata)

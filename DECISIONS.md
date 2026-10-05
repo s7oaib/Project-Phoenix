@@ -1270,3 +1270,44 @@ filesystem/terminal implementation, secrets handling, logging, EventBus activity
 audit writes, persistence, migrations, API/frontend or dependency is added.
 PHX-042 owns audit integration; INV-007 remains mandatory for future P3/P4
 execution, while PHX-041 executes no action. PHX-043/044/045 remain separate.
+
+## ADR-047 — Append-only audit evidence without execution authority
+Status: Accepted for PHX-042.
+
+AuditTrail borrows a caller-owned session factory and snapshots the exact PHX-040
+ToolRegistry. Construction performs no I/O. Each explicit append revalidates the
+exact stored PermissionRequest and PermissionDecision, resolves registry metadata,
+and requires matching request ID, actor, tool, risk and permission requirement.
+Audit evidence never evaluates permissions, authenticates approvals, mints grants,
+executes tools, or establishes verification or user-facing success.
+
+Frozen AuditRecord evidence has exactly 20 fields. Permission-decision records
+accept all PHX-041 decision states and carry no result. Tool-outcome records require
+an allowed non-P5 decision and one of the six non-denied PHX-040 result statuses.
+Denied attempts remain permission-decision evidence. Evidence IDs and optional
+task/session/caller correlation are preserved as opaque, case-sensitive text.
+Resources remain untrusted opaque data. Persist only the lowercase SHA-256 digest
+of the exact UTF-8 request reason, never its plaintext or arbitrary tool payloads.
+Explicit aware occurrence times normalize to UTC and cannot precede request time;
+omitted audit identities use independent UUID4 values.
+
+Alembic 0005 adds only audit_events to the shared Base, with one primary key,
+11 named checks and four ordinary indexes. Stable SQLite BEFORE UPDATE and
+BEFORE DELETE triggers reject row mutation with a content-free error. Duplicate
+IDs fail explicitly without replacement; repeated request IDs are legitimate.
+Each append uses a short committing transaction; failures roll back and close,
+raise safe errors with suppressed private exception chains, and never retry.
+get/list return detached, revalidated evidence. Filters use exact equality; bounded
+lists order by occurred_at then ID and return immutable tuples.
+
+The only new vocabulary is permission_decision/tool_outcome; EventType remains 32
+and there is no EventBus bridge. Historical revisions 0001–0004 remain immutable;
+head assertions evolve to 0005 while preserving earlier schema and source rows.
+Downgrade removes only the audit triggers, indexes and table. No startup migration,
+API/frontend, concrete tool, secrets boundary or dependency is introduced.
+
+audit_required_for_execution is true only for canonical P3/P4 risk members. INV-007
+still requires the future PHX-043/044 execution pipelines to invoke durable audit
+operations and handle their failures. This evidence primitive does not claim global
+execution enforcement or resistance to an administrator who controls the DB schema.
+P4 request-specific approval and unconditional P5 blocking remain PHX-041 authority.
