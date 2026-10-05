@@ -1,6 +1,6 @@
 # PHX-033 — VectorStore/sqlite Adapter
 
-Status: TODO
+Status: DONE
 Phase: 3 — Memory & RAG
 
 ## Objective
@@ -678,3 +678,108 @@ When complete, append concise evidence for:
 ## Known intended limitation
 
 The first built-in adapter performs bounded exact cosine in Python over validated SQLite rows. It is a correctness/portability baseline, not a large-scale ANN engine. sqlite-vec remains an optimization candidate behind the same `VectorStore` boundary. PHX-034 owns retrieval policy, source resolution, freshness checks, query embedding integration, reranking and context construction.
+
+## Verified completion — 2026-10-05
+
+- Starting prepared HEAD d3a4666b21071824ae33f4fc4730e0c738ae54f9 on
+  feature/PHX-033-vectorstore-sqlite-adapter; verified main at
+  3a11146a34327d19fbb0a632929898fa8d04fa6b. Added five files: vector_store.py,
+  sqlite_vector_store.py, persistence/embeddings.py, migration 0004 and focused
+  tests. Narrow supporting changes register Alembic metadata and evolve four
+  historical test files. Production PHX-014/030/031/032 remains unchanged.
+- Public synchronous VectorStore ABC has add(record), add_many(records),
+  get(record_id), delete(record_id), search(query). SqliteVectorStore borrows
+  sessionmaker and requires strict positive max_search_candidates, exposing
+  that bound read-only. No global store, constructor I/O or engine disposal.
+  VectorRecord, VectorBatch, VectorSearchQuery and VectorMatch are frozen,
+  extra-forbidden, exact-revalidated detached contracts. Safe input/conflict/
+  dimension/corruption/persistence/search-limit errors distinguish failures.
+- VectorRecord has exactly nine fields. Identifiers trim only outer whitespace
+  and preserve case; source_kind is extensible. Hashes require lowercase SHA-256
+  shape. Finite ordinary int/float components become immutable floats; booleans,
+  coercible strings, empty/zero vectors and dimension disagreement fail. Explicit
+  aware creation timestamps normalize to UTC, preserving microseconds. No text,
+  prompt, metadata blob, provider client, secret field or permission evidence.
+- VectorBatch snapshots exact ordered records, rejects empty/malformed/extended/
+  forged evidence, duplicate IDs/source-model keys and inconsistent dimensions.
+  Add/add_many reserve one SQLite writer with BEGIN IMMEDIATE before checks,
+  validate existing dimensions for each exact provider/model pair, insert only,
+  then commit. Durable ID/source-model conflicts preserve originals. Actual
+  uniqueness races, early/late trigger failures and commit failures prove whole-
+  batch rollback, session closure and error privacy. Competing real connections
+  prove another writer cannot admit conflicting dimensions during the transaction.
+- Get returns an exact detached record or None; delete commits only the exact ID
+  and returns True/False without source changes. Malformed vector evidence can
+  still be explicitly deleted by ID without decoding it. Re-embedding requires
+  delete followed by add; no replace/update, upsert, automatic merge or retry.
+- Search requires exact provider/model/vector and strict limit 1..100. Optional
+  exact source_kind and ordered unique source_ids (maximum 2000) preserve case;
+  None means no ID filter, empty tuple selects none. Validate the whole chosen
+  dimension space before source filters; inconsistent/manual dimensions fail.
+  Query dimension must match when filtered candidates exist; no candidates -> ().
+- Explicit read BEGIN gives dimension/count/vector reads one snapshot. A real WAL
+  interleaving proves an external write cannot change that search's candidate
+  set. Count exact filtered candidates before loading/calculating; overflow raises
+  VectorSearchLimitError without truncation. Bound fetch by validated count, so
+  even a large valid constructor integer cannot overflow SQL LIMIT. Revalidate
+  every candidate; corrupt JSON/components/hash/timestamps/dimensions fail without
+  skipping rows. A high-score limit does not bypass corruption or candidate bounds.
+- Standard-library scaled temporary unit arithmetic, hypot and fsum compute
+  cosine without changing stored vectors. Verified positive/zero/negative scores,
+  huge/subnormal finite values, dimension separation and repeatability. Require
+  finite [-1,1] scores, clamp only overshoot <=1e-12, sort score DESC/record ID ASC,
+  then apply limit. Seven-field VectorMatch excludes vectors, source text and
+  citations; score is similarity evidence, not truth or final relevance.
+- EmbeddingRecordRow shares Base and existing UTCDateTime. Exactly nine nonnull
+  columns; JSON vector arrays, named PK, source_kind/source_id/provider_id/model_id
+  uniqueness, positive dimensions and JSON-array checks. Three exact indexes:
+  ix_embedding_records_source, ix_embedding_records_model and
+  ix_embedding_records_created_at. No source FKs, virtual tables or extensions.
+- Sole Alembic head 0004_embedding_records follows 0003_document_ingestion. Real
+  temporary lifecycle 0001 -> 0002 -> 0003 -> 0004 -> 0003 -> 0004 verifies exact
+  constraints/indexes and preserved seeded memories/documents/chunks. Full-head
+  mapping comparison has no drift. Historical migrations and protected production
+  files match origin/main. PHX-030 stays at explicit 0002 and PHX-032 schema tests
+  at explicit 0003; only current-head assertions advance to 0004. Original schema,
+  UTC, isolation and atomicity coverage remains, with unchanged historical counts.
+- uv run --locked pytest tests/test_vector_store_sqlite.py -q: 273 passed in
+  43.33s. PHX-030: 244 in 12.36s; PHX-031: 167 in 52.23s; PHX-032: 300 in
+  36.66s; persistence: 12 in 3.00s. Timings include concurrent regression load.
+  PHX-014 embeddings: 182 passed. Every individual Phase-1 suite passed:
+  61/108/83/54/182/194/130 (812 total). Every individual Phase-2 suite passed:
+  96/101/151/213/348/214/242/790/574 (2,729 total).
+- Final full verification: uv run --locked pytest -q --junitxml=<temporary report>
+  passed 4,651 tests in 83.81s, exit 0, one existing Starlette/httpx warning.
+  An earlier full run had 4,650 passes and one unchanged PHX-016 benchmark test
+  failure under its 10 ms deadline: timeout was correct, but the test expected
+  provider cancellation. Isolated rerun (one pass) and its whole suite (130 passes)
+  passed; no benchmark code/assertions changed. The final full run saved XML/log
+  outside the repository. An intermediate retry's output handle was lost, so it
+  is not used as completion evidence.
+- uv lock / uv sync --locked passed, 36 packages; manifests/locks unchanged.
+  Ruff check and format check passed (75 files). Strict mypy passed (70 sources);
+  explicit Alembic env/all four revisions typing passed (five sources). uv build
+  produced wheel/sdist. Foundation bootstrap/API/config/persistence/events/hardware:
+  126 passed in 4.31s. npm test: four passed; desktop workspace typecheck/build
+  passed. Exact /health remains status=ok/service=phoenix-api/version=0.1.0;
+  canonical EventType count remains 32. API/desktop files unchanged.
+- Fresh-process guards block writes, DB connections/session acquisition, extension
+  loading, network/subprocess, providers, events, tools/permissions and workers.
+  Contracts/ORM registration/lazy construction pass with an empty temporary
+  directory; existing Windows stdlib platform initialization precedent retained.
+  SQL observation proves ordinary store operations never read source tables;
+  seeded source rows/embedding_ref remain unchanged. No content/vector logging.
+  AST/dependency separation and credential-signature scan passed: 167 repository
+  files, zero matches. INV-001 through INV-024 and permission/security implications
+  reviewed; opaque provenance/vector evidence grants no authority.
+- All twenty acceptance criteria pass. ADR-042 records these decisions. Complete
+  staged-diff review of all thirteen intended files and both staged/unstaged
+  whitespace checks passed before the completion commit.
+- Limitations: bounded exact Python cosine is not large-scale ANN. Caller owns
+  permissions, schema, sessions/engine lifetimes, synchronous execution/resource
+  scope and upstream admission. Vectors cannot reveal whether their source was
+  secret-bearing; no source-existence/freshness claim. Manual DB writes can corrupt
+  evidence; add/search/get detect the relevant invalid evidence. No automatic
+  indexing, provider invocation, EventBus, sqlite-vec or PHX-034/035 integration.
+  Existing benchmark tests retain very short timing sensitivity. PHX-034 and
+  PHX-035 remain TODO; PHX-034 — Retrieval/context assembly is not started.

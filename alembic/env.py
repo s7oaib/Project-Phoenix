@@ -11,6 +11,9 @@ from phoenix.persistence.documents import (
     DocumentChunkRow,  # noqa: F401 — register target metadata
     DocumentRow,  # noqa: F401 — register target metadata
 )
+from phoenix.persistence.embeddings import (
+    EmbeddingRecordRow,  # noqa: F401 — register target metadata
+)
 from phoenix.persistence.memory import (
     MemoryRow,  # noqa: F401 — register target metadata
 )

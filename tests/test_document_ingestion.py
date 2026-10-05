@@ -18,7 +18,7 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import Engine, event, inspect, select, text
+from sqlalchemy import Engine, MetaData, event, inspect, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -239,7 +239,7 @@ def config(tmp_path: Path) -> Config:
 
 @pytest.fixture
 def database(tmp_path: Path) -> Iterator[Engine]:
-    command.upgrade(config(tmp_path), "head")
+    command.upgrade(config(tmp_path), "0003_document_ingestion")
     settings = AppSettings(data_dir=tmp_path, _env_file=None)  # type: ignore[call-arg]
     engine = create_engine_for_settings(settings)
 
@@ -808,7 +808,7 @@ def test_same_evidence_derives_identical_ids_across_services(
     first = ingest(make(database))
     other_path = tmp_path / "other"
     other_path.mkdir()
-    command.upgrade(config(other_path), "head")
+    command.upgrade(config(other_path), "0003_document_ingestion")
     settings = AppSettings(data_dir=other_path, _env_file=None)  # type: ignore[call-arg]
     other = create_engine_for_settings(settings)
     try:
@@ -1353,11 +1353,14 @@ def test_mapping_exact_shared_base_and_reserved_metadata(database: Engine) -> No
         assert model.metadata_json.property.columns[0].name == "metadata"
         assert isinstance(model.__table__.columns["source_timestamp"].type, UTCDateTime)
     assert isinstance(DocumentRow.__table__.columns["indexed_at"].type, UTCDateTime)
-    assert set(Base.metadata.tables) == {"memories", "documents", "document_chunks"}
+    # Shared metadata can include newer mappings; this test inspects revision 0003.
+    document_metadata = MetaData()
+    for name in ("memories", "documents", "document_chunks"):
+        Base.metadata.tables[name].to_metadata(document_metadata)
     assert_document_schema(database)
     with database.connect() as connection:
         assert (
-            compare_metadata(MigrationContext.configure(connection), Base.metadata)
+            compare_metadata(MigrationContext.configure(connection), document_metadata)
             == []
         )
 
@@ -1440,7 +1443,7 @@ def test_real_alembic_lifecycle_preserves_memories_and_old_migrations(
 ) -> None:
     migration_config = config(tmp_path)
     scripts = ScriptDirectory.from_config(migration_config)
-    assert scripts.get_heads() == ["0003_document_ingestion"]
+    assert scripts.get_heads() == ["0004_embedding_records"]
     revision = scripts.get_revision("0003_document_ingestion")
     assert revision is not None and revision.down_revision == "0002_memory_schema"
     for path in (
@@ -1473,7 +1476,7 @@ def test_real_alembic_lifecycle_preserves_memories_and_old_migrations(
                 ),
                 {"now": NOW.replace(tzinfo=None)},
             )
-        command.upgrade(migration_config, "head")
+        command.upgrade(migration_config, "0003_document_ingestion")
         assert_document_schema(engine)
         with engine.connect() as connection:
             assert (
@@ -1493,7 +1496,7 @@ def test_real_alembic_lifecycle_preserves_memories_and_old_migrations(
                 ).scalar_one()
                 == "Original evidence"
             )
-        command.upgrade(migration_config, "head")
+        command.upgrade(migration_config, "0003_document_ingestion")
         assert_document_schema(engine)
         with engine.connect() as connection:
             assert (
