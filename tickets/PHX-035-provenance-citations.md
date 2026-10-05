@@ -1,6 +1,6 @@
 # PHX-035 — Provenance/citations
 
-Status: TODO
+Status: DONE
 Phase: 3 — Memory & RAG
 Branch: `feature/PHX-035-provenance-citations`
 
@@ -1092,3 +1092,90 @@ Push only:
 `feature/PHX-035-provenance-citations`
 
 Do not create a PR, merge, push main, force-push, or start PHX-040.
+
+## Verified PHX-035 completion
+
+Created `phoenix/rag/citations.py` and `tests/test_provenance_citations.py`.
+Supporting changes: this ticket, only PHX-035 in `FEATURE_TICKETS.md`, and
+one accepted ADR-044 in `DECISIONS.md`. Historical runtime/tests, schema,
+migrations, desktop and dependency manifests are unchanged.
+
+Public API: `ProvenanceCitationService.build` and read-only `agent_id`,
+`CitationRenderer.render`, frozen extra-forbidden `CitationEntry`,
+`CitationBundle`, `CitationRenderRecord`, and explicit safe `CitationError` /
+`CitationInputError`. Registry owner is `knowledge_rag`; default, removed and
+renamed aliases work, while alias-only/missing/forged registry evidence fails.
+
+Build exact-revalidates stored PHX-034 result, every nested exact ContextItem
+and diagnostics, rejecting subclasses, copied extras, malformed provenance,
+totals/order/correlation contradictions and duplicate vector identity.
+Preserve retrieval/provider/model/UTC as_of. Exactly one detached citation per
+selected item, in original order, even when several vectors share a source.
+Empty results produce empty tuples. Strict ordinals 1..100 are contiguous;
+IDs are exactly citation-{ordinal}, markers exactly [{ordinal}]. Bundle entries
+must share retrieval_id and have unique vector_record_id. No separate optional
+coverage object; validation and one-to-one tests provide structural evidence.
+
+The 20-field entry copies only selected provenance: source kind/ID/vector ID/
+lowercase 64-character hash/reference and document or memory fields. No content,
+query, vector, score, arbitrary metadata, prompt, answer or permission/truth state.
+Memory preserves type/scope/finite confidence/reference-or-None and stays
+nonauthoritative, with no document fields. Documents preserve document ID,
+reference, parser/chunk index, optional path/page/section/UTC timestamp, and
+original authoritative true/false, with no memory fields. No provenance inference,
+hash recomputation, newer source resolution, authenticity or verification claim.
+
+Bundle has five fields: retrieval_id/provider_id/model_id/as_of/citations.
+Render records have four: citation_id/ordinal/marker/label. Memory label is
+Memory · type=<type> · scope=<scope> · source=<reference-or-ID>. Document label
+is Document · source=<reference> · document=<ID>, appending present page,
+section, path and chunk in that order. Display whitespace collapses to one line;
+structured provenance retains its original value. Unicode and URL/Markdown/HTML/
+shell/prompt-looking values remain inert untrusted text. Source [99] text cannot
+change generated markers. No link wrappers, hash/confidence/authority decoration,
+content duplication, answer insertion, generation or claim entailment.
+
+Validation commands and results:
+
+- `uv run --locked pytest tests/test_provenance_citations.py -q`: **173 passed**,
+  final focused run 1.38s. Includes boundaries, numbering, provenance, malicious
+  display text, no-content contracts and fresh-process isolation.
+- Individual `uv run --locked pytest tests/test_<suite>.py -q`:
+  PHX-034 **367**, PHX-030 **244**, PHX-031 **167**, PHX-032 **300**,
+  PHX-033 **273**, persistence **12**, PHX-014 embeddings **182** passed.
+- All seven Phase-1 suites individually: **812 passed**; all nine Phase-2
+  suites individually: **2729 passed**. Existing tests unchanged.
+- Final `uv run --locked pytest -q --junitxml=<temporary report>`:
+  **5191 passed**, exit 0, 89.84s. Log/XML outside the repository. One existing
+  Starlette/httpx deprecation warning; dependencies unchanged.
+- `uv run --locked ruff check .`: passed; `uv run --locked ruff format --check .`:
+  **79 files** passed; `uv run --locked mypy`: **74 source files** passed.
+- `uv lock`, `uv sync --locked`, `uv build`: passed, **36 packages**,
+  unchanged manifests/lockfile; wheel and source distribution built.
+- Foundation bootstrap/API/config/persistence/events/hardware command:
+  **126 passed**, including exact unchanged `/health`, in 4.63s.
+- Desktop `npm test`: **4 passed**; `npm run typecheck --workspace
+  @phoenix/desktop` and `npm run build --workspace @phoenix/desktop`: passed.
+
+Fresh-process import/construction/build/render guards reject database connections,
+sessions, source reads/dereference, network, retrieval/vector/provider work,
+source writes, EventBus, process/thread/task creation and file writes. All outputs
+are deterministic and detached. Static import/call review confirms no generation,
+tool/permission, API/frontend, persistence, cache or worker integration.
+Alembic head remains `0004_embedding_records`; four revisions and env.py are
+unchanged. EventType remains **32**. Compared **98 historical protected files**
+against origin/main: unchanged. Repository credential-signature scan:
+**173 files, zero matches**. Reviewed INV-001 through INV-024 and permission /
+security implications: preserved. PHOENIX retains supremacy; provenance grants
+no permissions, and labels remain untrusted data.
+
+Implementation/verification acceptance criteria 1–18 pass. DONE status follows
+the verified gates. Complete staged review, exact commit and feature-branch-only
+push are recorded in the final lifecycle report. Phase 3 is complete in the
+feature branch; PHX-040 remains TODO and has not been started.
+
+Limitations: citation identity is local to one bundle. Evidence preserves the
+retrieval snapshot without checking later source changes or truth. Consumers
+must keep labels as untrusted plain text and authorize future source interaction
+independently. No inline answer citations, claim verification, generated answer,
+new source kinds or API/frontend integration are supplied by this ticket.

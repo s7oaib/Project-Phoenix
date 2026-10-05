@@ -1111,3 +1111,55 @@ No source/vector/schema mutation, migration, events, generation, tool/permission
 runtime, API or frontend integration. Source snapshots do not span the embedding
 provider, VectorStore transaction and all source phases; freshness is evidence
 for the final resolved source snapshot, not distributed atomicity or source truth.
+
+## ADR-044 — Pure provenance binding and deterministic plain-text citations
+Status: Accepted for PHX-035.
+
+ProvenanceCitationService consumes only the exact immutable PHX-034
+RetrievalContextResult. Require AgentRegistry internal ID knowledge_rag;
+removing/renaming VEGAPUNK does not change behavior or grant runtime authority.
+Construction retains no collaborators or mutable operation state. PHOENIX
+remains supreme; callers own authorization and upstream secret admission.
+
+Exact-revalidate stored result, nested ContextItem and diagnostics values,
+rejecting subclasses, copied extras and contradictions before presentation.
+Preserve retrieval_id/provider_id/model_id/UTC as_of and every selected item's
+order. Create exactly one detached frozen CitationEntry per item, without
+deduplication, fabrication, enrichment or retrieved-content duplication.
+Empty results produce empty citation and render tuples.
+
+Citation ordinals are strict integers 1..100. Within each bundle they must be
+contiguous 1..N, with exact citation-{ordinal} IDs and [{ordinal}] markers.
+No whitespace/padding equivalents or source-derived numbering. Bundle entries
+share retrieval_id and have unique vector_record_id values. Entry, bundle and
+render record contracts forbid extras and revalidate nested stored evidence.
+Separate optional coverage records are unnecessary; bundle validation proves
+structural order/correlation, and build enforces one-to-one input coverage.
+
+Preserve source kind/ID/vector ID/hash/reference and original selected document
+or memory provenance. Memory requires type/scope/finite confidence and is never
+authoritative, with no document locators. Documents require document ID/reference/
+parser/chunk index, preserve optional path/page/section/UTC timestamp, and carry
+no memory-only fields. Source hashes are exact lowercase 64-character evidence,
+never recomputed, displayed by default or claimed to authenticate a source.
+Document authority remains only the PHX-034 knowledge-precedence boolean,
+never truth, verification, instruction authority, safety or permission.
+
+CitationRenderer returns ordered frozen citation_id/ordinal/marker/label records.
+Memory label: Memory · type=<type> · scope=<scope> · source=<reference-or-ID>.
+Document label: Document · source=<reference> · document=<ID>, followed only by
+present page, section, path and chunk locators in that order. Collapse whitespace
+with " ".join(value.split()) for display; retain original structured provenance.
+Labels preserve ordinary Unicode and treat URL/Markdown/HTML/shell/prompt-looking
+text only as inert untrusted plain text. Source bracket text cannot change the
+separate structural marker. Output grows linearly with selected provenance;
+no arbitrary metadata serialization, confidence/authority decoration or hash label.
+
+Build/render are synchronous stateless in-memory transformations. No source
+re-resolution, freshness check, file/URL/path dereference, database/session,
+retrieval/vector/embedding/model call, event, tool/permission work, persistence,
+schema/migration, API/frontend, cache or worker. No answer insertion, generation,
+claim extraction or entailment. Citations preserve the retrieval snapshot;
+they do not establish source truth, newer freshness or answer correctness.
+Downstream consumers must keep labels as untrusted plain text and independently
+authorize any future source interaction. No new dependency is required.

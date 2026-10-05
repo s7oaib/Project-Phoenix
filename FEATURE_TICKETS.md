@@ -37,7 +37,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-032 Document ingestion — DONE
 - PHX-033 VectorStore/sqlite adapter — DONE
 - PHX-034 Retrieval/context assembly — DONE
-- PHX-035 Provenance/citations — TODO
+- PHX-035 Provenance/citations — DONE
 
 ## Phase 4 — Tools, Permissions & Security
 - PHX-040 ToolRegistry — TODO
