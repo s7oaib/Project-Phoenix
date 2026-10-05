@@ -1039,3 +1039,75 @@ API/frontend, permissions/tools, reranking/context or citations. PHOENIX remains
 supreme. PHX-034 owns retrieval/freshness/query embedding/context policy and
 PHX-035 citations. This bounded exact adapter is a portable correctness baseline,
 not a large-scale ANN engine; callers own synchronous execution and resource scope.
+
+## ADR-043 — Scoped read-only retrieval and bounded structured context evidence
+Status: Accepted for PHX-034.
+
+RetrievalContextService requires AgentRegistry's internal ID knowledge_rag.
+Aliases and role text confer no authority. PHOENIX remains supreme; PUDDING
+retains admission/persistence ownership. Borrow an explicit sessionmaker and
+provider-neutral VectorStore. Construction/import performs no I/O, provider
+calls, event work or worker startup; callers own authorization, schema,
+dependency lifetimes, deadlines and upstream secret admission.
+
+Frozen extra-forbidden contracts exact-revalidate stored values and nested
+evidence, rejecting subclasses, copied extras and forged values. Requests carry
+explicit provider/model, meaningful original query text, aware UTC as_of,
+ordered unique memory scopes/types and document IDs, caller-declared authority,
+candidate limit 1..100, similarity threshold, ranking policy and context budget.
+At least one source family must be scoped. Authority IDs must be requested
+documents; metadata, paths, filenames and text cannot self-promote a source.
+
+Resolve exact eligible IDs read-only, ordered by ID, fetching at most 2001 per
+family to enforce the 2000-ID bound without truncation. Exclude memories whose
+expiry is <= as_of, without deleting or touching last_accessed_at. Close that
+source session before awaiting exactly one supplied EmbeddingProvider.embed
+for only query_text, correlated by retrieval_id/provider/model. Require exact
+EmbeddingResponse, one ordered finite nonzero vector and truthful dimensions.
+No provider discovery/routing, generation, fallback, retry or lifecycle lease.
+
+Search at most once per nonempty eligible memory/document_chunk family through
+VectorStore.search with exact provider/model/vector/IDs and the private request
+candidate bound. Exact-revalidate all returned matches, even below threshold,
+rejecting correlation/scope/duplicate-ID violations and excess candidates. No
+adapter-specific dependency, vector writes or interpretation of future kinds.
+
+Before context inclusion, resolve current source rows in a new short explicit
+SQLite read snapshot and reconstruct existing MemoryRecord/DocumentRecord/
+DocumentChunkRecord contracts. Reject corruption and noncanonical source
+bindings safely. Recheck memory scope/type/expiry and document membership.
+Memory freshness hashes exact UTF-8 content; document freshness compares the
+current persisted chunk content_hash. Missing source/parent is orphaned; changed
+hash is stale. Exclude both without repair or mutation. Aggregate diagnostics
+also count source eligibility changes, with exact accounting across similarity,
+stale/orphan/ineligible, ranked, budget-excluded and selected counts.
+
+Use exactly the ticket's weighted relevance/recency/importance memory mean,
+as_of-based nonnegative age and base-two half-life decay. Temporary weight
+scaling avoids overflow while preserving the same formula for finite weights.
+Confidence remains raw evidence, without a hidden weight. Documents use only
+(similarity+1)/2. Merge authoritative documents first, then rerank descending,
+similarity descending, source kind, source ID and vector ID ascending.
+Authority is knowledge precedence only; all retrieved text remains untrusted
+executable input and grants no instruction, tool or permission authority.
+
+Caller-owned tokenizer-neutral budgets require max_items 1..100 and max_chars
+1..1000000. Select complete original texts in rank order; skip any nonfitting
+item and consider later smaller items. Structured items retain source identity,
+hash, reference, document locators/parser/timestamp/index and memory type/scope/
+confidence. No prompt concatenation, role wrappers, citation formatting or
+truth/verification/task-completion claim. PHX-035 owns citation presentation.
+
+One service belongs to one process/event loop. Caller tasks own active IDs;
+reject duplicates and nested ownership, expose sorted immutable ID inspection,
+and clean state in finally on every path. cancel acknowledges accepted/not_found
+and targets only that caller task. An independent cancellation flag prevents
+search, later source resolution and finalization after a provider suppresses
+CancelledError and clears task counters. Cancellation is cooperative, not proof
+remote inference stopped; synchronous bounded reads/search need caller resource
+scope. No hidden tasks, cache, persistent query history or background re-indexing.
+
+No source/vector/schema mutation, migration, events, generation, tool/permission
+runtime, API or frontend integration. Source snapshots do not span the embedding
+provider, VectorStore transaction and all source phases; freshness is evidence
+for the final resolved source snapshot, not distributed atomicity or source truth.

@@ -36,7 +36,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-031 PUDDING memory service — DONE
 - PHX-032 Document ingestion — DONE
 - PHX-033 VectorStore/sqlite adapter — DONE
-- PHX-034 Retrieval/context assembly — TODO
+- PHX-034 Retrieval/context assembly — DONE
 - PHX-035 Provenance/citations — TODO
 
 ## Phase 4 — Tools, Permissions & Security
