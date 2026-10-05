@@ -43,7 +43,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-040 ToolRegistry — DONE
 - PHX-041 PermissionEngine P0-P5 — DONE
 - PHX-042 Audit trail — DONE
-- PHX-043 Filesystem tool — TODO
+- PHX-043 Filesystem tool — DONE
 - PHX-044 Terminal tool — TODO
 - PHX-045 Secrets boundary — TODO
 

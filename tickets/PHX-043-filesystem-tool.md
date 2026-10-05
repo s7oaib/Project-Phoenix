@@ -1,6 +1,6 @@
 # PHX-043 — Filesystem tool
 
-Status: TODO
+Status: DONE
 
 Phase: 4 — Tools, Permissions & Security
 
@@ -1274,3 +1274,167 @@ PHX-043 is DONE only if all are true:
 18. Security/privacy/invariant checks pass.
 19. Ticket and feature index are updated only after verification.
 20. Exact required commit is pushed only to the PHX-043 feature branch.
+
+## Completion evidence — 2026-10-06
+
+Created phoenix/tools/filesystem.py and tests/test_filesystem_tool.py. Updated
+DECISIONS.md (one ADR-048), this ticket and FEATURE_TICKETS.md. One necessary
+supporting repair in tests/test_retrieval_context.py removes an obsolete asymmetric
+comparison: PHX-042's audit registration is already present in the supplied main.
+The exact single-registration assertion remains, and the entire environment now
+must match origin/main. No existing production behavior or schema changed.
+
+### Public API and canonical authority
+
+FilesystemOperation, FilesystemErrorCode, frozen FilesystemCall/FilesystemIntent/
+FilesystemToolResult, FilesystemInputError, FilesystemAuditError and the distinct
+FilesystemPostExecutionAuditError are defined locally. FilesystemTool(root,
+registry, policy, audit_trail) exposes only describe(call) and execute(call,
+request, *, grants=(), user_decision=None). filesystem_tool_definitions() is pure
+and returns seven detached immutable ToolDefinition declarations, in this order:
+
+1. filesystem.read_text — P1
+2. filesystem.list_directory — P1
+3. filesystem.stat — P1
+4. filesystem.create_text — P2
+5. filesystem.create_directory — P2
+6. filesystem.write_text — P3
+7. filesystem.delete_file — P4
+
+Definitions have meaningful descriptions, exact JSON schemas, descriptive scope
+and audit metadata, a 10-second timeout declaration, cancellation_supported=False,
+Windows/Linux/macOS platform metadata and explicit local/trusted-workspace
+environment metadata. There is no handler, alias or global registration. The
+runtime snapshots/revalidates ToolRegistry and rejects any missing definition,
+risk downgrade, schema/metadata drift, extra injection, subclass or forged risk.
+Unrelated additional tools remain allowed; the supplied registry is not mutated.
+
+### Root, intent, permissions and durable audit
+
+One explicit absolute application-configured root is mandatory and immutable.
+Construction and describe perform no target filesystem/database I/O or migration.
+Relative paths preserve case and meaningful filename spaces; `/` is the only
+separator. Traversal/dot/empty segments, absolute/drive/UNC/device syntax, ADS
+colons, NUL, backslashes, wildcards, Windows device names/extension forms and
+trailing dot/space ambiguity reject lexically. No environment/home/shell expansion
+occurs. Only list/stat admit `.`. Resources identify the normalized absolute root
+plus exact validated target; action is the canonical operation value.
+
+Calls have exactly six fields and no authority overrides. Default IDs are
+independent UUID4 strings; supplied IDs normalize without changing case. Request
+IDs are caller-supplied and remain stable across approval retries. Exact stored
+PermissionRequest evidence must correlate on tool, action and resource before
+PermissionEngine evaluates once, using the canonical registry snapshot and supplied
+immutable policy. PHX-041 owns all grant/policy/approval semantics; P3 once/persistent
+grants do not authorize, and P4 needs exact request-specific explicit approval.
+Grant/policy, wrong-request approval, file content and descriptive metadata cannot
+authorize delete. Nonallowed decisions return denied, attempted=False,
+effect_applied=False, no output and no outcome row, without target filesystem I/O.
+
+P3/P4 permission decisions, including denial/approval-required, must durably append
+through PHX-042 before root resolution, stat, temporary creation, write or unlink.
+An independent DB connection in tests observes the committed permission row before
+the first target access. Required pre-audit failure raises a safe audit error and
+performs no target I/O. Allowed attempts append outcome evidence before returning
+normal success/failure. Post-attempt audit failure raises the distinct safe error
+with call ID and effect_may_have_occurred=True; it neither returns normal success
+nor retries or pretends no effect occurred. Normal attempted P3/P4 results carry
+distinct permission/outcome audit IDs. P1/P2 create no mandatory audit rows, and
+stored audit evidence never approves a later request.
+
+After authorization, root resolution is strict and requires a directory. Every
+existing caller-reachable component is lstat-checked, resolved containment is
+verified, and symlinks/all Windows reparse points are rejected. Creates require an
+existing contained parent. Stat consistently rejects links; immediate listing
+entries may report kind=symlink with size_bytes=None, without dereferencing.
+
+### Operations, results, trust and limitations
+
+Read preserves strict UTF-8 text and newlines exactly, with a 1 MiB default and
+strict integer bounds 1..1 MiB. Oversized files fail before opening/full content
+return; decoding failures are explicit. Listings are nonrecursive, exact-name
+sorted, default 200/max 1000 entries, and expose truncation as partial_success.
+Sorting retains bound+1 names; stat reports kind/size/UTC modification timestamp.
+Observation causes no requested mutation. Exclusive UTF-8 create never overwrites
+or creates parents. Directory create is one level. Overwrite requires an existing
+regular file and uses same-directory temporary write, flush/fsync and os.replace;
+normal success/failure cleans temporary artifacts where possible and preserves no
+backup. Delete unlinks one existing regular file once, never a directory/tree.
+Text payloads are bounded to 1 MiB. Partial creation on write failure is reported
+truthfully as failure with effect_applied=True.
+
+Results are frozen, extra-forbidden, exact-revalidated and structurally consistent.
+Outputs are deeply detached immutable JSON objects with exact operation shapes;
+failure codes are the ten closed ticket codes. Raw OS/SQL errors, private exception
+chains and file content do not leak through runtime errors. File content/names/
+metadata are untrusted, never executed or treated as approval/instructions, and
+never automatically logged, audited as payloads, inserted into memory/RAG or sent
+to a model. Audit rows contain only the existing minimal permission/outcome fields.
+
+V1 assumes a single-user local workspace: hostile concurrent path replacement is
+outside scope; this is not universal race-proof openat isolation. Filesystem and
+SQLite audit are not atomic. Outer deadlines belong to the caller; no hidden
+thread/task/process is created. Replacement does not promise ACL/mode/inode
+preservation or crash-atomic coupling to audit. Cleanup is best effort on OS
+failure. Trusted integration owns evidence authenticity/request admission and must
+configure a narrow non-secret root. Broader secret isolation remains PHX-045.
+
+### Commands and verification
+
+- `uv run --locked pytest tests/test_filesystem_tool.py -q`: **649 passed,
+  16 skipped**, **71.08 s**. Covers the full ticket matrix plus forgery, exact
+  evidence, exclusive-create conflict, partial creation and atomic-write failures.
+  Real symlink cases skip only for Windows WinError 1314 (account lacks symlink
+  privilege). **All seven real NTFS junction tests pass**, including escape
+  rejection and non-dereferencing listing; reparse-attribute tests also pass.
+- Individually ran `uv run --locked pytest tests/test_<suite>.py -q` for all
+  **26 required regression suites**, each exit 0. PHX-042 **302**, PHX-041 **926**,
+  PHX-040 **204**, memory_schema **244**, pudding_memory_service **167**,
+  document_ingestion **300**, vector_store_sqlite **273**, retrieval_context **367**,
+  provenance_citations **173**, persistence **12**; all PASS. Phase-3 feature
+  aggregate **1,524**, plus persistence **12**.
+- Seven individual Phase-1 suites: model_provider **61**, ollama_provider **108**,
+  model_registry **83**, model_lifecycle **54**, embeddings **182**, colibri_provider
+  **194**, model_benchmark **130**; aggregate **812**, all PASS.
+- Nine individual Phase-2 suites: agent_registry **96**, phoenix_orchestrator **101**,
+  aizen_planner **151**, agent_model_router **213**, task_graph_state_machine **348**,
+  structured_agent_handoffs **214**, levi_verification **242**, mahoraga_recovery
+  **790**, kaido_failsafe **574**; aggregate **2,729**, all PASS.
+- `uv lock`; `uv sync --locked`: PASS, **36 packages**; manifests/lock unchanged.
+- Final `uv run --locked pytest -q` with external JUnit/log: **7,272 passed,
+  16 skipped, one existing Starlette/httpx warning**, **363.60 s**. Includes the
+  supporting comparison repair; baseline **6,623** plus **649** admitted new tests.
+- `uv run --locked ruff check .`: PASS. `uv run --locked ruff format --check .`:
+  PASS, **90 files**. `uv run --locked mypy`: PASS, **84 source files**.
+  `uv build`: PASS, source distribution and wheel.
+- `uv run --locked pytest tests/test_bootstrap.py tests/test_api.py
+  tests/test_config.py tests/test_persistence.py tests/test_events.py
+  tests/test_hardware.py -q`: **126 passed**, existing warning only; exact /health
+  remains unchanged.
+- `npm test`: **4 passed**. `npm run typecheck --workspace @phoenix/desktop` and
+  `npm run build --workspace @phoenix/desktop`: PASS; desktop files unchanged.
+- ScriptDirectory heads exactly **[0005_audit_events]**; **EventType count 32**.
+  Migrations 0001–0005, persistence, events, registry, permissions, audit, models,
+  agents, memory/RAG production, API/frontend and dependencies remain unchanged.
+- Protected-source review: **108 existing files** match origin/main after Git
+  newline normalization; the sole existing-test exception is the reviewed
+  strengthened comparison above. Credential/signature scan: **188 files**, zero
+  matches. `git diff --check`: PASS. No real user/database mutation; verification
+  logs, temp databases/files, caches and build outputs are excluded from staging.
+
+### Security, invariants and acceptance
+
+Reviewed INV-001 through INV-024: PASS within this ticket's boundaries. Registry
+and deterministic permissions gate every action; P4 stays explicit and P5 stays
+blocked/unreachable. P3/P4 durable pre/post audit obligations are enforced for this
+runtime. Failures remain explicit and provide no verification/task-success claim.
+No terminal, secret store, EventBus, model/agent routing, automatic memory ingestion,
+API/frontend privilege, recursive operation, migration or dependency was added.
+Guarded uncached-module import/construction blocks target I/O, DB connections,
+migration, network, hidden workers and EventBus activity. ADR-048 records the
+authority/path/audit/privacy choices and documented V1 limitations.
+
+All implementation, regression, security and invariant acceptance gates PASS.
+Final staged review, exact feature commit and normal push are reported in the
+execution report. PHX-040/041/042/043 are DONE; PHX-044/045 remain TODO.
+Next: PHX-044 — Terminal tool; not started.
