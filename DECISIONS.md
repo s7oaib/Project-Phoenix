@@ -851,3 +851,56 @@ ingestion, VectorStore, embedding generation, retrieval/context and citation
 rendering remain PHX-031 through PHX-035. No secret-specific fields/type/storage,
 logging, events, API, frontend or agent/provider/tool/permission execution.
 Schema validation cannot reliably identify every secret inside arbitrary text.
+
+## ADR-040 — Admitted identity-scoped memory and post-commit observability
+Status: Accepted for PHX-031.
+
+PuddingMemoryService requires the neutral AgentRegistry internal ID memory.
+Aliases and professional roles are display metadata, never identity or authority.
+Borrow an explicit synchronous sessionmaker, EventBus and mandatory admission
+policy. Construction/import opens no session, connection, file or subscription,
+performs no migration and starts no task/thread. Callers own schema setup,
+dependency lifetimes and authorization; the service never disposes their engine.
+
+Every create/replace exact-revalidates a detached PHX-030 MemoryRecord before
+calling the injected synchronous MemoryAdmissionPolicy.evaluate exactly once.
+Require an exact frozen extra-forbidden MemoryAdmissionDecision with matching
+memory_id and exactly accepted/rejected_secret/rejected_policy. Only accepted
+reaches session acquisition. Policy failures, malformed/corrupt decisions and
+rejections fail explicitly without content/metadata disclosure. No allow-all
+default, semantic detector, model call or secret-specific storage is supplied.
+INV-018 enforcement depends on the trusted policy classifying secrets correctly;
+the broader secrets implementation remains PHX-045. Admission grants no permission.
+
+Create inserts one exact new ID, rejecting duplicates including primary-key races,
+without overwriting, upsert, content deduplication or contradiction reconciliation.
+Get uses the exact ID and returns a detached revalidated record or None. Frozen
+MemoryListQuery supports only exact type/scope/source_type, strict limit 1..500
+(default 100) and offset >= 0, ordered created_at ASC then id ASC. Return immutable
+tuples; administrative inspection is not semantic retrieval. Get/list preserve
+last_accessed_at and expose expired rows without timers, deletion or hidden filters.
+
+Replace requires an existing exact ID and admission again. Keep created_at equal
+to stored creation and updated_at >= the stored update; equality is valid because
+wall-clock timestamps are not unique versions. Replace only that row, with no
+content-based matching or merge. Delete commits removal of only the exact ID and
+returns True/False for present/absent. Neither operation invents an update/delete
+event. All database operations use short explicit session scopes; failures roll
+back/close through SQLAlchemy and expose safe errors without SQL or private paths.
+Malformed ORM JSON/timestamps and invalid domain reconstruction fail explicitly.
+
+Create commits and closes its session before constructing and awaiting exactly
+one canonical memory.created event: INFO, agent_id memory, correlation_id record
+ID, no task ID, and payload only memory_id/memory_type. Frozen MemoryCreateResult
+contains a detached record and published/rejected_full evidence. EventBus full
+preserves the durable row, reports rejected_full and never retries. Cancellation
+propagates and preserves already committed memory. Other publication failures
+raise safe MemoryEventError explicitly describing the committed row; no fake
+rollback, durable outbox or automatic replay is provided. Event evidence grants
+no execution authority. EventBus event-loop ownership remains caller-controlled.
+
+Reuse the unchanged PHX-030 domain/ORM and Alembic head 0002_memory_schema. No
+schema/dependency changes, automatic chat extraction, API/frontend integration,
+provider/model/lifecycle work, ToolRegistry bypass or permission implementation.
+Document ingestion, VectorStore, retrieval/context and citations remain PHX-032
+through PHX-035; PHOENIX remains supreme and PUDDING remains subordinate.
