@@ -7,6 +7,10 @@ from alembic import context
 from phoenix.core.config import AppSettings
 from phoenix.persistence.base import Base
 from phoenix.persistence.database import database_url
+from phoenix.persistence.documents import (
+    DocumentChunkRow,  # noqa: F401 — register target metadata
+    DocumentRow,  # noqa: F401 — register target metadata
+)
 from phoenix.persistence.memory import (
     MemoryRow,  # noqa: F401 — register target metadata
 )
