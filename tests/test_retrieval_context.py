@@ -2022,14 +2022,14 @@ def test_scope_ast_schema_dependencies_and_protected_sources_unchanged(
         )
         current = (ROOT / path).read_bytes().replace(b"\r\n", b"\n")
         if path == "alembic/env.py":
-            # PHX-042 permits only this exact new metadata registration.
+            # PHX-042 is merged into main; retain its exact registration and
+            # compare the complete environment against that current baseline.
             registration = (
                 "from phoenix.persistence.audit import (\n"
                 "    AuditEventRow,  # noqa: F401 — register target metadata\n"
                 ")\n"
             ).encode()
             assert current.count(registration) == 1
-            current = current.replace(registration, b"", 1)
         assert current == previous.replace(b"\r\n", b"\n")
     allowed = {
         "asyncio",

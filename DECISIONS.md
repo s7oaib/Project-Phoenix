@@ -1311,3 +1311,74 @@ still requires the future PHX-043/044 execution pipelines to invoke durable audi
 operations and handle their failures. This evidence primitive does not claim global
 execution enforcement or resistance to an administrator who controls the DB schema.
 P4 request-specific approval and unconditional P5 blocking remain PHX-041 authority.
+
+## ADR-048 — Permission-gated, audited workspace filesystem capability
+Status: Accepted for PHX-043.
+
+FilesystemTool exposes exactly seven synchronous operations. Canonical definitions
+are read_text/list_directory/stat P1, create_text/create_directory P2, write_text P3
+and delete_file P4. Construction snapshots ToolRegistry and rejects every mismatch
+against canonical schemas, risks and descriptive metadata. Definitions contain no
+handlers; PermissionEngine remains the sole P0–P5 authority and receives the same
+validated registry snapshot and explicit immutable application policy.
+
+The application supplies one explicit absolute trusted root; construction and
+describe are lexical and perform no filesystem/database I/O. Calls cannot replace
+that root. Conservative `/`-separated relative paths reject traversal, embedded
+dots, empty segments, backslashes, absolute/drive/UNC/device syntax, ADS colons,
+wildcards, reserved Windows device names (including extension forms) and trailing
+dot/space ambiguity. Ordinary case and filename spaces are preserved; no shell,
+environment or home expansion occurs. Only list/stat admit `.` for root access.
+Intent resources identify the normalized absolute root plus exact relative target;
+request tool, action and resource must match exactly before one permission
+evaluation. Call IDs remain independent of caller-supplied stable request IDs.
+
+Every non-allowed decision returns denied evidence without target I/O. For P3/P4,
+AuditTrail must commit the permission decision before even resolving/statting the
+root or creating a temporary file. Allowed attempts then append durable outcomes
+before returning a normal result. Required pre-audit failure raises a safe error
+and fails closed. Post-attempt audit failure raises a distinct safe error with the
+call ID and effect_may_have_occurred=True, without success or automatic retry.
+Filesystem and SQLite storage are not one atomic transaction. P1/P2 have no
+mandatory audit rows. Audit history never authorizes later operations.
+
+After authorization, strictly resolve the trusted root, require a directory, check
+each existing caller-reachable component with lstat, reject symlinks and every
+Windows reparse attribute (including junctions), and verify resolved containment.
+Creates require an existing contained parent. Stat consistently rejects link
+targets; listings may report immediate links as symlink with no target size.
+V1 assumes a single-user local workspace, without hostile concurrent path
+replacement: these checks do not claim cross-platform race-proof openat isolation.
+
+Reads and text payloads are bounded to 1 MiB of strict UTF-8. Reads preserve bytes'
+text meaning without newline conversion. Listings are nonrecursive, sorted by
+exact name, return at most 200 entries by default (maximum 1000), and expose
+truncation as partial_success. Sorting retains only bound+1 names in memory while
+scanning the directory; outer deadlines belong to the caller. Exclusive creates
+never overwrite or create parents. Writes require an existing regular file and
+use a same-directory temporary file, flush/fsync and os.replace, with best-effort
+cleanup and no backup. Delete is one regular-file unlink after exact P4 user
+approval. Actual partial creation on an I/O failure is reported as effect_applied;
+failures never fabricate success. Atomic replacement does not promise preservation
+of inode identity, ACLs, modes or crash-atomic audit coupling.
+
+Frozen calls/intents/results reject extras, stored-value forgeries and contradictory
+evidence. Result outputs are detached immutable JSON data with exact operation
+shapes; failures expose only closed error codes. File content and metadata remain
+untrusted, with no execution, instruction authority, logging, audit payload,
+automatic memory/RAG insertion or model forwarding. Trusted integration owns
+approval-origin authenticity and request admission; this runtime does not mint
+permission evidence or provide consumption/replay storage.
+
+PHX-045 remains the dedicated secret boundary. Until then trusted integration must
+configure a narrow non-secret workspace: no arbitrary home/OS-root safety claim or
+ad-hoc secret detector is provided. There is no terminal/process, model/agent,
+EventBus, API/frontend, watcher, recursive operation, migration or dependency
+integration. Cancellation metadata is false; no hidden worker is created. Alembic
+head remains 0005_audit_events and the canonical EventType vocabulary remains 32.
+
+Necessary regression support: PHX-042 is already merged into the supplied main
+baseline. Retrieval's protected-source test retains its exact single audit
+registration assertion and now compares the entire Alembic environment to main,
+without removing that registration from only one side. No source protection is
+relaxed and no existing production behavior changes.
