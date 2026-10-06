@@ -1,6 +1,6 @@
 # PHX-051 — Windows UI automation
 
-Status: TODO
+Status: DONE
 Phase: 5 — Computer & Web
 
 ## Objective
@@ -1132,3 +1132,81 @@ At minimum:
 
 ## Next
 PHX-052 — Screenshot/vision loop. Do not start it.
+
+## Completion evidence — 2026-10-06
+
+All deterministic acceptance criteria pass. Implementation is confined to
+phoenix/tools/windows_ui.py and tests/test_windows_ui_automation.py, plus authorized
+dependency/decision/ticket documentation. tests/test_bootstrap.py and the dependency
+assertion in tests/test_browser_tool.py change narrowly for pywinauto promotion;
+no prior production source changes. ADR-052 is the sole new accepted decision.
+
+Public API: WindowsUIOperation, WindowsUIErrorCode, WindowsControlSelector,
+WindowsUICall, WindowsUIIntent, WindowsWindowEvidence, WindowsControlEvidence,
+WindowsUIToolResult, WindowsUIInputError, WindowsUIAuditError,
+WindowsUIPostExecutionAuditError, windows_ui_tool_definitions and WindowsUITool.
+Exactly seven tools/risks and complete registry anti-downgrade checks are covered.
+Strict operation shapes, positive HWND/PID, bounded class/selector text, UTF-8 input
+limits, frozen contracts, exact snapshot revalidation and caller-authority rejection
+are tested. Intent/resource derivation is pure, binds effective bounds/identity/
+selector and hashes exact set_text bytes without echoing raw input.
+
+PermissionEngine runs once after exact request correlation. Nonallowed calls do
+not import/access UIA. P4 mutations require request-specific explicit approval;
+grants, policies, wrong-request approval and approval-looking UI text cannot grant
+authority. Independent database connections observe the committed P4 decision
+before backend access. Pre-audit failures produce zero target access; every allowed
+attempt records one outcome. Post-effect audit failure is explicit uncertainty,
+without retry. Raw set_text never enters resource/result/audit/error/log output.
+Observed window/control content is never automatically copied to mutation results
+or audit rows; the exact caller-supplied target/selector remains resource evidence.
+
+Fake UIA/COM tests prove the fixed backend, direct HWND lookup, top-level-only raw
+enumeration, case-sensitive exact control matching, 500-descendant overflow refusal,
+bounded sorted list/inspection evidence, password/unknown-state value omission,
+enabled/visible checks, writable native ValuePattern, required Invoke/Window
+patterns, raw SetFocus and exactly one native effect. Native BOOL int/bool handling,
+array/property failures, unsupported/missing methods and conservative effect evidence
+are covered. Guarded import/construction/describe succeeds on win32/linux/darwin
+without UIA, file/environment-secret/SQLite/network/process/thread/task/logger,
+memory/RAG/vector/SecretStore activity. Pydantic's nonsecret plugin-disable flag is
+the only allowed framework environment lookup in that guard.
+
+Verification commands/results:
+- uv run --locked pytest tests/test_windows_ui_automation.py: 493 passed.
+- PHX-050 browser: 653 passed.
+- Phase 4 individually: secrets 402; terminal 270; filesystem 649 passed/16 skipped;
+  audit 302; permissions 926; registry 204. Aggregate 2753 passed/16 skipped.
+- Phase 3 individually: memory schema 244; PUDDING 167; ingestion 300; vector store
+  273; retrieval 367; citations 173; persistence 12. Aggregate 1536 passed.
+- Phase 2 all nine individual suites: 2729 passed.
+- Phase 1 all seven individual suites: 812 passed.
+- uv lock and uv sync --locked: PASS; only pywinauto 0.6.9, pywin32 312,
+  comtypes 1.4.17 and six 1.17.0 added; all existing third-party lock entries unchanged.
+- uv run --locked pytest: 9090 passed, 16 skipped (one existing warning).
+- uv run --locked ruff check . and ruff format --check .: PASS (98 formatted files).
+- uv run --locked mypy: PASS (92 source files).
+- uv build: source distribution and wheel PASS; validation build artifacts kept
+  outside the repository.
+- Foundation/bootstrap/API/config/persistence/events/hardware: 126 passed;
+  exact /health and foundation production unchanged.
+- npm test: 4 passed; desktop typecheck and build PASS; desktop sources/manifests unchanged.
+- Security/signature/scope review: PASS; zero known credential-signature hits;
+  190 protected tracked files unchanged; all five migrations unchanged;
+  Alembic heads == [0005_audit_events], EventType count == 32.
+- INV-001 through INV-024 reviewed: PASS, including permission, P4 audit, P5,
+  frontend isolation, untrusted UI content, normal-memory exclusion, explicit
+  errors, disclosed cancellation limits and authorized dependency promotion.
+
+No real Windows desktop smoke was run; deterministic tests never enumerate or
+manipulate user windows. No browser/terminal/filesystem/secrets/model/memory/RAG/
+events/schema/API/frontend integration, process launch, physical input, screenshot,
+OCR, vision or new agent authority exists. PHX-052+ remains TODO.
+
+Known limitations: Windows and UIA-supporting controls only; one action per call;
+no physical-input/vision/process-launch fallback; HWND/PID/class and control checks
+are non-atomic against concurrent changes; native COM has no hard preemption;
+FindAll may materialize the tree before descendant admission; effect/audit commits
+are non-atomic; successful action is execution evidence, not verified business
+success. Trusted integration owns ordinary-text admission, consent authenticity,
+replay prevention and verification. No generic secret discovery is claimed.

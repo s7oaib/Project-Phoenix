@@ -23,6 +23,24 @@ tests use a private fake runtime and require neither browser binaries nor public
 internet. No existing user profile, cookies, credentials or persistent context
 is imported. See https://playwright.dev/python/docs/browsers.
 
+### pywinauto (Phase 5, Windows only)
+
+PHX-051 authorizes `pywinauto>=0.6.9,<0.7; sys_platform == "win32"`, locked
+to **0.6.9** with **pywin32 312**, **comtypes 1.4.17** and **six 1.17.0**.
+Promotion is accepted in ADR-052.
+Only the UIA backend is used, behind ToolRegistry, PermissionEngine and durable
+P4 audit. Imports and desktop access occur only during explicit allowed execution;
+non-Windows execution returns safe unavailable-dependency evidence.
+
+Native accessibility calls require a Windows desktop and applications exposing
+the relevant UIA patterns. Deterministic tests use a private fake and never access
+the real desktop. Native COM calls are synchronous and non-preemptible; no hard
+process-wide timeout is claimed. Descendant admission is capped at 500, with
+overflow failing before interaction; native FindAll may materialize the tree
+before that admission check. No physical input or process-launch fallback exists.
+No Pillow, screenshot/OCR/vision, hooks or alternate automation framework is added.
+See https://pywinauto.readthedocs.io/en/latest/code/pywinauto.uia_element_info.html.
+
 ## Optional V1 runtime
 
 ### Colibri
