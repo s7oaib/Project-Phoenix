@@ -1,6 +1,6 @@
 # PHX-050 — Playwright browser tool
 
-Status: TODO
+Status: DONE
 Phase: 5 — Computer & Web
 
 ## Objective
@@ -1181,3 +1181,171 @@ At minimum:
 
 ## Next
 PHX-051 — Windows UI automation. Do not start it.
+
+## Verified completion evidence — 2026-10-06
+
+All deterministic acceptance gates PASS. Starting feature HEAD was
+`68dfbe494992fa39659f4f0b4bd36419362d0c90`; origin/main remained
+`3c17b8a5291871c236cc3726b2b91097657d4ed4`. Implementation remains on
+`feature/PHX-050-playwright-browser-tool`; PHX-051 and later tickets remain TODO.
+
+### Files and dependency promotion
+
+- Created `phoenix/tools/browser.py` and `tests/test_browser_tool.py`.
+- Modified `pyproject.toml`, `uv.lock`, `docs/25_DEPENDENCIES.md`, `DECISIONS.md`,
+  `FEATURE_TICKETS.md` and this ticket.
+- Supporting test-only changes in `tests/test_bootstrap.py`,
+  `tests/test_vector_store_sqlite.py` and `tests/test_retrieval_context.py`
+  reconcile historical global dependency freezes with this ticket's explicitly
+  authorized promotion. Bootstrap still asserts the complete exact runtime set.
+  Browser tests now compare the entire Python project configuration and lock
+  against origin/main, permitting only Playwright plus its required transitives
+  and exact Phoenix dependency references. Existing third-party records remain equal;
+  desktop dependencies and protected production-source freezes remain intact.
+- Only new direct dependency: `playwright>=1,<2`, locked **1.63.0**. New transitives
+  **greenlet 3.5.6**, **pyee 13.0.1**; **39** resolved packages. No pre-existing
+  package version, artifact, dependency or unrelated metadata changed.
+- One accepted decision: **ADR-051**. No export, API/frontend or other production
+  subsystem change. No binary download or installation hook.
+
+### Contracts, permission and audit
+
+Public API: `BrowserOperation`, `BrowserErrorCode`, `BrowserCall`, `BrowserIntent`,
+`BrowserElement`, `BrowserToolResult`, `BrowserInputError`, `BrowserAuditError`,
+`BrowserPostExecutionAuditError`, `browser_tool_definitions`, `BrowserTool`.
+The internal owner remains `computer_control`; no AgentRegistry change.
+
+Exactly seven ordered canonical tools: session_open P2, navigate P2, read_page P1,
+inspect_element P1, click P4, fill P4, session_close P2, all under `browser.`.
+Complete metadata snapshots reject missing definitions, forged evidence and drift
+in all eleven definition fields; unrelated tools remain allowed. Contracts are
+frozen, extra-forbidden, exact-revalidated and strict. BrowserCall has exactly the
+eight frozen fields and operation shapes. Caller IDs are opaque, normalized,
+case-preserving, nonempty control-free strings; call_id defaults to UUID4.
+
+Pure describe performs no session/runtime lookup, permission evaluation or I/O.
+Canonical compact JSON resources bind operation/session, exact target/expected
+URL, selector and effective read bound. Fill binds SHA-256 of exact UTF-8 text,
+never raw text; the digest grants no authentication or permission. Exact
+PermissionRequest tool/action/resource correlation precedes exactly one existing
+PermissionEngine evaluation. Nonallowed results are denied, unattempted, have no
+effect/output/outcome audit and perform zero target browser/session I/O.
+
+Click/fill require exact request-specific approval. Grants, policy, wrong-request
+approvals and approved-looking page/selector/reason text cannot bypass P4. P4
+permission audit commits before any owned session/browser/page/locator access,
+including denied decisions. An independent SQLite connection verifies durability
+before every fake browser method. Pre-audit failure raises safe BrowserAuditError
+with zero target I/O. Allowed P4 attempts produce exactly one durable outcome
+audit before normal return, including failed/pre-action attempts. Outcome failure
+raises BrowserPostExecutionAuditError with call_id and possible-effect evidence;
+no action or audit retry, rollback claim or normal success.
+
+### Runtime, URL and DOM boundary
+
+Only an allowed explicit session_open lazily starts synchronous Playwright and
+one owned headless Chromium, fresh nonpersistent context and blank page. Fixed
+options: accept_downloads=False, service_workers=block, permissions=[], default
+action/navigation timeouts 30,000 ms. No executable/args/proxy/profile/credentials/
+cookies/storage/headers/environment supplied by caller. One active session;
+duplicates never replace it. Wrong/missing IDs fail without target access.
+Explicit session_close removes owned state and attempts context/browser/driver
+cleanup once each. Partial startup and crash/disconnection cleanup are tested.
+The internal CDP session is released through owned context/browser/driver cleanup.
+
+URLs are ordinary HTTP/HTTPS strings, outer-trimmed, <=4,096 characters, with a
+hostname and no userinfo, controls, backslashes, localhost/suffix or nonpublic
+IP literals. Unicode IDNA and Chromium numeric/short/octal/hex IPv4 spellings are
+checked conservatively. No validation-time fetch or DNS probe. A fixed context
+request guard checks URLs before continuation. Chromium normally follows HTTP
+redirects without re-running Playwright routing; a fixed owned-page CDP Fetch
+response guard checks every received redirect Location before continuing it.
+Unsafe, ambiguous or malformed redirect evidence fails closed. Protocol failure
+does not silently resume; it marks owned state unusable. No response body is
+fetched by the guard and no caller protocol command or JavaScript is exposed.
+External child-frame and worker requests are rejected rather than letting their
+separate Chromium targets escape the owned page's response guard. Tests cover
+all five redirect statuses, safe absolute/relative targets, private/obfuscated
+destinations, malformed headers, guard failure and operation/audit evidence.
+
+Navigate performs one goto with 30,000-ms timeout and DOMContentLoaded wait;
+returns validated final URL and bounded title as untrusted evidence. Reads and
+interactions check exact current expected_url after permission/pre-audit.
+Selectors are CSS-only, <=2,048 characters, control-free, without chaining or
+XPath/text engines. Inspect/click/fill count exactly one match; zero and multiple
+matches fail explicitly. No first/nth selection, evaluate, HTML or hidden values.
+Read returns body inner text, default 100,000/max 200,000 characters; inspect
+returns element text, default 20,000/max 50,000, and only id/class/role/aria-label/
+name/type/href/title, each <=4,096. Prefix truncation is deterministic, Unicode
+preserving and reported as partial_success/truncated. Tag name is omitted.
+Detached element attributes are immutable mapping snapshots and JSON-safe.
+
+Click invokes one bounded ordinary locator.click, without force/options/modifiers
+or retry. Fill accepts exact explicit ordinary text <=65,536 UTF-8 bytes,
+including empty/meaningful whitespace, structurally rejects SecretMaterial and
+checks type=file/password and current/new-password autocomplete after pre-audit.
+It invokes one fill with no Enter, submit or click. Once either action starts,
+possible-effect evidence remains true even after failure/timeout. Interactions
+return no page title/URL/text that could reflect raw fill text. Popups are closed
+best effort and never adopted; detected downloads fail safely without save/path
+exposure; no upload/file chooser or SecretStore resolution exists.
+
+Results are frozen, exact-revalidated JSON-safe evidence with all seventeen
+required fields, consistent permission/attempt/effect/audit/status/output shapes
+and closed error codes. Raw Playwright/OS errors and private exception chains are
+suppressed. Page evidence stays inert and is never executed, logged, promoted
+into authority or forwarded to another action/subsystem.
+
+### Verification results
+
+- `uv run --locked pytest tests/test_browser_tool.py -q`: **653 passed**,
+  **34.86 s**, deterministic fake runtime/DOM/protocol only. Autouse guards forbid
+  real Playwright startup; no public network, profiles, credentials or downloads.
+- Optional live Chromium smoke: **NOT RUN**, bundled executable absent. No binary
+  downloaded. This is not a deterministic completion gate.
+- All **29** established regression suites ran individually and exited **0**.
+- Phase 4: secrets **402**, terminal **270**, filesystem **649 passed/16 skipped**,
+  audit **302**, permission **926**, registry **204**; **2,753 passed/16 skipped**.
+- Phase 3: memory **244**, PUDDING **167**, ingestion **300**, vector store **273**,
+  retrieval **367**, provenance **173**; **1,524 passed**, plus persistence **12**.
+- Phase 2: registry **96**, orchestrator **101**, planner **151**, router **213**,
+  task graph **348**, handoffs **214**, LEVI **242**, MAHORAGA **790**, KAIDO **574**;
+  **2,729 passed**.
+- Phase 1: provider **61**, Ollama **108**, model registry **83**, lifecycle **54**,
+  embeddings **182**, Colibri **194**, benchmark **130**; **812 passed**.
+- Final full `uv run --locked pytest -q`: **8,597 passed, 16 skipped**, **231.00 s**;
+  baseline 7,944 plus 653 new cases, with one existing Starlette/httpx warning.
+- `uv lock`; `uv sync --locked`: PASS. `ruff check .`: PASS;
+  `ruff format --check .`: **96 files** PASS; `mypy`: **90 source files** PASS.
+- `uv build --out-dir <external validation directory>/dist`: PASS, source archive
+  and wheel. Validation logs, JUnit and build archives remain outside the repo.
+- Foundation bootstrap/API/config/persistence/events/hardware: **126 passed**,
+  existing warning only; exact /health and API source unchanged.
+- Desktop `npm test`: **4 passed**; workspace typecheck and build: PASS.
+- Alembic head **0005_audit_events**, **32** EventTypes, all five migration Git
+  blobs unchanged. **186** protected tracked files compare equal to origin/main.
+- Repository credential/signature scan: no private-key, GitHub/OpenAI/AWS/Slack
+  credential signatures. Changed/untracked scope reviewed against an exact
+  allowlist; no profile/state/DB/WAL/download/screenshot/cache/build artifacts.
+- Reviewed INV-001 through INV-024. Canonical permissions/P4/P5/audit remain
+  intact; no privileged bypass, agent/model authority, memory/RAG/embedding
+  forwarding, terminal/filesystem/native UI/vision/search/URAHARA/PHX-055 action,
+  EventBus, API/frontend or schema integration. New dependency promotion explicit.
+
+### Limitations
+
+One isolated session; browser binaries are operational prerequisites. No persistent
+authentication/profile, secrets/password fill, uploads/downloads, public
+cancellation, native UI/vision fallback or automated business-outcome verification.
+External child-frame/worker network access is deliberately unsupported in V1.
+Public-host DNS rebinding is not fully prevented. Hostile page changes after the
+exact URL check remain a race with DOM action. Browser effects and SQLite audit
+are not atomic; outcome failure cannot prove rollback. A fill can trigger page
+autosave/network effects. Playwright's synchronous APIs own their normal driver;
+individual navigation/action waits are fixed and finite, but context/browser/driver
+close exposes no public hard timeout. Cleanup makes one cooperative best-effort
+attempt per owned resource, without hidden workers/retries or a process-wide hard
+deadline claim. Returned prefixes are bounded; Playwright obtains the underlying
+inner text before slicing. Trusted integration owns consent authenticity, replay
+control and admission of caller URLs/selectors/text; arbitrary ordinary strings
+are not classified as secrets. No general prompt-injection classifier is added.

@@ -34,6 +34,7 @@ def test_distribution_has_foundation_runtime_dependencies() -> None:
         "alembic",
         "fastapi",
         "httpx",
+        "playwright",
         "psutil",
         "pydantic",
         "pydantic-settings",

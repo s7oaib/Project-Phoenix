@@ -8,6 +8,21 @@ Default local model runtime.
 ### Tauri / React / FastAPI / SQLite ecosystem
 Core application platform.
 
+### Playwright (Phase 5)
+
+Required Python runtime dependency for PHX-050 direct DOM/browser control:
+`playwright>=1,<2`, locked to **1.63.0** with its required **greenlet 3.5.6** and
+**pyee 13.0.1** transitive dependencies. Promotion is accepted in ADR-051.
+
+PHX-050 uses synchronous, isolated headless Chromium behind ToolRegistry,
+PermissionEngine and P4 audit. Chromium binaries are a separate operational
+prerequisite; import, construction, tests, package installation and application
+startup never install/download them. Explicit authorized session opening returns
+safe unavailable-dependency evidence if the executable is missing. Deterministic
+tests use a private fake runtime and require neither browser binaries nor public
+internet. No existing user profile, cookies, credentials or persistent context
+is imported. See https://playwright.dev/python/docs/browsers.
+
 ## Optional V1 runtime
 
 ### Colibri

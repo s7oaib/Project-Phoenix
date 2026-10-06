@@ -1996,6 +1996,8 @@ def test_scope_ast_schema_dependencies_and_protected_sources_unchanged(
         "memories",
     ]
     assert EmbeddingRecordRow.__tablename__ == "embedding_records"
+    # PHX-050's exact dependency gate owns the authorized Python manifest change;
+    # every retrieval production source and desktop dependency stays frozen here.
     protected = (
         "phoenix/models/embeddings.py",
         "phoenix/memory/schema.py",
@@ -2011,8 +2013,6 @@ def test_scope_ast_schema_dependencies_and_protected_sources_unchanged(
         "alembic/versions/0002_memory_schema.py",
         "alembic/versions/0003_document_ingestion.py",
         "alembic/versions/0004_embedding_records.py",
-        "pyproject.toml",
-        "uv.lock",
         "package.json",
         "package-lock.json",
     )
