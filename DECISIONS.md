@@ -2071,3 +2071,55 @@ Existing production/tests/manifests, five migrations, head 0005_audit_events and
 handling/text fallback belongs to later integration. Deterministic tests use
 synthetic PCM and two independent test-only provider implementations, with
 guarded uncached import/construction/validation/positive-detection/cancel/close.
+
+## ADR-058 — Exact frame-level VAD and bounded stdlib energy evidence
+Status: Accepted. Date: 2026-10-07. Ticket: PHX-061.
+
+Conceptual owner voice; UTA remains display metadata and PHOENIX supreme.
+VadProvider is a separate neutral async capabilities/classify/cancel/aclose ABC
+with read-only identity and sorted immutable observational operation IDs. Reuse
+unchanged PHX-060 AudioEncoding/PcmAudioFrame and PHX-010 cancellation contracts.
+No wake-provider dependency or default phrase modification is introduced.
+
+Implement the public phoenix.voice.vad module as vad/__init__.py. The preferred
+flat vad.py conflicts with PHX-060's live top-level file-layout assertion. A
+tentative historical-test repair then conflicts with PHX-054's protected-test
+integrity gate. Using one package module preserves the same public import path
+and every prior source/test Git blob, without weakening either regression.
+The tentative test edit was fully restored; no prior test is changed.
+
+Frozen extra-forbidden capabilities/request/decision contracts exact-revalidate
+stored values, reject subclasses/injected/colliding extras and detach PCM frames.
+Durations are exactly ms_10/ms_20/ms_30, admitting exactly 320/640/960 decoded
+bytes at 16000 Hz mono two-byte pcm_s16le. Valid PHX-060 frames with another size
+fail unsupported_audio, without conversion/rechunking/padding/truncation/repair.
+Capabilities require unique canonical-order durations and exact provider identity.
+Decisions bind operation/provider/stream/sequence/UTC capture time/duration exactly.
+Activity is silence/speech; ordinary finite float score 0..1 is provider-local
+evidence and never determines activity at the neutral layer. Neither grants
+permission, human-speech certainty, identity, intent, task success or startup health.
+Closed safe errors expose no PCM/base64/hash/threshold/backend diagnostics.
+
+EnergyVadProvider defaults to energy_vad_v1 and adapter-local -42.0 dBFS threshold.
+Explicit thresholds require ordinary finite floats in [-90.0,-10.0], never request
+options. Decode through pcm_bytes_for_provider(), interpret signed little-endian
+16-bit samples, calculate sqrt(sum(sample^2)/sample_count), use -96.0 dBFS for
+zero RMS or 20*log10(rms/32768.0), and clamp to [-96.0,0.0]. Speech iff dBFS >=
+threshold, including equality. Score is clamp((dBFS+96.0)/96.0,0.0,1.0), normalized
+energy rather than calibrated speech probability. At most 480 samples are analyzed
+without awaits/worker handoff. Active IDs stay (); cancellation is UNSUPPORTED.
+
+Construction binds no loop and starts no work. First async call binds the current
+loop; all later cross-loop calls fail wrong_event_loop, including after closure.
+Same-loop aclose is idempotent and marks closed; capabilities/classify/cancel then
+fail closed. Reinitialization cannot replace configuration/lifecycle or reopen.
+Only configuration/loop/closed state is retained, never PCM/request/result history.
+
+This baseline is an amplitude gate: noise/music false positives and quiet-speech
+false negatives are expected. No adaptive noise floor, speaker discrimination,
+debounce/hangover or segment aggregation exists. Caller owns exact chunking/timing;
+PHX-064 owns conversation/barge-in policy. No microphone/device, wake, STT/TTS,
+startup, EventBus, tool/permission/audit, model/prompt/secrets/memory/RAG, audio
+logging/persistence, API/frontend/schema or dependency integration is introduced.
+Five migrations, head 0005_audit_events and 32 EventTypes remain unchanged.
+Future better VAD adapters require separate explicit dependency/model authorization.

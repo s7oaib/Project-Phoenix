@@ -59,7 +59,7 @@ Phase 5 status: COMPLETE.
 
 ## Phase 6 — Voice
 - PHX-060 Wake-word provider — DONE
-- PHX-061 VAD — TODO
+- PHX-061 VAD — DONE
 - PHX-062 STT provider — TODO
 - PHX-063 TTS provider — TODO
 - PHX-064 Voice conversation/barge-in — TODO

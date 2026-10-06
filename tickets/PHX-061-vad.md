@@ -1,6 +1,6 @@
 # PHX-061 — VAD
 
-Status: TODO
+Status: DONE
 Phase: 6 — Voice
 
 ## Objective
@@ -1086,3 +1086,140 @@ Disclose at minimum:
 
 # Next
 PHX-062 — STT provider. Do not start it.
+
+## Completion evidence — 2026-10-07
+
+Acceptance: PASS. Preparation HEAD b61e5153b91d5fb02d1d91478978a9155738ca7c;
+origin/main 4cc0feb59ae91bc77b72c7a3a0f1a7885f397ee3; initially clean, 0 behind /
+1 ahead, only this ticket added. Work stays on feature/PHX-061-vad. No main push,
+PR, merge, force push or PHX-062 work. PHX-061 DONE; PHX-062–065 TODO; Phase 6
+INCOMPLETE. The sole new accepted decision is ADR-058.
+
+Created phoenix/voice/vad/__init__.py and tests/test_vad.py. Modified only this
+ticket, FEATURE_TICKETS.md and DECISIONS.md. Public import path phoenix.voice.vad
+is unchanged from the suggested module interface. Package location is necessary
+to preserve existing PHX-060 top-level layout and PHX-054 protected-test assertions.
+An initial flat-file layout and tentative historical-test repair demonstrated
+both conflicts; the tentative edit was restored exactly. Final regressions have
+no existing production/test modifications or weakened assertions.
+
+Public API: VadActivity, VadFrameDuration.pcm_byte_count, VadProviderErrorCode,
+VadProviderError, VadCapabilities.validate_provider, VadRequest,
+VadDecision.validate_request, VadProvider, DEFAULT_ENERGY_VAD_THRESHOLD_DBFS and
+EnergyVadProvider (provider_id/threshold_dbfs/active_operation_ids/closed plus
+async capabilities/classify/cancel/aclose). PHX-060 audio/wake/default phrase
+and neutral CancellationResult/Status remain unchanged. Conceptual owner voice;
+UTA is display-only and grants no authority.
+
+Exact frozen seven/three/eight-field contracts reject extras, subclasses, missing
+fields, stored/colliding forgeries and detach exact PCM evidence. IDs are strict,
+outer-trimmed, control-free, case-preserving and <=256; request IDs default to UUID4.
+Capabilities require 1..3 unique canonical-order durations, strict cancellation
+bool and fixed 16000/1/2/pcm_s16le. Requests admit exactly 320/640/960 bytes for
+10/20/30 ms; every otherwise-valid wrong length is unsupported_audio. No repair,
+padding, truncation, resampling or rechunking. PCM remains private in repr/str.
+Decisions have strict nonnegative sequence, explicit aware UTC capture evidence,
+exact silence/speech and duration enums and ordinary finite float score 0..1.
+All six correlation fields are exactly revalidated. Neutral activity is independent
+of score; no transcript/language/identity/action/permission/state/health fields.
+Nine safe errors expose category only, without audio or configuration diagnostics.
+
+EnergyVadProvider implements real stdlib CPU VAD with default energy_vad_v1 and
+-42.0 dBFS. Threshold is constructor-only ordinary finite float [-90.0,-10.0].
+Exact signed S16LE bytes use struct.iter_unpack; RMS is sqrt(sum(sample^2)/count).
+Zero RMS uses -96.0; otherwise 20*log10(rms/32768.0), clamped [-96.0,0.0]. Speech
+iff dBFS >= threshold; score clamp((dBFS+96)/96,0,1) is normalized energy only.
+Maximum admitted math is 480 samples. No await/worker/queue/retained operation;
+active IDs () and cancel UNSUPPORTED with exact neutral identity. Constructor
+binds no loop; first async method binds, every cross-loop method fails
+wrong_event_loop. Same-loop close is idempotent, other methods then closed;
+no reinitialization/reopen. No retained PCM/request/result history or mutation.
+
+### Required matrix and final verification
+
+All 152 listed boundaries and additional adversarial cases are covered:
+
+- 1–6: exact enums/mapping/errors; safe messages; foreign/copied enum rejection.
+- 7–24: exact frozen capability fields, canonical duration subsets/duplicates/order,
+  format/bool/ID validation, provider correlation and stored/subclass attacks.
+- 25–40: exact request/default ID, exact nested frames, all three sizes and adjacent
+  mismatches/long frames, no repair/options, detached snapshots and private repr.
+- 41–68: exact decision/UTC/sequence/enums/float, all six correlation failures,
+  independent score/activity combinations and forbidden text/authority fields.
+- 69–84: complete/incomplete ABCs, strict identity, two substitutable test fakes,
+  exact capability/decision/cancellation consumers and all cancellation statuses.
+- 85–123: threshold/configuration, all durations, zero/low/high/positive/negative/
+  alternating/nonuniform RMS, exact/adjacent threshold boundaries, determinism,
+  immutable requests, no retained PCM, UNSUPPORTED cancel, close/no reopen and
+  all 16 first-method/cross-loop combinations, no workers/retries/logging.
+- 124–152: protected PHX-060/default phrase/previous source/dependency/event/schema
+  checks, static import/call allowlists, guarded uncached and fresh-interpreter
+  import/construction/validation/real classification/close, credential-signature scan.
+
+Commands/results:
+
+- THREE consecutive uv run --locked pytest tests/test_vad.py -q runs with external
+  JUnit/logs: **403 passed each**, **1.42 / 1.44 / 1.34 s**, every exit 0.
+- All **36 prior suites** ran individually with locked pytest and external JUnit/logs,
+  every final exit 0. PHX-060 **537**; Phase 5 prompt injection **604**, URAHARA **492**,
+  search **400**, vision **397**, Windows UI **493**, browser **653**: **3039 passed**.
+- Phase 4 secrets **402**, terminal **270**, filesystem **649 passed/16 skipped**,
+  audit **302**, permissions **926**, registry **204**: **2753 passed/16 skipped**.
+- Phase 3 memory **244**, PUDDING **167**, ingestion **300**, vectors **273**,
+  retrieval **367**, citations **173**: **1524 passed**, persistence **12 passed**.
+- Phase 2 registry **96**, orchestrator **101**, AIZEN **151**, router **213**,
+  task graph **348**, handoffs **214**, LEVI **242**, MAHORAGA **790**, KAIDO **574**:
+  **2729 passed**, all nine suites individually.
+- Phase 1 provider **61**, Ollama **108**, registry **83**, lifecycle **54**,
+  embeddings **182**, Colibri **194**, benchmark **130**: **812 passed**, all seven.
+- uv lock; uv sync --locked: PASS, **43 packages**, manifests/lock unchanged.
+- uv run --locked pytest -q: **11923 passed, 16 skipped, one existing warning**,
+  **347.38 s**; prior baseline 11520 plus 403. Existing Windows symlink privilege
+  skips and Starlette/httpx deprecation warning remain unchanged.
+- uv run --locked ruff check .: PASS; ruff format --check .: **116 files** PASS;
+  uv run --locked mypy: **110 source files** PASS.
+- uv build --out-dir <external-validation>/dist: PASS; final wheel/sdist include
+  exact vad/__init__.py and no stale flat vad.py. Archives remain outside repo.
+- Foundation bootstrap/API/config/persistence/events/hardware: **126 passed**,
+  existing warning only; exact /health unchanged.
+- npm test: **4 passed**; desktop workspace typecheck/build PASS.
+- Protected Git-blob comparison: **135 prior protected files unchanged**, including
+  every prior production/test, all five migrations, API/desktop and dependencies.
+  Alembic heads **[0005_audit_events]**; EventType **32**.
+- Repository credential/signature scan: PASS, zero matches; git diff --check PASS.
+  No audio/model/DB/log/cache/build artifacts are staged. Logs/JUnit, the initial
+  source-integrity failure evidence and final build archives remain external.
+
+### Security, invariants and limitations
+
+INV-001–024 reviewed: PASS within scope. PHOENIX/permission/P4/P5/audit/verification/
+recovery/fail-safe and text paths are unchanged. Untrusted VAD activity/score grant
+no authority and finalize no startup/task success. No heavy model generation,
+silent fallback, dependency promotion or schema change. State/cancel/close are
+explicit, with bounded frame math and honest UNSUPPORTED cancellation.
+
+Guarded tests deny filesystem, SQLite, socket/DNS, native device loading,
+subprocess/thread/async-task creation, logging/print, EventBus and secret environment
+lookup. The caller's loop is created before guards; socket construction is denied
+without replacing its type, preserving Windows' internal loop bookkeeping.
+Pydantic's nonsecret plugin flag is stubbed without reading environment; other
+lookups fail. Guarded zero/max-energy classification performs only exact byte
+revalidation, bounded CPU math and result construction. Static imports allow only
+stdlib/Pydantic, existing PCM helpers and neutral cancellation contracts.
+
+No microphone/device, wake provider/action, STT/TTS, debounce/hangover/segments,
+conversation/barge-in/startup, EventBus/tool/permission/audit/model/prompt guard/
+secrets/memory/RAG, audio logging/persistence, API/frontend/schema or dependency
+integration. No prior test remains modified. Package-layout rationale is recorded
+in ADR-058; no runtime/security boundary was changed to satisfy regressions.
+
+Limitations: amplitude gate rather than semantic speech recognition; noise/music
+false positives and quiet-speech false negatives; no adaptive noise floor, speaker
+discrimination, debounce/hangover or segment aggregation; no capture/wake/STT/TTS/
+conversation/barge-in/startup integration. Requires fixed PHX-060 PCM and exact
+10/20/30 ms frames; caller owns chunking/timing. Score is not calibrated probability.
+Future better VAD requires separately approved adapter/dependency/model artifacts.
+Final staged review, commit/push, clean-tree/remote equality and unchanged-main
+evidence are reported by this execution run.
+
+Next: **PHX-062 — STT provider; not started**.
