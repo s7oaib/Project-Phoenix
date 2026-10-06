@@ -1730,3 +1730,112 @@ PHX-040–050 production remains unchanged, P5 remains blocked, all five migrati
 stay intact, Alembic remains 0005_audit_events and EventType remains 32. Historical
 bootstrap/browser manifest assertions evolve only for this exact promotion, with
 a new full-project/lock comparison rejecting unrelated changes. PHX-052+ stays TODO.
+
+## ADR-053 — Scoped in-memory screenshot evidence and separate advisory vision
+Status: Accepted. Date: 2026-10-06. Ticket: PHX-052.
+
+Add exactly screen.capture_window at P1 observe, owned conceptually by
+computer_control (KAKASHI display alias). ToolRegistry declarations and the
+existing deterministic PermissionEngine remain authoritative. Complete canonical
+tool metadata is compared against a detached registry snapshot, with exact input
+revalidation. ScreenshotCall contains only call_id, positive integer HWND,
+expected PID and normalized case-preserving class name <=256 characters. Describe
+is pure; canonical JSON binds capture_window/HWND/PID/class. Execute matches exact
+request tool/action/resource and evaluates once before any native access. Nonallowed
+execution returns denied without attempting capture. No new P3/P4 audit behavior
+is introduced for this P1 capability. Consent authenticity/replay and later actions
+remain responsibilities of trusted orchestration.
+
+Capture uses lazy Windows ctypes user32/gdi32, GetWindowDC for the exact nonzero
+HWND, a compatible off-screen memory DC and 32-bit top-down DIB, and PrintWindow
+with fixed whole-window flags. No desktop DC, screen BitBlt fallback, clipboard,
+pywinauto screenshot helper, image library or file output exists. The window must
+exist, match expected PID/class, be visible/non-iconic, and have bounded geometry.
+Pre/post identity and geometry rechecks discard changed evidence. These checks
+narrow races without an atomic observation guarantee. Native PrintWindow is
+synchronous and not safely hard-preemptible; protected/GPU/special windows may
+fail or provide incomplete/blank rendering despite native success. No resize,
+downsample or crop is offered. DC/bitmap/selection resources receive one cleanup
+attempt in order on every path; cleanup failure is explicit, without retries.
+Native and mutable pixel buffers are wiped best effort, without claiming complete
+erasure of immutable Python/interpreter copies. GDI BI_RGB's reserved alpha channel
+is made opaque; the pure encoder preserves supplied BGRA alpha exactly.
+
+GetWindowRect is DPI-virtualized; native inspection/rendering therefore temporarily
+uses per-monitor DPI awareness on the calling thread and restores the prior context
+once afterward, without changing process-wide policy. Missing/failed native DPI
+support fails safely (Windows 10 1607+ is required). Restoration failures discard
+and wipe mutable pixels rather than return a frame. Coordinate/dimension evidence
+is physical pixels; DPI support and cleanup are verified with fake WinAPI only.
+
+Dimensions are 1..4096 each, <=8,294,400 pixels, with exact BGRA byte length and
+orientation evidence. Deterministic stdlib PNG uses BGRA-to-RGBA conversion, filter
+0 for every row, zlib level 9, exact chunk lengths/CRCs and only IHDR/IDAT/IEND.
+No metadata/timestamp/text chunks exist. PNG is <=8 MiB without silent truncation.
+ScreenshotFrame is frozen, extra-forbidden, exactly revalidated, UTC-normalized
+and sensitive: identity/coordinates/dimensions plus exact SHA-256 and canonical
+base64. Base64 is omitted from repr/str. Frame validation admits the fixed
+metadata-free 8-bit RGBA non-interlaced PNG representation and checks bounded
+decompression/raster/CRC/hash/dimension integrity. Frame possession is observation
+evidence, never authority. Results are detached JSON-safe contracts correlated to
+permission/resource; success has one frame, denial/failure none. Closed safe codes
+replace native diagnostic text and pointers.
+
+PHX-010 ModelProvider/GenerationRequest/ModelMessage remain text-only and unchanged.
+VisionInterpreter is a separate async neutral ABC with interpret/cancel/aclose and
+read-only provider ID. Frozen request/response/region contracts carry no action,
+tool, permission, risk or verified/task-success fields. Query <=4096, summary
+<=8192, <=64 regions, strict integer geometry and ordinary finite float confidence
+0..1 are validated against the exact correlated frame. Pixels, query, summary,
+labels, coordinates and confidence remain untrusted advisory data.
+
+OllamaVisionInterpreter uses existing httpx, only lexical localhost/localhost.
+or stdlib loopback literals, HTTP(S) and root base URL with fixed api/show/api/chat
+paths. No DNS probe is required; userinfo, ambiguous/non-loopback hosts, query,
+fragment and caller path routing are rejected. trust_env=False is required for
+owned and injected clients; redirects are disabled per request, with client auth
+disabled for these local calls. Injected transports/clients are trusted infrastructure;
+clients remain caller-owned, while transports of owned clients close with them.
+They must preserve this local transport intent; no security
+claim is made against a malicious replacement transport or server. Each operation
+checks exact vision capability via api/show before uploading one base64 frame.
+Chat is one user message with fixed visual-data-only/no-action/no-permission
+instructions plus caller query, stream=False, JSON format and fixed temperature 0,
+seed 0, num_predict 2048. No tool schema/function calls are sent.
+
+HTTP failure, protocol error, duplicate/nonfinite JSON, invalid assistant/done/model
+evidence, oversized bodies/content, extra inner fields and malformed/out-of-bounds
+regions fail explicitly. Adapter-generated operation/provider/model/frame IDs are
+correlated; model text cannot choose those IDs. HTTP bodies are capped at 1 MiB,
+content at 65,536 characters. Finite connect/read/write/pool deadlines and a whole
+operation deadline (default 300 seconds) bound cooperative inference. One instance
+has one active caller operation, no queue/worker. Independent cancellation flags
+prevent success after local cancellation even if lower code suppresses it; deadline
+checks prevent late success after suppressed timeout. Owned client cleanup and
+active-task waiting are bounded; cancellation does not claim server shutdown.
+
+VisionLoopService processes only an explicit immutable 1..3-frame sequence with
+same HWND/PID/class, unique IDs and nondecreasing UTC timestamps. Iteration budget
+is 1..3 and cannot exceed frame count. Collision-resistant operation IDs derive
+from canonical loop ID/iteration; each interpreter response is exactly revalidated
+and correlated. Stop immediately on sufficient; otherwise consume exactly the
+budget. Normal result contains only interpretations/IDs/count/sufficient/exhausted
+with advisory_only=True, never task verification. One active loop per instance;
+scoped cancellation sets a separate flag and targets the current interpreter
+operation/caller task, never continuing to another frame after cancellation.
+No hidden recapture or model-to-tool/action path exists. Model inference remains
+cooperative and may be incorrect/adversarial; sufficient is not business success.
+
+Frames and model outputs are not logged or persisted to files, databases, audit,
+memory/RAG/embeddings or caches. No SecretStore, OCR, physical input, browser/native
+UI action, terminal/filesystem chain, search/research, EventBus, API/frontend,
+schema/migration or dependency change is added. PHX-040–051 production and all text
+providers/registry/router remain unchanged. Five migrations, Alembic head
+0005_audit_events and 32 EventTypes are preserved. Deterministic tests use synthetic
+pixels, fake WinAPI resource boundaries, in-process HTTP and fake interpreters;
+no real desktop/model smoke is required or performed.
+
+Repaired stale PHX-051 test_exact_windows_dependency_promotion moving-origin/main
+comparison after PHX-051 merge; test-only repair, no PHX-051 production change.
+The fixed historical PRE/POST promotion is tested separately from current-retention
+checks, without preventing legitimate future dependency evolution. PHX-053+ TODO.

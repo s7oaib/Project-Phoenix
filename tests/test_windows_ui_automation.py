@@ -1490,26 +1490,43 @@ def test_source_architecture_and_immutability() -> None:
 
 
 def test_exact_windows_dependency_promotion() -> None:
+    """Fixed PHX-051 history, separately from current dependency retention."""
+    pre = "762be6471085fa5ccf5e905c3cab0e79a3de7faa"
+    post = "45d65deb6352d1b649f5cd58814758eaf6e2ad5c"
     before = tomllib.loads(
         subprocess.check_output(
-            ["git", "show", "origin/main:pyproject.toml"], cwd=ROOT
+            ["git", "show", f"{pre}:pyproject.toml"], cwd=ROOT
         ).decode()
     )
-    after = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    after = tomllib.loads(
+        subprocess.check_output(
+            ["git", "show", f"{post}:pyproject.toml"], cwd=ROOT
+        ).decode()
+    )
     dependency = "pywinauto>=0.6.9,<0.7; sys_platform == 'win32'"
     assert dependency in after["project"]["dependencies"]
     after["project"]["dependencies"].remove(dependency)
     assert after == before
     old_lock = tomllib.loads(
-        subprocess.check_output(
-            ["git", "show", "origin/main:uv.lock"], cwd=ROOT
-        ).decode()
+        subprocess.check_output(["git", "show", f"{pre}:uv.lock"], cwd=ROOT).decode()
     )
-    new_lock = tomllib.loads((ROOT / "uv.lock").read_text())
+    new_lock = tomllib.loads(
+        subprocess.check_output(["git", "show", f"{post}:uv.lock"], cwd=ROOT).decode()
+    )
     old = {x["name"]: x for x in old_lock.pop("package")}
     new = {x["name"]: x for x in new_lock.pop("package")}
     assert new_lock == old_lock
     assert set(new) - set(old) == {"pywinauto", "pywin32", "comtypes", "six"}
+    historical_requirement = next(
+        item
+        for item in new["phoenix"]["metadata"]["requires-dist"]
+        if item["name"] == "pywinauto"
+    )
+    assert historical_requirement == {
+        "name": "pywinauto",
+        "marker": "sys_platform == 'win32'",
+        "specifier": ">=0.6.9,<0.7",
+    }
     for package in (old["phoenix"], new["phoenix"]):
         for items in (package["dependencies"], package["metadata"]["requires-dist"]):
             items[:] = [item for item in items if item["name"] != "pywinauto"]
@@ -1520,11 +1537,11 @@ def test_exact_windows_dependency_promotion() -> None:
         "comtypes",
         "six",
     }
-    requires = next(
-        x
-        for x in tomllib.loads((ROOT / "uv.lock").read_text())["package"]
-        if x["name"] == "phoenix"
-    )
+    current_project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert dependency in current_project["project"]["dependencies"]
+    current_packages = tomllib.loads((ROOT / "uv.lock").read_text())["package"]
+    assert any(package["name"] == "pywinauto" for package in current_packages)
+    requires = next(x for x in current_packages if x["name"] == "phoenix")
     assert (
         next(
             x for x in requires["metadata"]["requires-dist"] if x["name"] == "pywinauto"

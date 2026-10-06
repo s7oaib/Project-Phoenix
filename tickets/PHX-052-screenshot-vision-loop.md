@@ -1,6 +1,6 @@
 # PHX-052 — Screenshot / vision loop
 
-Status: TODO
+Status: DONE
 Phase: 5 — Computer & Web
 
 ## Authorized prerequisite repair discovered after PHX-051 merge
@@ -1341,3 +1341,89 @@ At minimum:
 
 # Next
 PHX-053 — Search provider abstraction. Do not start it.
+
+## Completion evidence — 2026-10-06
+
+All deterministic gates PASS. Files: phoenix/tools/screenshot.py,
+phoenix/models/vision.py, phoenix/models/ollama_vision.py,
+tests/test_screenshot_vision_loop.py, the authorized historical-test repair,
+DECISIONS.md, FEATURE_TICKETS.md and this ticket. Preserved/reviewed/repaired all
+three user WIP drafts after fast-forward to 44c7db201bd43c5a99042c4be15cd8e207ecb511.
+ADR-053 is the sole new accepted decision. No dependency change or optional export.
+
+Repaired stale PHX-051 test_exact_windows_dependency_promotion moving-origin/main
+comparison after PHX-051 merge; test-only repair, no PHX-051 production change.
+Historical manifests/lock compare fixed PRE 762be6471085fa5ccf5e905c3cab0e79a3de7faa
+to POST 45d65deb6352d1b649f5cd58814758eaf6e2ad5c. Exact authorized pywinauto marker,
+0.6.9 lock and comtypes/pywin32/six relation are preserved. Current-retention checks
+are separate and permit legitimate future unrelated dependencies. The repaired
+test passed first; full prerequisite PHX-051 suite passed 493 before draft edits.
+
+Screenshot API: ScreenshotCall, ScreenshotIntent, ScreenshotFrame,
+ScreenshotToolResult, ScreenshotErrorCode, ScreenshotInputError,
+screenshot_tool_definitions and ScreenshotCaptureTool.describe/execute.
+Exactly screen.capture_window P1, complete registry anti-downgrade, pure intent,
+exact permission request correlation and one evaluation. Denials touch no native
+backend and introduce no audit rows. Fake tests cover strict/frozen/forged contracts,
+HWND/PID/class binding, visible/minimized/rectangle checks, pre/post identity and
+geometry change rejection, bounded raw pixels and opaque native alpha, lazy native
+load, native signatures/pointer marshalling, PrintWindow failure, zero desktop/screen
+fallback, one restore/delete/release attempt per resource and safe errors. Pure PNG
+tests verify BGRA/RGBA orientation, deterministic filter/zlib/chunks/CRCs, bounded
+raster, metadata exclusion, canonical base64/hash/IHDR and privacy-safe repr.
+
+Vision API: VisionRegion, VisionInterpretRequest, VisionInterpretResponse,
+VisionInterpreter, VisionError/VisionErrorCode, VisionLoopRequest,
+VisionLoopResult/VisionLoopService and OllamaVisionInterpreter. Existing text-only
+ModelProvider and Ollama/Colibri/registry/router remain unchanged. Tests cover
+loopback URL admission, no environment proxy/redirect/auth fallback, exact show
+before image chat, required vision capability, fixed no-tool payload/image/options,
+bounded protocol JSON, exact response schema/correlation/regions, error privacy,
+one active operation, whole-operation timeout, cancellation including suppressed
+cancellation, active state cleanup and owned versus caller-owned clients. Loop
+tests cover all 1..3 budgets/stopping positions, same target/unique chronological
+frames, exact response revalidation, advisory-only consistency, busy/cancel state,
+suppressed cancellation, no later frame and independent instances. Guarded imports,
+construction/describe and loop execution prove no capture/action/model-to-tool,
+memory/RAG/secrets/audit/events or persistence side effects. Pydantic's nonsecret
+plugin-disable flag is the only permitted framework environment lookup in import
+guards. No live desktop, public network or model download is used in tests.
+
+Verification:
+- Focused tests, THREE consecutive runs: 397 passed / 397 passed / 397 passed.
+- PHX-051 493; PHX-050 653, individually PASS.
+- Phase 4 individually: secrets 402; terminal 270; filesystem 649 passed/16 skipped;
+  audit 302; permissions 926; ToolRegistry 204. Total 2753 passed/16 skipped.
+- Phase 3 individually: memory 244; PUDDING 167; ingestion 300; vector store 273;
+  retrieval 367; citations 173; persistence 12. Total 1536 passed.
+- Phase 2 all nine individual suites: 2729 passed.
+- Phase 1 all seven individual suites: 812 passed.
+- Full Python: 9487 passed, 16 skipped, one existing warning.
+- uv lock / uv sync --locked: PASS; pyproject.toml and uv.lock unchanged.
+- Ruff check / format check: PASS, 102 files formatted; mypy PASS, 96 source files.
+- uv build: source distribution and wheel PASS; validation artifacts outside repo.
+- Foundation/bootstrap/API/config/persistence/events/hardware: 126 passed,
+  exact /health unchanged.
+- npm test: 4 passed; desktop typecheck/build PASS; desktop sources unchanged.
+- Scope/security/signature review: PASS, 197 protected tracked files unchanged;
+  zero known credential-signature hits; all five migrations unchanged;
+  Alembic heads [0005_audit_events]; EventType count 32; INV-001..024 PASS.
+
+No screenshots, PNG/base64 dumps, HTTP/model logs, DBs or cache/build artifacts
+are committed. No memory/RAG/embedding/SecretStore/EventBus/API/frontend/schema,
+OCR, physical input, browser/Windows UI action, automatic recapture or dependency
+integration. Screenshot and model evidence remain untrusted, never authorization
+or final verification. Windows screenshot smoke: NOT RUN. Ollama vision smoke:
+NOT RUN. PHX-053/054/055 remain TODO and were not started.
+
+Limitations: Windows/one existing window only; no crop/resize/downsample/history;
+Windows 10 1607+ native DPI context support required and restored after access;
+protected/GPU/special windows may fail or render blank/incomplete; native PrintWindow
+is not safely hard-preemptible; identity/geometry checks do not eliminate races;
+mutable-buffer wiping cannot erase all immutable copies; local loopback Ollama and
+truthful vision capability required; trusted injected transports/server must honor
+local privacy intent; one active inference/loop per instance, cooperative model
+cancellation does not prove server shutdown; explicit supplied frames only;
+interpretations can be wrong/adversarial, regions authorize no action and sufficient
+does not prove business/task success. Trusted orchestration owns consent, replay,
+frame admission, later separately authorized actions and verification.
