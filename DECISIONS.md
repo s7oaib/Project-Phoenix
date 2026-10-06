@@ -2015,3 +2015,59 @@ No-signal never means safe; evidence is not silently sanitized. Upstream secret
 admission and downstream ToolRegistry/PermissionEngine/audit remain necessary.
 Zero-source synthesis rejects invalid_input because URAHARA already skips it;
 metadata can overflow the guard's total budget even when source content alone fits.
+
+## ADR-057 — Canonical PCM evidence and a provider-neutral wake boundary
+Status: Accepted. Date: 2026-10-07. Ticket: PHX-060.
+
+The conceptual owner is voice; UTA is removable display metadata, absent from
+runtime authority. PHOENIX remains supreme. The immutable default phrase is
+exactly phrase_id=rise_phoenix, text=Rise, Phoenix. No fuzzy text matching,
+acoustic training, concrete wake engine, model artifact or dependency is added.
+Future concrete providers require separately approved dependencies/model artifacts.
+
+WakeWordProvider is a separate async ABC over caller-supplied audio, exposing a
+strict read-only provider ID, abstract sorted immutable active-operation IDs and
+capabilities/detect/cancel/aclose. Its constructor validates only identity and
+allocates no runtime resource. Adapters own bounded operation state, deadlines,
+cooperative cancellation and explicit cleanup; no global scheduling, queue,
+selection, retry or fallback policy is imposed. Reuse unchanged PHX-010
+CancellationResult/Status. ACCEPTED acknowledges one operation's cancellation,
+without proving native/remote inference stopped or shutting down unrelated work.
+
+PcmAudioFrame freezes nine fields, strict normalized control-free stream identity,
+ordinary integer sequence 0..2147483647, explicit aware UTC capture evidence and
+exact 16000 Hz / mono / two-byte / pcm_s16le format. Canonical RFC4648 standard
+base64 must decode to nonempty even-length PCM <=32000 bytes and re-encode exactly;
+the lowercase SHA-256 must match decoded bytes. Encoded input is bounded before
+decode. Audio is omitted from repr/str. Deliberate pcm_bytes_for_provider() returns
+revalidated exact bytes without caching, playback, conversion or I/O. Explicit
+serialization/byte access is sensitive and caller-owned, never automatic logging
+or persistence. This wake format does not freeze every future speech subsystem.
+
+Frozen extra-forbidden phrase/capability/request/detection contracts reject stored
+forgeries, subclass extensions, missing fields and injected/colliding extras.
+Nested caller containers become detached exact snapshots. Capabilities contain
+1..32 phrases, unique IDs/exact texts, fixed audio format and strict cancellation
+support. Consumers exact-revalidate and correlate provider identity; technical
+support proves neither availability nor authority and selects no provider.
+
+Requests carry only operation_id/phrase/frames. Windows contain 1..32 frames from
+one stream, contiguous +1 sequences, nondecreasing UTC timestamps and <=96000
+decoded bytes. Overflow/gaps/reordering fail without truncation or repair.
+Detections carry only operation/provider/phrase/stream/range IDs, strict detected
+bool and ordinary finite float score 0..1. validate_request() revalidates both
+sides and requires all six correlation values, including the full first/last
+frame range. Score is provider evidence, not guaranteed calibrated probability,
+speaker identity, permission, health or task confidence. It never overrides the
+provider's detected flag. Closed safe errors suppress private input/backend
+diagnostics, including audio and malicious extra-field names.
+
+Positive detection starts nothing. No microphone/device access, VAD/STT/TTS,
+conversation/debounce/barge-in/startup health, EventBus publication, tool,
+permission, audit, model inference, prompt guard, memory/RAG, secrets, network,
+audio persistence/logging, API/frontend or schema integration is introduced.
+Existing production/tests/manifests, five migrations, head 0005_audit_events and
+32 EventTypes remain unchanged. Text remains usable independently; voice failure
+handling/text fallback belongs to later integration. Deterministic tests use
+synthetic PCM and two independent test-only provider implementations, with
+guarded uncached import/construction/validation/positive-detection/cancel/close.
