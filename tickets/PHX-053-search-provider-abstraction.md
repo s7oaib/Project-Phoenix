@@ -1,6 +1,6 @@
 # PHX-053 — Search provider abstraction
 
-Status: TODO
+Status: DONE
 Phase: 5 — Computer & Web
 
 ## Objective
@@ -855,3 +855,98 @@ At minimum:
 
 ## Next
 PHX-054 — URAHARA research flow. Do not start it.
+
+## Completion evidence — 2026-10-06
+
+All deterministic gates PASS. Created phoenix/web/__init__.py,
+phoenix/web/search.py and tests/test_search_provider.py. Modified only this
+ticket, FEATURE_TICKETS.md and DECISIONS.md (one accepted ADR-054). No existing
+runtime or test is changed, including the PHX-052 historical dependency-test
+repair. No dependencies changed; pyproject.toml and uv.lock match origin/main.
+
+Public API: SearchResult, SearchRequest, SearchResponse, SearchProvider,
+SearchProviderError and SearchProviderErrorCode. Reuse PHX-010 CancellationResult
+and CancellationStatus; no new cancellation vocabulary. Future owner web_research
+is conceptual, URAHARA display-only; PHOENIX retains sole supreme authority.
+Actual P1 search tool/permission execution is deferred to PHX-054.
+
+Contracts have exact 4/9/4 fields, frozen/extra-forbidden, exact stored-value
+revalidation including nested values/subclasses/copied extras/colliding extras.
+All text is ordinary valid Unicode without NUL. IDs trim outer whitespace,
+preserve case, reject controls and bound normalized length to 256 characters.
+Query preserves meaningful original formatting <=4096 and omits repr/str;
+title/snippet preserve exact text (empty valid), <=1024/8192 and omit repr/str.
+Strict max_results/rank 1..20 reject bool/coercion. Explicit aware datetime/ISO
+evidence normalizes UTC, rejecting naive/numeric data; no wall-clock default.
+Source_name optionally preserves meaningful text <=512; published_at optionally
+preserves provider-reported UTC; date_text preserves raw <=256 evidence.
+Source_ref is optional opaque control-free text <=1024, never dereferenced;
+empty opaque/date evidence is permitted. No rank/date/name means trusted/current.
+
+HTTP(S) URLs <=4096 are lexically checked for hostname/authority, userinfo,
+controls/backslash, localhosts, nonpublic IPv4/IPv6 and ambiguous numeric/bracket
+spellings. Original admitted spelling remains; query/fragment/public IP/IDNA
+metadata is supported. Zero DNS lookup, URL opening, fetch or download. This
+does not claim DNS-rebinding prevention or approval for later navigation.
+Results snapshot to immutable tuples, 0..20 including empty; ranks exactly 1..N
+in tuple order, unique normalized IDs and exact URLs. No semantic deduplication.
+validate_request exact-revalidates receiver/request and checks request_id,
+provider_id, UTC as_of and max_results without semantic query correctness claims.
+
+SearchProvider ABC exposes read-only normalized provider_id, abstract sorted
+immutable active_request_ids and async search/cancel/aclose. Test-only providers
+prove interchangeable identities, exact consumer validation, sorted concurrent
+state and request-scoped ACCEPTED/NOT_FOUND cancellation, cleanup and neutral
+result shapes. No production concrete/fake provider, HTTP client, BrowserTool,
+search ToolDefinition, permission call or actual web search exists.
+
+Closed error vocabulary exactly invalid_input, invalid_response, unavailable,
+timeout, rate_limited, unauthorized, busy, closed, wrong_event_loop,
+cleanup_failure; only safe code public text. Validation failures suppress raw
+Pydantic input/extra names and exception chains. Fake system/developer/tool/
+permission/shell/credential/trust/date content remains exact inert data, with no
+truth/verified/confidence/answer/success fields or automatic execution. No
+ranking/cross-check/synthesis, citation generation, SecretStore/env keys, model/
+vision, memory/RAG/embedding, persistence/audit, EventBus, API/frontend or schema.
+
+Verification commands and results:
+- uv run --locked pytest tests/test_search_provider.py: 400 passed (recorded
+  external JUnit/log), covering all 124 minimum matrix boundaries plus adversarial
+  identity, Unicode, URL syntax, exact revalidation and correlation cases.
+- Individually ran all 32 established prior suites, each locked pytest exit 0.
+  Phase 5: screenshot/vision 397; Windows UIA 493; browser 653.
+- Phase 4: secrets 402; terminal 270; filesystem 649 passed/16 skipped; audit 302;
+  permissions 926; registry 204. Aggregate 2753 passed/16 skipped.
+- Phase 3: memory 244; PUDDING 167; ingestion 300; vectors 273; retrieval 367;
+  citations 173; persistence 12. Aggregate 1536 passed.
+- Phase 2 all nine individually: 2729 passed. Phase 1 all seven: 812 passed.
+- Full uv run --locked pytest: 9887 passed, 16 skipped, one existing warning;
+  exactly 9487 baseline plus 400 new cases. Reports remain outside repository.
+- uv lock / uv sync --locked: PASS, no manifest/lock changes.
+- Ruff check / format check: PASS, 105 files formatted; mypy PASS, 99 source files.
+- uv build: PASS, source archive/wheel outside repo.
+- Foundation bootstrap/API/config/persistence/events/hardware: 126 passed,
+  exact /health unchanged. npm test: 4 passed; desktop typecheck/build PASS.
+- Protected-file review: 203 prior tracked files unchanged. All five migrations
+  byte-identical after Git normalization, Alembic heads [0005_audit_events];
+  EventType 32; EventBus/events untouched. Credential/signature scan: zero hits.
+- git diff --check: PASS. Security and INV-001..024 review: PASS within scope.
+
+Guarded uncached module evaluation, contract construction/revalidation/correlation
+and pure provider construction deny file/env-secret/DB/network/DNS/process/thread/
+task/EventBus/logging side effects. Pydantic's framework plugin-disable switch
+is stubbed without environment reads. Static import/call analysis permits only
+stdlib, Pydantic and neutral CancellationResult; no tool/model/agent execution.
+All prior source/tests/migrations/desktop/manifests remain intact; no credential,
+query/result log, HTTP dump, database, cache or build artifact enters the commit.
+
+Known limitations: no concrete engine/network/credential integration, browser
+fallback or page retrieval; lexical URL admission does not resolve DNS or prevent
+rebinding. Provider ranks/dates/titles/snippets/sources may be wrong/adversarial.
+No semantic dedup/ranking/cross-check/synthesis or freshness/truth verification.
+Concrete cancellation/state/deadlines are future adapter obligations; fake
+evidence proves representability only. Later navigation requires independent
+permission/security; cancellation acceptance is not remote cessation. All
+implementation acceptance boundaries PASS; staged review/commit/push are recorded
+in the final lifecycle report. PHX-054 and PHX-055 remain TODO; Phase 5 ongoing.
+Next PHX-054 — URAHARA research flow; not started.

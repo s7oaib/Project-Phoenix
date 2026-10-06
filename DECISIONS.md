@@ -1839,3 +1839,57 @@ Repaired stale PHX-051 test_exact_windows_dependency_promotion moving-origin/mai
 comparison after PHX-051 merge; test-only repair, no PHX-051 production change.
 The fixed historical PRE/POST promotion is tested separately from current-retention
 checks, without preventing legitimate future dependency evolution. PHX-053+ TODO.
+
+## ADR-054 — Pure provider-neutral search evidence without execution
+Status: Accepted. Date: 2026-10-06. Ticket: PHX-053.
+
+SearchProvider is a separate async provider category under phoenix/web, exposing
+read-only normalized provider_id, abstract sorted immutable active_request_ids,
+search/cancel/aclose, with existing PHX-010 CancellationResult/Status. The ABC
+starts no I/O or worker and adds no concrete provider. Future adapters own bounded
+operations, state cleanup and scoped cancellation; accepted cancellation is an
+acknowledgement, not proof remote work stopped. PHOENIX remains supreme. Future
+research owner is web_research; URAHARA is display-only, absent from contracts.
+Actual web search is P1; ToolRegistry/PermissionEngine execution integration is
+deferred to PHX-054. This provider abstraction creates no search tool or permission.
+
+SearchRequest has exactly request_id/query_text/max_results/as_of; SearchResult
+has exactly result_id/rank/url/title/snippet/source_name/published_at/date_text/
+source_ref; SearchResponse has exactly request_id/provider_id/as_of/results.
+Frozen extra-forbidden models revalidate exact stored values and nested results,
+rejecting subclasses, copied extras, colliding extras and malformed evidence.
+Ordinary Unicode strings reject NUL; normalized identifiers are control-free,
+case-preserving, nonempty and <=256 characters. Query preserves meaningful
+formatting <=4096; title/snippet preserve original text, including empty values,
+with <=1024/8192 character bounds. These three content fields are omitted from
+repr/str. Explicit aware dates normalize UTC, including aware ISO representations
+for JSON roundtrips; numeric/naive timestamps fail. No clock default exists.
+Strict integer max_results/rank are 1..20; bool/coerced numbers fail.
+
+URLs are outer-trimmed HTTP(S) metadata <=4096 characters, without userinfo,
+controls, backslashes or malformed authority. Localhost/suffixes and nonpublic
+literals reject; IDNA and ambiguous numeric/bracket syntax are checked lexically.
+The original admitted URL spelling is retained. No DNS, fetch or dereference
+occurs; admission grants no navigation approval or DNS-rebinding protection.
+Later retrieval requires its own independent security and permission checks.
+
+Optional source_name preserves meaningful provider text <=512; published_at is
+provider-reported UTC evidence; date_text preserves raw text <=256. source_ref
+is an opaque control-free string <=1024, preserved even when empty. Neither
+names, dates, opaque references nor rank prove quality, truth, authenticity or
+freshness. Responses snapshot list/tuple inputs to immutable 0..20 result tuples,
+require ranks exactly 1..N in order, and reject duplicate normalized IDs/exact
+admitted URL strings. No semantic URL/source deduplication occurs. validate_request
+revalidates both sides and checks exact request/provider/as_of and result count;
+it establishes no semantic query correctness or task success.
+
+Ten closed safe error categories include input/response failure, unavailable,
+timeout, rate_limited, unauthorized, busy, closed, wrong_event_loop and cleanup_failure.
+Contract validation failures suppress private diagnostic chains and expose only
+invalid_input/invalid_response, without query, URL, snippet or extra field names.
+Web prompt/tool/system/approval/shell-looking text remains inert untrusted data.
+No browser fallback, page retrieval, ranking/cross-check/synthesis, citations,
+SecretStore/env keys, model/vision, memory/RAG, audit/persistence, EventBus,
+API/frontend, schema/migration or dependency integration is added. Existing
+production and tests remain unchanged; Alembic stays 0005_audit_events and the
+EventType vocabulary stays 32. Tests use synthetic data and test-only providers.
