@@ -1,6 +1,6 @@
 # PHX-054 — URAHARA research flow
 
-Status: TODO
+Status: DONE
 Phase: 5 — Computer & Web
 
 ## Objective
@@ -1238,3 +1238,142 @@ At minimum:
 
 # Next
 PHX-055 — Prompt-injection defenses. Do not start it.
+
+## Completion evidence — 2026-10-06
+
+All deterministic PHX-054 gates PASS. Starting feature HEAD:
+be7fc0e971ec083fe1013074644069b406c2f7ff. Main remains
+5694996f67befca1fd23784cfc4bea2b0ba80b7a. No PR/merge/main push or PHX-055 work.
+
+Created phoenix/tools/web_search.py, phoenix/web/research.py and
+tests/test_urahara_research_flow.py. Modified only DECISIONS.md (ADR-055),
+FEATURE_TICKETS.md and this ticket. No existing runtime/test/dependency file changed.
+
+Public search API: WebSearchCall, WebSearchIntent, WebSearchToolResult,
+WebSearchErrorCode, WebSearchError, web_search_tool_definitions, WebSearchTool
+(provider_id, describe, async execute/cancel). Exactly one web.search P1 definition;
+all eleven declaration fields checked, strict exact snapshots and nested authority
+forgeries rejected. Five-field call, seven-field intent and nine-field result.
+Query formatting preserved/private in repr; canonical resource binds operation,
+provider, SHA-256 query, max_results and canonical UTC as_of. Describe/construction
+are pure. Exact request correlation precedes one PermissionEngine evaluation.
+Denied: no provider call, attempted=False, response/error=None. Allowed: one exact
+derived SearchRequest; response revalidated/correlated, including empty success.
+Ten closed error codes match PHX-053; malformed/raw failures are privacy-safe.
+No retry/fallback/close/audit addition. Cancellation delegates exact ID to borrowed
+provider and revalidates operation/provider/status acknowledgement.
+
+Research API: ResearchErrorCode/ResearchError; ResearchPageRequest/ResearchPageReader;
+ResearchRequest/research_search_call; ResearchContentKind/ResearchPageReadStatus;
+ResearchSourceEvidence; ResearchSynthesisRequest/ResearchClaimDraft/
+ResearchSynthesisDraft/ResearchSynthesizer; ResearchClaim/ResearchDiagnostics/
+ResearchReport; UraharaResearchService (owner_id, active_research_ids, async
+research/cancel). Only neutral owner web_research; aliases can be renamed/removed.
+Constructors/imports allocate no I/O/workers and retain caller-owned collaborators.
+
+Page requests have exactly operation_id/source_result_id/requested_url/max_chars.
+URL admission reuses PUBLIC PHX-053 SearchResult validation without private helper
+imports/DNS. Reader ABC has read-only ID/sorted active IDs/read/cancel/aclose;
+no concrete adapter. Raw/nested browser evidence exactly revalidated before use.
+Require READ_PAGE/browser.read_page, allowed P1, attempted/no effect/no error,
+valid success/partial read, exact call/resource URL/bound and public final URL.
+Bad operation/tool/risk/permission/URL/resource/text/status/contract falls back
+explicitly to exact snippet, with classification/counters; catastrophic exceptions
+raise page_reader_failure. No direct browser execution or invented consent broker.
+
+Nine-field ResearchRequest has strict integer bounds and UTC reference time.
+Pure search call preserves research/provider/query/result/time values. Select first
+eligible sources in provider order, 1..8, using optional published_at-only age
+filter; cutoff equality includes, absent dates unknown, future anomalies retained.
+Raw date_text stays unparsed; no source-quality inference/semantic dedup.
+Per-source prefix <=50000 and total <=200000, preserving selected provenance after
+budget exhaustion. Sixteen-field source evidence retains original search metadata,
+deterministic identity, page/snippet kind, exact UTF-8 SHA-256, truncation, read
+classification and reader ID. Page final URL retained; fallback final URL=requested.
+
+Neutral synthesizer ABC exposes ID/sorted active IDs/synthesize/cancel/aclose.
+No model implementation/import/call. Four-field synthesis request, four-field claim
+draft and four-field synthesis draft exactly revalidate bounded nested evidence,
+extra fields/subclasses/duplicates and research/synthesizer/source correlation.
+Six-field final claims preserve order/text/uncertainty and derive distinct support
+count plus corroborated=(count>=2). This is structural declared support only,
+never truth/verification/independence/entailment. Twelve strict bounded diagnostics
+agree with final source/claim counts; ten-field report is always advisory_only=True,
+owner web_research, no success/verified/truth/completion field. Zero-source report
+has fixed service summary, no claims, synthesizer_id=None and zero synth calls.
+
+Execution: exact request/active registration -> one permissioned search -> exact
+response -> eligibility/selection -> one page attempt per selected source -> explicit
+fallback/budgets -> one synthesis only with sources -> exact support accounting ->
+diagnostics/report -> finally cleanup. Search denial/failure raises safe closed error.
+One active operation per service/event loop, no queue/background worker. Scoped
+cancel sets independent flag and targets current search/page/synthesis only.
+Suppressed CancelledError/uncancel cannot advance/finalize. Delayed acknowledgement
+cannot cancel unrelated caller work after cleanup; finally clears every terminal path.
+
+### Commands and final results
+
+- THREE consecutive `uv run --locked pytest tests/test_urahara_research_flow.py -q`
+  runs: **492 passed each**, no warning. Synthetic fake search/page/synth boundaries
+  with REAL ToolRegistry/PermissionEngine only; no internet/browser/model/credentials.
+- All **33** prior focused suites ran individually with locked pytest, exit 0.
+  PHX-053 **400**, PHX-052 **397**, PHX-051 **493**, PHX-050 **653**.
+- Phase 4: secrets **402**, terminal **270**, filesystem **649 passed/16 skipped**,
+  audit **302**, permissions **926**, registry **204**; **2753 passed/16 skipped**.
+- Phase 3: memory **244**, PUDDING **167**, ingestion **300**, vectors **273**,
+  retrieval **367**, citations **173**; **1524 passed**, persistence **12**.
+- Phase 2: registry **96**, orchestrator **101**, planner **151**, router **213**,
+  task graph **348**, handoffs **214**, LEVI **242**, MAHORAGA **790**, KAIDO **574**;
+  **2729 passed**. All nine suites individually.
+- Phase 1: provider **61**, Ollama **108**, registry **83**, lifecycle **54**,
+  embeddings **182**, Colibri **194**, benchmark **130**; **812 passed**.
+- Final `uv run --locked pytest -q`: **10379 passed, 16 skipped**, one existing
+  Starlette/httpx warning. Baseline 9887 plus all 492 final new cases.
+  An earlier full run hit one existing 10 ms benchmark timing failure
+  (`test_slow_optional_probe_does_not_consume_generation_deadline[2]`). Its log
+  was retained externally; the unchanged benchmark suite then passed 130 tests,
+  followed by this clean full rerun. No prior code/test or timeout was changed.
+- `uv lock`; `uv sync --locked`: PASS, manifests/lock unchanged.
+- `uv run --locked ruff check .`: PASS; `ruff format --check .`: **108 files** PASS;
+  `uv run --locked mypy`: **102 source files** PASS.
+- `uv build --out-dir <external-validation>/dist`: sdist/wheel PASS; logs/JUnit/
+  archives stay outside repo/staging. Final builds contain both new runtime modules.
+- Foundation bootstrap/API/config/persistence/events/hardware: **126 passed**,
+  existing warning only; exact /health and source unchanged.
+- Desktop `npm test`: **4 passed**; desktop workspace typecheck/build PASS.
+- Protected review: **207 existing tracked files unchanged** from origin/main,
+  including all prior production/tests/desktop/manifests and five migrations.
+  Alembic heads **[0005_audit_events]**, EventType **32**. Credential/signature scan:
+  **213 files**, zero matches. `git diff --check` PASS.
+
+### Security, invariants, acceptance and limitations
+
+Reviewed INV-001 through INV-024: PASS within scope. All **157 minimum matrix
+boundaries** plus adversarial cases pass. Search is actual P1 registry/permission
+execution; P4/P5/audit authority unchanged. Search/page/synth content cannot mint
+grants/decisions/tools, change risk/budgets/IDs or trigger any action. Guarded uncached
+imports/construction and fake execution deny file/SQLite/network/process/thread/
+task/EventBus/logging/environment access. Only Pydantic's plugin flag is stubbed,
+without reading any environment value; no secret environment lookup is permitted.
+Static imports rule out concrete browser/model/secret/memory/RAG/persistence/UI/
+PHX-055 bridges. No logging, download/click/fill/terminal/filesystem/Windows action,
+provider fallback, citation formatting, event, schema or dependency integration.
+Single ADR-055 records the architecture and frozen failure/cancellation policies.
+Complete staged/commit/push verification is reported by the execution run.
+
+Limitations: injected search/page/synthesis collaborators are required; no built-in
+search engine, concrete page reader/permission broker or local model synthesizer.
+Provider ranks/dates remain untrusted; no semantic quality/independence scoring,
+date_text parsing or semantic dedup. Snippet fallback may provide less evidence.
+Budgets count characters, not tokens; empty excerpts can retain selected provenance.
+Lexical URLs do not prove DNS safety or navigation permission. Browser evidence
+establishes supplied structure/correlation, not independent authenticity. Trusted
+integration owns genuine consent, admission, replay control, cooperative deadlines,
+resource lifetime and application-wide heavy-generation coordination; one-active
+limit applies per service. Cancellation acknowledgement does not prove remote stop.
+Declared source support proves neither semantic entailment nor truth. Adversarial
+text remains possible; PHX-055 generalized defenses are not implemented. Reports
+remain ephemeral/advisory and cannot finalize task success. Existing skips/warning
+unchanged. Phase 5 remains INCOMPLETE pending PHX-055.
+
+Next: **PHX-055 — Prompt-injection defenses; not started**.

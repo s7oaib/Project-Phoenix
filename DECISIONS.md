@@ -1893,3 +1893,58 @@ SecretStore/env keys, model/vision, memory/RAG, audit/persistence, EventBus,
 API/frontend, schema/migration or dependency integration is added. Existing
 production and tests remain unchanged; Alembic stays 0005_audit_events and the
 EventType vocabulary stays 32. Tests use synthetic data and test-only providers.
+
+## ADR-055 — Bounded advisory research through existing permission boundaries
+Status: Accepted. Date: 2026-10-06. Ticket: PHX-054.
+
+WebSearchTool declares exactly web.search at P1 and snapshots every canonical
+ToolDefinition field. Existing PermissionEngine evaluates one exact correlated
+tool/action/resource request before any injected SearchProvider search. Resource
+is compact canonical JSON binding search/provider/SHA-256 of exact UTF-8 query/
+max_results/UTC as_of, without query plaintext. The hash is correlation data,
+never authority. Nonallowed requests perform no search; valid allowed requests
+derive one SearchRequest and exact-revalidate/correlate one SearchResponse.
+No P1 audit rows, concrete provider, query rewrite, retry or alternate fallback.
+Provider lifetime and cooperative deadlines remain caller-owned.
+
+UraharaResearchService requires neutral registry ID web_research, independently
+of URAHARA/any alias. PHOENIX remains supreme. An injected neutral ResearchPageReader
+returns existing BrowserToolResult evidence; service accepts only exact allowed
+P1 READ_PAGE success/valid partial-success, no effect/error, with correlated call,
+expected public URL and read bound. Final URL independently satisfies public
+PHX-053 lexical admission. No BrowserTool execution, session broker or Playwright
+is added. Individual denied/unavailable/failed/invalid evidence uses observable
+search_snippet fallback; unexpected reader exceptions are fatal. Search denial/
+failure raises a closed safe ResearchError rather than an ordinary report.
+
+Select first eligible provider-ordered candidates within explicit 1..8 source
+budget; no quality score or semantic dedup. Optional age filtering uses only
+provider-reported published_at; exact boundary includes, missing dates remain
+unknown, future dates count anomalies and remain unknown-age candidates.
+Never parse date_text. Prefix-only per-source/total character budgets retain
+all selected provenance, including empty excerpts after total exhaustion.
+Source/page operation IDs derive from unambiguous canonical research/result
+identity hashes; exact UTF-8 excerpt hashes and truncation evidence are retained.
+
+ResearchSynthesizer is a caller-supplied async ABC, with no concrete model adapter.
+Exact correlated drafts reference only selected source IDs. Final support counts
+distinct declared IDs; corroborated means at least two, without asserting truth,
+source independence, fact checking or semantic entailment. Summary, claim text,
+uncertainty and all source metadata stay untrusted inert data. Reports always
+have advisory_only=True and owner_id=web_research, never task success/verification.
+Zero selected sources use one fixed service summary, no claims and no synthesis.
+
+One active caller research per service/event loop; second request is busy, with
+no queue/hidden worker/global serialization. Scoped cancel sets an independent
+local flag, targets only current search/page/synthesis ID, validates neutral
+acknowledgement and cancels the still-owned caller task. Suppressed cancellation
+cannot advance/finalize. Finally clears active state. Delayed acknowledgements
+cannot cancel unrelated caller work after cleanup. Accepted is an acknowledgement,
+not proof remote work stopped; collaborators must cooperate and callers own
+deadlines/resources. No automatic collaborator close or global shutdown.
+
+No text-to-permission/action path, download, concrete browser/model coupling,
+credential lookup, memory/RAG/embedding/citation/history persistence, EventBus,
+API/frontend/schema or dependency change. Prior production and tests are intact;
+five migrations, head 0005_audit_events and 32 EventTypes remain unchanged.
+PHX-055 generalized prompt-injection defenses remain separate future work.
