@@ -1,6 +1,6 @@
 # PHX-060 — Wake-word provider
 
-Status: TODO
+Status: DONE
 Phase: 6 — Voice
 
 ## Objective
@@ -1101,3 +1101,154 @@ At minimum:
 
 # Next
 PHX-061 — VAD. Do not start it.
+
+## Completion evidence — 2026-10-07
+
+Acceptance: PASS. Started from preparation HEAD
+355f1da3257f247b6d97c72e25da973abfdf4427, with origin/main exactly
+e58d304df3a2097ae03e0b31941c9cf487a584f9, clean tree, 0 behind / 1 ahead and only
+this added ticket. Implementation remains on feature/PHX-060-wake-word-provider.
+No main update, PR, merge, force push or PHX-061 work is authorized/performed.
+
+Created phoenix/voice/audio.py, phoenix/voice/wake.py and
+tests/test_wake_word_provider.py. Modified only DECISIONS.md (sole ADR-057),
+FEATURE_TICKETS.md and this ticket. Existing voice/__init__.py stays unchanged.
+PHX-060 DONE; PHX-061 through PHX-065 remain TODO; Phase 6 INCOMPLETE.
+
+Audio API: AudioEncoding and PcmAudioFrame, with deliberate
+pcm_bytes_for_provider(). Wake API: WakePhrase, DEFAULT_WAKE_PHRASE,
+WakeWordCapabilities.validate_provider(), WakeWordRequest,
+WakeWordDetection.validate_request(), WakeWordProviderErrorCode,
+WakeWordProviderError and WakeWordProvider. Existing CancellationResult/Status
+are reused without modifying model providers. Conceptual owner voice; UTA is
+display-only and no AgentRegistry mutation/lookup is required.
+
+All five contracts are frozen, extra-forbidden, exact-revalidated and detached.
+Strict case-preserving/control-free IDs normalize outer whitespace, <=256 chars
+(phrase ID/text <=128). Required aware captured_at normalizes UTC, including
+aware ISO JSON roundtrips, without a clock default. Frames freeze exact 16000/1/2/
+pcm_s16le, strict sequence 0..2147483647, canonical standard base64, nonempty even
+PCM <=32000 bytes and exact lowercase SHA-256. Encoded admission is bounded before
+decode. No resampling/conversion/repair/cache. Audio is hidden from repr/str and
+validation diagnostics; explicit dumps/byte access remain sensitive caller data.
+
+Default phrase exactly rise_phoenix / Rise, Phoenix. Capabilities snapshot 1..32
+phrases, reject duplicate normalized IDs/exact text and carry strict cancellation
+support/fixed PCM evidence. Requests contain only operation_id/phrase/frames:
+UUID4 default or normalized stable caller ID; 1..32 same-stream frames, contiguous
+sequences, nondecreasing timestamps, <=96000 total bytes. Overflow rejects without
+truncation. Detections have exactly eight fields, strict nonnegative ordered range,
+strict bool and ordinary finite float 0..1. Helper requires exact operation/provider/
+phrase/stream/first/last correlation. Score never derives/overrides detected and
+confers no probability, identity, health, task or permission guarantee.
+
+ABC constructor validates only provider identity. Async capabilities/detect/cancel/
+aclose and sorted immutable active IDs define adapter obligations, without concrete
+engine/runtime/scheduler. Two independent test fakes satisfy the same consumer
+interface. Consumer tests exactly revalidate capabilities, detections and neutral
+cancellation results. Scoped ACCEPTED cancellation leaves unrelated operations
+running; NOT_FOUND/UNSUPPORTED remain explicit. Acceptance is acknowledgement only,
+not proven inference cessation. The base allocates nothing; adapters own cleanup.
+
+### Required matrix coverage
+
+All 148 listed boundaries are covered by the focused suite plus regressions:
+
+- 1–30: exact fields/encoding, frozen/extras/JSON, strict IDs/time/sequences/format,
+  canonical base64, size/evenness/hash/repr/bytes and stored/subclass/extra attacks.
+- 31–40: phrase shape, strict meaningful Unicode/control/length/format preservation,
+  exact immutable default and absence of fuzzy matching.
+- 41–53: capability shape, detached 1/32 and rejected 0/33 phrase collections,
+  duplicate policy, nested/colliding forgery rejection, strict format/bool/no authority.
+- 54–72: request shape/default ID, exact phrase/frame snapshots, count/window/order/
+  timestamp/96000-byte boundaries, no repair/truncation/options, private repr.
+- 73–93: detection shape/IDs/range/bool/float endpoints/nonfinite rejection,
+  all six correlation mismatches, no transcript/action/permission/health and
+  independent score/detected combinations.
+- 94–97: exact ten-code vocabulary, safe errors/formatted chains, foreign-code
+  rejection and no audio/extra-field-name diagnostics.
+- 98–116: complete/incomplete ABCs, strict normalized read-only ID, two independent
+  fakes, exact capability/detection/cancellation consumers, active tuple/sorting,
+  operation isolation/cleanup/reuse, explicit close and no provider selection.
+- 117–122: documented voice/UTA metadata, exact default, no fuzzy matching,
+  no authority and guarded positive detection that starts no other subsystem.
+- 123–148: static import/call allowlists, guarded uncached import/validation/fake
+  flow, protected-source/manifests/migration checks, EventType/Alembic checks,
+  logger/print denial and whole-repository credential-signature scan.
+
+### Commands and final results
+
+- uv run --locked pytest tests/test_wake_word_provider.py -q: final **537 passed**,
+  external focused JUnit, 1.20 s. Synthetic buffers/fakes only, no live microphone,
+  device enumeration, wake engine/model or network. Initial development failures
+  exposed Pydantic after-validator diagnostic wrapping; safe code-only integrity
+  errors fixed it. Strict typing issues in test helpers were corrected. No prior
+  test/security behavior was changed to pass.
+- All **35 prior suites** ran individually using uv run --locked pytest
+  tests/test_<suite>.py -q with external logs/JUnit, every exit code 0.
+- Phase 5: prompt_injection_defenses **604**, urahara_research_flow **492**,
+  search_provider **400**, screenshot_vision_loop **397**, windows_ui_automation
+  **493**, browser_tool **653**; aggregate **3039 passed**.
+- Phase 4: secrets_boundary **402**, terminal_tool **270**, filesystem_tool
+  **649 passed/16 skipped**, audit_trail **302**, permission_engine **926**,
+  tool_registry **204**; aggregate **2753 passed/16 skipped**.
+- Phase 3: memory_schema **244**, pudding_memory_service **167**, document_ingestion
+  **300**, vector_store_sqlite **273**, retrieval_context **367**,
+  provenance_citations **173**; aggregate **1524 passed**, persistence **12 passed**.
+- Phase 2: agent_registry **96**, phoenix_orchestrator **101**, aizen_planner **151**,
+  agent_model_router **213**, task_graph_state_machine **348**,
+  structured_agent_handoffs **214**, levi_verification **242**, mahoraga_recovery
+  **790**, kaido_failsafe **574**; aggregate **2729 passed**.
+- Phase 1: model_provider **61**, ollama_provider **108**, model_registry **83**,
+  model_lifecycle **54**, embeddings **182**, colibri_provider **194**,
+  model_benchmark **130**; aggregate **812 passed**.
+- uv lock; uv sync --locked: PASS, **43 packages**, pyproject.toml/uv.lock unchanged.
+- uv run --locked pytest -q: **11520 passed, 16 skipped, one existing warning**,
+  **347.56 s**. Baseline 10983 plus all 537 new cases. Existing Windows symlink
+  privilege skips and Starlette/httpx deprecation warning are unchanged.
+- uv run --locked ruff check .: PASS; ruff format --check .: **114 files** PASS;
+  uv run --locked mypy: **108 source files** PASS.
+- uv build --out-dir <external-validation>/dist: sdist/wheel PASS; both contain
+  the exact final runtime modules. No build artifacts are staged.
+- Foundation/bootstrap/API/config/persistence/events/hardware: **126 passed**,
+  existing warning only; exact /health unchanged.
+- npm test: **4 passed**; npm run typecheck --workspace @phoenix/desktop and
+  npm run build --workspace @phoenix/desktop: PASS.
+- Protected Git hash comparison: **132 prior protected files unchanged**,
+  including all previous production/tests, five migrations, API/frontend and
+  dependency manifests. Alembic heads **[0005_audit_events]**; EventType **32**.
+- Repository credential/signature scan: PASS, zero matches. git diff --check PASS.
+  All logs/JUnit/archives and two empty validation-shell redirection artifacts
+  remain outside the repository; no audio/model/DB/cache artifact enters staging.
+
+### Security, invariants and limitations
+
+Reviewed INV-001 through INV-024: PASS within PHX-060 scope. PHOENIX remains supreme;
+AIZEN/LEVI/MAHORAGA/KAIDO and task verification are unchanged. Audio/detection/score
+are untrusted data and mint no approval/grant/tool/audit/task authority. P4/P5 and
+privileged execution/audit remain unchanged. No model generation affects the
+heavy-generation limit. Text remains usable; orchestration has no new voice call
+or crash path. State/cancellation and explicit failures are represented; no silent
+fallback, schema mutation or dependency promotion exists.
+
+Guarded uncached code imports, construction/default UUID request/JSON validation,
+exact byte access and fake positive detect/cancel/close deny filesystem access,
+SQLite, sockets/DNS, subprocess/thread/async-task creation, native device loading,
+environment-secret lookup, logger/print and EventBus. Pydantic's nonsecret plugin
+flag is stubbed without reading environment; all other lookups fail. Static checks
+permit only stdlib/Pydantic, the new audio helpers and neutral CancellationResult.
+No ToolRegistry/PermissionEngine/AuditTrail/model/prompt guard/secrets/memory/RAG
+integration, audio logging/persistence, VAD/STT/TTS/conversation/barge-in/startup,
+EventBus/API/frontend or schema/dependency changes exist.
+
+Limitations: no concrete wake engine, trained Rise-Phoenix acoustic model,
+microphone/device integration, VAD/STT/TTS, conversation state/debounce/refractory
+behavior, barge-in, startup health or wake events. Input is fixed 16 kHz mono
+S16LE; caller owns capture/window construction and sensitive serialization/bytes.
+Score may be uncalibrated; concrete cancellation/cleanup remain cooperative adapter
+obligations. No immutable-interpreter audio erasure guarantee is made. Voice failure/
+text fallback is future integration. A concrete provider requires separately
+approved dependency/model artifacts. Final staged review, feature commit/push,
+remote equality/clean tree and unchanged-main evidence are reported by this run.
+
+Next: **PHX-061 — VAD; not started**.

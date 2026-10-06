@@ -58,12 +58,14 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 Phase 5 status: COMPLETE.
 
 ## Phase 6 — Voice
-- PHX-060 Wake-word provider — TODO
+- PHX-060 Wake-word provider — DONE
 - PHX-061 VAD — TODO
 - PHX-062 STT provider — TODO
 - PHX-063 TTS provider — TODO
 - PHX-064 Voice conversation/barge-in — TODO
 - PHX-065 Rise-Phoenix startup health sequence — TODO
+
+Phase 6 status: INCOMPLETE.
 
 ## Phase 7 — Media & Documents
 - PHX-070 Spotify integration — TODO
