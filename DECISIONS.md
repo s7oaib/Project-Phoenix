@@ -1653,3 +1653,80 @@ schema integration is introduced. P5 remains blocked. Alembic stays
 Historical bootstrap/vector/retrieval dependency test assertions are reconciled
 with the exact authorized promotion, without changing any existing production
 security or data semantics. All deterministic gates pass; PHX-051 remains TODO.
+
+## ADR-052 — Explicit Windows UIA boundary with conservative native mutation
+Status: Accepted. Date: 2026-10-06. Ticket: PHX-051.
+
+Promote pywinauto >=0.6.9,<0.7 with sys_platform == "win32" only, locked to
+0.6.9 plus pywin32 312, comtypes 1.4.17 and six 1.17.0. No existing third-party
+package changes. Direct API/DOM remains preferred over native accessibility.
+The conceptual owner is computer_control; KAKASHI is a display alias only.
+PHOENIX remains supreme, and existing ToolRegistry/PermissionEngine/AuditTrail
+own declaration, permission and durable audit authority.
+
+Exactly seven ordered tools: windows.list_windows P1, windows.inspect_window P1,
+windows.focus_window P2, windows.inspect_control P1, windows.invoke_control P4,
+windows.set_text P4, windows.close_window P4. Complete immutable declarations
+are snapshotted and compared at construction, including schemas, risk, permission,
+timeout, cancellation, audit, platforms and environments. Unrelated tools may
+coexist. Strict frozen extra-forbidden contracts are exactly revalidated.
+Calls carry no caller approval/risk/backend/callback surface. Positive HWNDs and
+expected process ID/class bind focus and control/mutation resources. Selectors
+use exact case-sensitive automation_id/control_type/name, never fuzzy matching,
+regex, wildcard, XPath, index or first-match fallback. Zero/multiple matches fail.
+At most 500 discovered descendants are admitted before any action; overflow fails.
+
+Describe is pure. Resources are canonical JSON with effective bounds, identity
+and selectors; set_text correlates SHA-256 of exact UTF-8 ordinary text, not raw
+text. The digest is data-minimization evidence, not authentication. SecretMaterial
+is structurally rejected. Permission requests match tool/action/resource exactly,
+and PermissionEngine evaluates once. Nonallowed execution touches no UIA.
+P4 decision audit commits before even backend import/initialization or HWND lookup;
+denials retain decision audit only. Every allowed P4 attempt commits one outcome
+before normal return, including unavailable/failed attempts. Pre-audit failure
+closes the boundary. Post-attempt audit failure raises safe uncertainty evidence,
+with no retry, rollback claim or normal success. Grants/policies cannot satisfy P4.
+Trusted integration owns consent authenticity, replay control and request admission.
+
+The adapter lazily loads pywinauto and fixes Desktop to backend=uia with magic
+lookup disabled. Direct ElementFromHandle avoids WindowSpecification polling.
+Fixed raw FindAll scopes enumerate root children or the selected window's
+descendants. Raw properties and array access preserve COM failures instead of
+using pywinauto helpers that log or silently return empty/default evidence.
+Windows BOOL marshalling is explicitly handled; unknown password state omits
+value and prevents set_text. Values are read only from ordinary non-password
+ValuePattern controls. Disabled/hidden controls cannot be mutated. Native
+SetFocus, InvokePattern.Invoke, writable ValuePattern.SetValue and WindowPattern.Close
+are called directly once. Methods/patterns are acquired before possible-effect
+evidence. High-level pywinauto focus/invoke/close helpers are avoided because they
+can add keyboard fallback, logging or worker/retry behavior. Once an action begins,
+possible-effect evidence remains true even on error. Success proves an attempt,
+not the user's external business outcome.
+
+Top-level windows are HWND-sorted, prefix-limited to 100 by default (maximum 200),
+with titles <=4096 characters. Inspection defaults to 4096 (maximum 8192) name/
+title/value characters. Prefix truncation produces explicit partial_success.
+Evidence is detached, immutable and JSON-safe, with structural operation/resource/
+permission/audit correlation. Mutation results never echo titles, control content
+or raw input. Closed safe error codes replace raw COM/library diagnostics.
+Window/control evidence is inert untrusted data, never authorization, instructions,
+agent routing or automatic verification. Audit persists correlation/status rather
+than UI content or raw set_text. No UI state persistence is introduced.
+
+Native COM calls are synchronous/cooperative and cannot be safely hard-preempted;
+metadata is 10 seconds with cancellation_supported=False, without sleeps, polling,
+workers, tasks or retries. FindAll can materialize its native array before the
+500-descendant admission check. HWND/PID/class and selector checks are not atomic
+against hostile concurrent replacement or tree changes. UI effects and SQLite
+audit commits are separate transactions. Windows/UIA-capable patterns are required;
+non-Windows explicit execution returns safe unavailable-dependency evidence.
+
+All deterministic tests use a private fake, including fake COM/native marshalling,
+and temporary audit databases; no real desktop enumeration or mutation occurs.
+No process launch/termination, Win32 backend/messages, physical input, clipboard,
+screenshots/OCR/vision, browser DOM, terminal/filesystem chain, credential resolver,
+memory/RAG/model/provider, EventBus, API/frontend or schema integration is added.
+PHX-040–050 production remains unchanged, P5 remains blocked, all five migrations
+stay intact, Alembic remains 0005_audit_events and EventType remains 32. Historical
+bootstrap/browser manifest assertions evolve only for this exact promotion, with
+a new full-project/lock comparison rejecting unrelated changes. PHX-052+ stays TODO.

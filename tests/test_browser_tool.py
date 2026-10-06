@@ -1716,7 +1716,7 @@ def test_previous_block_flag_cannot_override_wrong_session_failure(
 
 
 def test_only_authorized_playwright_dependency_promotion() -> None:
-    """Replace historical manifest freezes with the exact PHX-050 allowance."""
+    """Preserve PHX-050; PHX-051 separately verifies its exact Windows promotion."""
     before_project = tomllib.loads(
         subprocess.check_output(
             ["git", "show", "origin/main:pyproject.toml"], cwd=ROOT
@@ -1728,7 +1728,11 @@ def test_only_authorized_playwright_dependency_promotion() -> None:
         project["project"]["dependencies"] = [
             item
             for item in project["project"]["dependencies"]
-            if item != "playwright>=1,<2"
+            if item
+            not in (
+                "playwright>=1,<2",
+                "pywinauto>=0.6.9,<0.7; sys_platform == 'win32'",
+            )
         ]
     assert after_project == before_project
     before_lock = tomllib.loads(
@@ -1741,7 +1745,15 @@ def test_only_authorized_playwright_dependency_promotion() -> None:
     new = {package["name"]: package for package in after_lock.pop("package")}
     assert after_lock == before_lock
     assert not set(old) - set(new)
-    assert set(new) - set(old) <= {"playwright", "greenlet", "pyee"}
+    assert set(new) - set(old) <= {
+        "playwright",
+        "greenlet",
+        "pyee",
+        "pywinauto",
+        "pywin32",
+        "comtypes",
+        "six",
+    }
     assert {"playwright", "greenlet", "pyee"} <= set(new)
     for name in old:
         if name == "phoenix":
@@ -1751,7 +1763,9 @@ def test_only_authorized_playwright_dependency_promotion() -> None:
                     package["metadata"]["requires-dist"],
                 ):
                     entries[:] = [
-                        item for item in entries if item["name"] != "playwright"
+                        item
+                        for item in entries
+                        if item["name"] not in ("playwright", "pywinauto")
                     ]
         assert new[name] == old[name], name
     assert {item["name"] for item in new["playwright"]["dependencies"]} == {
