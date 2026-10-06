@@ -1334,7 +1334,9 @@ def test_scope_ast_frozen_events_and_unchanged_dependencies() -> None:
                     "exec",
                 }
     assert len(EventType) == 32
-    for path in ("pyproject.toml", "uv.lock", "package.json", "package-lock.json"):
+    # PHX-050 owns the authorized Python dependency promotion and its exact-diff
+    # gate in test_browser_tool; PHX-033 still freezes desktop dependencies.
+    for path in ("package.json", "package-lock.json"):
         previous = subprocess.check_output(
             ["git", "show", f"origin/main:{path}"], cwd=ROOT
         )

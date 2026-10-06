@@ -1563,3 +1563,93 @@ EventBus integration is introduced. API/desktop, /health, events, persistence,
 Alembic and dependency manifests remain unchanged. EventType stays 32 and the
 head stays 0005_audit_events. Future integrations require their own authorized
 permission/audit design; PHX-045 exposes no user-facing secrets manager.
+
+## ADR-051 — Isolated direct browser tools and required Playwright runtime
+
+Date: 2026-10-06
+
+Status: Accepted for PHX-050.
+
+Playwright is promoted to required Phase-5 Python runtime dependency
+`playwright>=1,<2`, locked to 1.63.0 with greenlet 3.5.6 and pyee 13.0.1. No existing
+third-party package changes. Chromium binaries remain separately installed operational
+prerequisites; import/construction/tests/package hooks/application startup never
+download them. Explicit authorized session_open maps missing/failed startup to
+safe unavailable-dependency evidence. Deterministic tests always use fake runtime,
+DOM and protocol objects; a live smoke test is optional and was not run here.
+
+The internal owner stays computer_control, without AgentRegistry integration.
+BrowserTool offers exactly seven canonical tools: session_open P2, navigate P2,
+read_page P1, inspect_element P1, click P4, fill P4, session_close P2. Complete
+ToolDefinition snapshots prevent risk/schema/permission/audit/timeout/platform
+drift. Click and fill remain generic P4 because DOM semantics can cause sensitive
+external effects, including autosave. Page labels/model/caller claims cannot
+lower risk. Existing PermissionEngine evaluates one exactly correlated request;
+only request-specific approval permits P4. No grant/policy or page evidence can
+authorize it. Trusted integration still owns authentic user evidence and replay
+control; the SHA-256 fill digest binds data without authenticating a caller.
+
+Frozen, extra-forbidden, strict, exact-revalidated BrowserCall has the eight frozen
+fields and operation-specific shapes. Pure describe returns canonical metadata
+and compact JSON resource evidence without session access/I/O. Resource binds
+operation/session and URL/selector/read bound; fill includes only the exact UTF-8
+digest. P4 permission audit must durably commit before session/browser/page access,
+including denied attempts. Allowed P4 outcomes durably commit once before normal
+return. Pre-audit failure prevents all target I/O; post-attempt audit failure raises
+explicit possible-effect evidence without retry, rollback claim or normal success.
+Browser effects and audit DB are separate transactions.
+
+Only allowed session_open starts synchronous headless Chromium with one fresh
+nonpersistent context and blank page, accept_downloads=False, service_workers=block,
+permissions=[] and 30,000-ms action/navigation waits. V1 owns one active session
+and only its context/browser/driver. No user browser profile, executable/args,
+cookies/storage/HTTP/proxy credentials, environment or permission input is accepted.
+Duplicates never replace state; explicit close and failed startup/crash cleanup
+attempt each owned resource once. Playwright does not expose a hard close timeout;
+cleanup is cooperative best effort, without hidden workers/retries or a claim of
+a process-wide deadline. Cancellation metadata remains False.
+
+URL data is strict HTTP/HTTPS <=4,096 characters, outer-trimmed, without userinfo,
+controls, localhosts or nonpublic literals; ambiguous Chromium numeric address
+spellings are rejected. No DNS probes or pre-permission fetch occurs. Fixed
+context request routing applies this lexical policy. Playwright 1.63 follows
+HTTP redirects without another routing callback, so an internal owned-page CDP
+Fetch response-stage guard validates Location before continuation. It checks all
+five HTTP redirect statuses, rejecting private/malformed/ambiguous destinations
+without reading response bodies, logging destinations or exposing caller commands.
+Protocol failure never silently resumes a paused request. Child-frame and worker
+requests are rejected because their separate Chromium targets would escape the
+owned page response guard; no iframe/worker browsing capability is offered in V1.
+The fixed protocol guard is internal security enforcement, not an eighth tool.
+Public-host DNS rebinding is still not claimed fully prevented.
+
+Read/inspect/click/fill bind exact expected_url after permission/pre-audit. This
+check is not atomic with a hostile page's concurrent navigation or DOM changes.
+CSS-only input <=2,048 characters uses a fixed css= locator; no selector chains,
+XPath/text engines, first/nth fallback or evaluate. Exactly one match is required.
+Read returns bounded body inner text; inspect returns bounded element text and
+only id/class/role/aria-label/name/type/href/title, omitting tag name rather than
+evaluating JavaScript. Prefix truncation is deterministic and reported explicitly;
+underlying inner text is obtained before slicing. Detached results are immutable,
+JSON-safe and structurally correlated; attributes use immutable snapshots.
+
+Click/fill invoke one ordinary bounded operation without options, modifiers,
+Enter/submit/click chaining or retry. Once invocation begins, effect evidence is
+conservatively true even after error. Fill accepts explicit ordinary text bounded
+to 65,536 UTF-8 bytes and rejects SecretMaterial and file/password/current-password/
+new-password inputs before filling. No raw fill text is echoed in result/title,
+resource/audit/log/exception. No SecretStore resolution or secret classification
+is added; trusted callers own ordinary-text admission. Popups are closed best
+effort, never adopted; downloads fail where detected without saving or exposing
+paths. No upload/file chooser exists. Successful action is execution evidence,
+not proof of external business outcome.
+
+Page URL/title/DOM text/attributes remain inert untrusted evidence, with closed
+safe errors and suppressed raw diagnostics. No model/agent authority, tool chain,
+memory/RAG/embedding/audit-content persistence, terminal/filesystem, Windows UI,
+screenshot/vision, search/URAHARA, PHX-055 classifier, EventBus, API/frontend or
+schema integration is introduced. P5 remains blocked. Alembic stays
+0005_audit_events; all five migrations and 32 EventTypes remain unchanged.
+Historical bootstrap/vector/retrieval dependency test assertions are reconciled
+with the exact authorized promotion, without changing any existing production
+security or data semantics. All deterministic gates pass; PHX-051 remains TODO.

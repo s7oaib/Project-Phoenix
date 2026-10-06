@@ -48,7 +48,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-045 Secrets boundary — DONE
 
 ## Phase 5 — Computer & Web
-- PHX-050 Playwright browser tool — TODO
+- PHX-050 Playwright browser tool — DONE
 - PHX-051 Windows UI automation — TODO
 - PHX-052 Screenshot/vision loop — TODO
 - PHX-053 Search provider abstraction — TODO
