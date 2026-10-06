@@ -3,6 +3,21 @@
 Status: TODO
 Phase: 5 — Computer & Web
 
+## Authorized prerequisite repair discovered after PHX-051 merge
+
+PHX-052 may make exactly one narrow historical-test repair before continuing implementation:
+
+- `tests/test_windows_ui_automation.py::test_exact_windows_dependency_promotion` currently compares the working manifest/lock against the moving `origin/main` ref. That assertion was valid only while PHX-051 was still a feature branch. After PHX-051 was squash-merged into main at `45d65deb6352d1b649f5cd58814758eaf6e2ad5c`, `origin/main` already contains pywinauto, so the test self-invalidates even on an otherwise unchanged checkout.
+- The pre-PHX-051 main commit is `762be6471085fa5ccf5e905c3cab0e79a3de7faa`.
+- Repair the test so it verifies the historical PHX-051 dependency promotion between those fixed repository commits and separately verifies that the current manifest/lock still contain the authorized pywinauto marker/evidence. The repaired test must not assume that future tickets add no unrelated dependencies.
+- Do not modify PHX-051 production code or semantics.
+- Do not weaken unrelated dependency, architecture, security, migration, event, or source-integrity assertions.
+- No other historical test file may be changed for this blocker unless an independently demonstrated stale moving-ref assertion is found and documented.
+- Run the repaired PHX-051 dependency test first and require PASS before proceeding with PHX-052.
+- The final PHX-052 diff may therefore include this one test-only historical regression repair, and completion evidence must disclose it explicitly.
+
+Local PHX-052 draft files that already exist as untracked work are user work-in-progress. Preserve and review them. Do not stash, reset, clean, delete, or overwrite them merely because this prerequisite repair is needed.
+
 ## Objective
 Implement PHOENIX's first scoped screenshot capture and local vision-interpretation loop while preserving the frozen computer-control preference:
 
