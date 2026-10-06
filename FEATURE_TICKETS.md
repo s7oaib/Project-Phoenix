@@ -50,7 +50,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 ## Phase 5 — Computer & Web
 - PHX-050 Playwright browser tool — DONE
 - PHX-051 Windows UI automation — DONE
-- PHX-052 Screenshot/vision loop — TODO
+- PHX-052 Screenshot/vision loop — DONE
 - PHX-053 Search provider abstraction — TODO
 - PHX-054 URAHARA research flow — TODO
 - PHX-055 Prompt-injection defenses — TODO
