@@ -1477,3 +1477,89 @@ leave descendants. Real Windows process/junction behavior is tested; POSIX/macOS
 branches are declared but not executed on this Windows host. No existing runtime,
 filesystem tool, agent/model, secret store, EventBus, API/frontend, schema, migration
 or dependency changes. Alembic remains 0005_audit_events; EventType remains 32.
+
+## ADR-050 — Explicit runtime secrets and Windows OS storage boundary
+
+Date: 2026-10-06
+
+Status: Accepted
+
+PHX-045 introduces only `phoenix/security/secrets.py`, with no tool, model,
+transport or ordinary-data integration. `SecretReference` is frozen,
+extra-forbidden, exact-revalidated and contains only `secret_id`. IDs are strict
+ordinary strings, trimmed outside, case-preserving, 1..128 ASCII characters,
+with grammar `[A-Za-z0-9][A-Za-z0-9_.-]{0,127}`. Control characters reject before
+trimming. Separators, wildcard/target syntax and arbitrary namespace overrides
+are forbidden. References serialize as nonsecret metadata; trusted callers must
+not use a username, token or secret value as an ID. An ID is neither permission,
+existence, ownership, trust nor authentication evidence and is never automatically
+promoted into memory.
+
+`SecretMaterial` is a small runtime-only slotted class rather than a Pydantic
+model/dataclass. It accepts one explicit nonempty valid Unicode string, including
+meaningful whitespace/NUL, and keeps a mutable UTF-8 bytearray. Its fixed repr/str
+contain redaction markers rather than value-derived text. Ordinary JSON, pickle,
+copy/deepcopy, __getstate__, dict/asdict/bytes/vars paths reject; it has no
+model_dump or dict method and cannot be subclassed. Equality/hash use object identity. Only the
+deliberately named `reveal_text_for_trusted_use()` returns exact text while open.
+Reveal confers no permission, performs no logging/persistence, and creates an
+immutable interpreter copy. Idempotent close exposes closed state and overwrites
+the original mutable buffer in place; context exit closes on success or failure.
+Closed material cannot be revealed, stored or used for redaction.
+
+Python cannot guarantee erasure of input strings, revealed/decoded strings,
+interpreter/allocator copies, exception-frame references or OS-managed copies.
+Buffer wiping is best effort, not cryptographic proof. This boundary prevents
+ordinary accidental serialization; it is not protection against trusted-process
+introspection, hostile native pointers, private-attribute tampering or an OS
+administrator. Trusted callers own authorization, explicit lifetime and consumer
+admission. No automatic environment/file/database/model lookup constructs material.
+
+`SecretStore` is the provider-neutral synchronous put/resolve/delete protocol,
+without list, export, value search, callback execution or authorization mutation.
+`WindowsCredentialStore` uses standard-library ctypes and GENERIC credentials,
+fixed target `PHOENIX/<normalized secret_id>`, UTF-8 blobs without a terminator,
+and a 2,560-byte OS limit. CRED_PERSIST_LOCAL_MACHINE retains the current user's
+credential across logons on this machine without requesting roaming. Windows
+target lookup is case-insensitive: reference spelling is preserved, but IDs that
+differ only in case share a Windows credential. The namespace is not an access
+control mechanism against other applications under the same Windows user.
+
+Import/construction does no credential I/O. Explicit operations lazily load
+advapi32.dll using system-directory search and declared Win32 ABI signatures.
+Non-Windows operations and unavailable DLL/logon-session state fail unavailable.
+Each operation exact-revalidates the reference; put requires open exact material
+and writes only its supplied bytes. Resolve reads one fixed target, validates
+type/target/bounded nonempty blob/strict UTF-8, and returns independent closable
+material. Missing resolve raises not_found; absent delete returns False, present
+delete True. Operations do not retry. All public adapter errors expose only the
+six closed codes not_found/unavailable/invalid_reference/invalid_material/
+store_failure/decode_failure, suppressing private exception chains. Put/read
+temporary mutable buffers are wiped in finally blocks. Bounded OS-owned read
+blobs are wiped before CredFree, including decode failure; every nonnull returned
+allocation is freed. Malformed size evidence is freed without unsafe oversized
+access. Read cleanup failure closes a produced result before raising failure.
+
+There is no production in-memory store, plaintext file/JSON/SQLite/registry/env
+fallback, custom encryption or new dependency. Tests always deny the real WinDLL
+loader and use synthetic values plus deterministic fake OS calls. ABI, target,
+bytes, frees, buffer wiping, errors and single-attempt behavior are tested without
+reading, writing or deleting real credentials.
+
+`redact_known_secrets(text, materials)` is pure exact-substring redaction for
+explicit open exact materials in an ordered list/tuple. Longer values claim
+overlapping occurrences first across the original text; equal lengths follow
+caller order and repeated occurrences are covered. Output uses `[REDACTED]`,
+without rescanning inserted markers or retaining values in a regex cache.
+It discovers no unknown/semantic secrets and replaces neither isolation nor
+admission policy, PermissionEngine or PHX-055 prompt-injection defenses.
+
+P5 stored-credential reveal stays blocked even with synthetic approval, denial,
+grant/policy-looking evidence and safe/approved text. No production reveal tool,
+endpoint, command, model resolver or frontend display exists. PermissionEngine,
+audit, filesystem and terminal semantics remain unchanged; no secret injection,
+credential file scanning, memory/RAG/embedding/citation/model forwarding or
+EventBus integration is introduced. API/desktop, /health, events, persistence,
+Alembic and dependency manifests remain unchanged. EventType stays 32 and the
+head stays 0005_audit_events. Future integrations require their own authorized
+permission/audit design; PHX-045 exposes no user-facing secrets manager.
