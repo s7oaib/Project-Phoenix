@@ -981,3 +981,91 @@ Disclose at minimum:
 
 # Next
 PHX-064 — Voice conversation/barge-in. Do not start it.
+
+
+# Authoritative compatibility repair — historical regression guards
+
+During the first PHX-063 execution attempt, the implementation correctly stopped before completion because several historical test-only repository-diff guards are not forward-compatible with later tickets once new files become tracked.
+
+This is an authoritative ticket correction, not permission to weaken product behavior.
+
+## Confirmed stale guards
+
+The following historical tests contain process-time repository-diff assertions that were valid only while their own ticket was being implemented, but become false after later legitimate tracked additions:
+
+- `tests/test_vad.py::test_protected_production_migrations_dependencies_and_events`
+  compares the current working tree to the PHX-060 baseline across broad `phoenix` scope and therefore rejects later tracked STT/TTS production files.
+- `tests/test_stt_provider.py::test_protected_sources_dependency_schema_and_events`
+  compares the current working tree to the pre-PHX-062 baseline across broad `phoenix` / `tests` scope and therefore rejects later tracked TTS files.
+- `tests/test_search_provider.py::test_all_prior_runtime_tests_schema_desktop_dependencies_unchanged`
+  dynamically hashes every protected path from `origin/main`, including historical test files, and therefore prevents legitimate later maintenance of those regression guards.
+- `tests/test_urahara_research_flow.py::test_event_schema_dependencies_and_protected_sources_unchanged`
+  dynamically hashes every protected path from `origin/main`, including historical tests, and therefore prevents legitimate later maintenance of those regression guards.
+
+These checks are historical ticket-scope/process assertions. They are not product runtime contracts and must not permanently freeze the repository against later tickets.
+
+## Exact authorized repair scope
+
+PHX-063 is explicitly authorized to modify exactly these four historical test files, in addition to the normal PHX-063 files:
+
+- `tests/test_vad.py`
+- `tests/test_stt_provider.py`
+- `tests/test_search_provider.py`
+- `tests/test_urahara_research_flow.py`
+
+No historical production file is authorized for modification.
+
+## Required repair semantics
+
+Repair only the stale repository-diff / dynamic-`origin/main` guards.
+
+Do NOT weaken the functional/security/provider assertions in those suites.
+
+Required principles:
+
+1. Remove or replace ticket-era whole-repository / whole-subtree equality assertions that compare the current working tree against a historical commit or current `origin/main`.
+2. Preserve the semantic invariants those tests can validly enforce at runtime, including:
+   - EventType remains exactly 32,
+   - sole Alembic head remains `0005_audit_events`,
+   - required migration-count assertions where already present,
+   - DEFAULT_WAKE_PHRASE semantic assertions where already present,
+   - subsystem-specific static/import/side-effect/security tests,
+   - credential/signature scans,
+   - all provider behavior tests.
+3. Do not add a broad allowlist for PHX-063 paths to a historical baseline-diff test. The repair must be forward-compatible rather than ticket-specific.
+4. Do not skip, xfail, deselect, monkeypatch Git, or fake repository state.
+5. Do not weaken tests by making them unconditional passes.
+6. Do not modify historical production code to satisfy historical tests.
+7. Remove now-unused imports/helpers only when required by Ruff/mypy.
+8. The four repaired historical suites must pass with the PHX-063 files staged/tracked.
+
+## Staged-state verification gate
+
+The original blocker appeared only when the new TTS files were represented as tracked changes. Therefore PHX-063 completion requires a staged-state regression proof.
+
+Before declaring completion:
+
+1. stage the complete intended PHX-063 diff,
+2. run at minimum:
+   - `tests/test_vad.py`
+   - `tests/test_stt_provider.py`
+   - `tests/test_search_provider.py`
+   - `tests/test_urahara_research_flow.py`
+   - `tests/test_tts_provider.py`
+3. confirm they pass while the complete intended diff is staged,
+4. then run the required full regression/quality gates from this ticket while that same intended tracked state is present.
+
+Do not rely on untracked-file behavior as evidence.
+
+## Expected final diff expansion
+
+The final PHX-063 diff may now include exactly these historical test-only compatibility repairs in addition to the previously expected PHX-063 files:
+
+- `tests/test_vad.py`
+- `tests/test_stt_provider.py`
+- `tests/test_search_provider.py`
+- `tests/test_urahara_research_flow.py`
+
+This compatibility repair must be documented truthfully in the PHX-063 completion evidence and ADR-060 testing/compatibility notes.
+
+No separate architecture ADR is required for the test-harness correction.
