@@ -1382,3 +1382,98 @@ baseline. Retrieval's protected-source test retains its exact single audit
 registration assertion and now compares the entire Alembic environment to main,
 without removing that registration from only one side. No source protection is
 relaxed and no existing production behavior changes.
+
+## ADR-049 — Trusted, bounded, permission-gated terminal profiles
+Status: Accepted for PHX-044.
+
+TerminalTool exposes synchronous describe/execute over immutable application-owned
+command profiles. Its three metadata-only canonical definitions are terminal.inspect
+P2, terminal.project P3 and terminal.sensitive P4. Construction snapshots and checks
+every ToolRegistry field against the canonical definitions, then constructs the
+existing PermissionEngine with that registry and explicit immutable policy. Profiles
+select a canonical tool but cannot override risk. The default catalog is empty;
+profiles preserve source order and reject duplicate normalized IDs. Adding profiles
+requires a new catalog/runtime, with no discovery, registration or hot reload.
+
+Each profile declares an absolute executable, fixed argv, either no caller arguments
+or an exact string allowlist, a fixed relative working directory, supported platforms,
+ordinary inherited environment names, stdin policy and bounded timeout/output limits.
+Relative executables, batch files and named shell interpreters are rejected. Calls
+contain only opaque call ID, profile ID, ordered strict arguments and optional stdin.
+There is no shell string, parsing/expansion, caller executable/risk/cwd/environment,
+handler, timeout override or implicit shell invocation. Trusted configuration owns
+read-only versus modifying classification and must avoid interactive interpreters,
+background jobs and argument combinations with unintended command semantics.
+
+The root is explicit, absolute and lexical at construction. Describe performs no
+target I/O and derives action execute plus a canonical JSON resource identifying
+profile and lexical absolute cwd, with a SHA-256 digest binding exact profile
+configuration, arguments and stdin. This binds approvals to the invocation without
+persisting raw arguments/stdin in audit resources; it is data minimization, not
+encryption or an authentication mechanism. Call IDs are independent of stable
+request IDs, default to UUID4, preserve ordinary opaque case and correlate audit
+records. Request tool/action/resource must match before exactly one permission
+evaluation. Every non-allowed result is denied with no attempt, effect or target I/O.
+PHX-041 remains authoritative: P3 task/session scope, exact request-specific P4 user
+approval, no P4 policy/grant authorization and unconditional P5 blocking.
+
+For P3/P4, the permission decision must commit through AuditTrail before cwd
+resolution, environment reads, temporary stdin creation or process launch. An
+independent database connection observes that committed row in tests. Allowed
+attempts append one outcome before returning normal evidence, including launch,
+cwd, pipe, nonzero-exit, timeout and output-limit failures. Pre-audit failure raises
+a safe error and launches nothing. Post-attempt audit failure raises a distinct safe
+error with call ID and effect_may_have_occurred=True, without a normal result or
+retry. Child effects and audit transactions are not atomic; audit evidence never
+authorizes a later request. P2 has no mandatory audit rows.
+
+After authorization, strict root resolution and each fixed cwd component's lstat
+reject missing/non-directory targets, symlinks and all Windows reparse attributes,
+including real junction escapes, and verify resolved containment. Minimal inherited
+environment defaults to SystemRoot; only SystemRoot, WINDIR, LANG, LC_ALL and
+LC_CTYPE may be explicitly selected. PATH, home/profile, proxy, Python injection
+and credential names cannot be selected. No full environment is copied or logged.
+Trusted integration must configure narrow non-secret roots, executables and inputs;
+PHX-045 owns broader secret handling and remains TODO.
+
+One direct child uses argv, shell=False, no PTY, binary pipes and no hidden worker.
+Synchronous fair reads use Windows PeekNamedPipe or POSIX nonblocking os.read;
+there is no communicate/read-all capture or reader thread. Stdin is disabled by
+default and limited to 64 KiB UTF-8; a temporary seekable file, created only after
+authorization/audit and closed after the attempt, prevents blocking on unconsumed
+input. Caller/fixed argument sequences each allow at most 64 strict strings, each
+at most 4096 UTF-8 bytes; the final executable/fixed/caller argv is at most 16 KiB.
+Timeout defaults to 30 seconds and is finite, positive and at most 300 seconds.
+Stdout and stderr each default to 64 KiB, with strict bounds 1 byte through 1 MiB.
+Capture retains bounded byte prefixes and observes at most one extra byte per
+stream before an immediate direct-child kill on excess; timeout also kills. Wait
+and cleanup are bounded best effort. Native OS process creation is not preemptible,
+and there is no process-tree manager. Cancellation metadata truthfully stays false.
+
+Raw prefixes decode as UTF-8 with replacement, preserving newlines. Replacement
+characters can expand encoded result text up to three times the raw-byte ceiling.
+Both truncation flags mark incomplete capture on timeout/limit, even if only one
+stream exceeded its budget. Zero exit maps to success evidence; nonzero exit to
+failure/process_failure, timeout to timeout/timeout, excess output to failure/
+output_limit, missing executable to unavailable_dependency/executable_unavailable,
+and cwd/other I/O failures to failure with closed codes. Modifying profiles preserve
+possible-effect evidence once launch succeeds, including nonzero/timeout/limit or
+reader failure; pre-launch failures report no effect. Effect_applied is conservative
+possible mutation evidence, not proof of a specific change. P2 reports no mutation.
+
+Frozen exact-revalidated calls, profiles, intents and results reject extras,
+stored-value forgeries and contradictory evidence. Results contain no process
+handles, environment dumps or raw exceptions. Stdout/stderr remain inert untrusted
+evidence, with no approval/instruction authority, command chaining, logging, audit
+payload, automatic memory/RAG insertion or model forwarding. Exit codes do not
+establish verified task completion or bypass PHOENIX/LEVI. Trusted integration owns
+approval authenticity, request admission and replay control.
+
+V1 follows PHX-043's single-user local workspace model: hostile concurrent path
+replacement and hostile executables are outside this boundary. Cwd containment is
+not an OS sandbox, process-tree restriction, network firewall or crash-atomic audit
+guarantee. OS failure may prevent best-effort cleanup; trusted profiles must not
+leave descendants. Real Windows process/junction behavior is tested; POSIX/macOS
+branches are declared but not executed on this Windows host. No existing runtime,
+filesystem tool, agent/model, secret store, EventBus, API/frontend, schema, migration
+or dependency changes. Alembic remains 0005_audit_events; EventType remains 32.
