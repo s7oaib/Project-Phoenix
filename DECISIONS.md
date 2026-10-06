@@ -2123,3 +2123,47 @@ startup, EventBus, tool/permission/audit, model/prompt/secrets/memory/RAG, audio
 logging/persistence, API/frontend/schema or dependency integration is introduced.
 Five migrations, head 0005_audit_events and 32 EventTypes remain unchanged.
 Future better VAD adapters require separate explicit dependency/model authorization.
+
+## ADR-059 — Bounded provider-neutral STT and inert transcript evidence
+Status: Accepted. Date: 2026-10-07. Ticket: PHX-062.
+
+Conceptual owner voice; UTA remains display metadata and PHOENIX supreme.
+SttProvider defines capabilities/transcribe/cancel/aclose with read-only identity
+and immutable sorted observational operation IDs. Reuse unchanged PHX-060 PCM
+and neutral cancellation evidence. No provider routing, retry or fallback policy
+is embedded; adapters own bounded operation state/deadlines/cooperative cleanup.
+ACCEPTED cancellation acknowledges the request, not proven native cessation.
+
+Use the ticket-authorized stt/__init__.py layout for public phoenix.voice.stt,
+preserving PHX-060's live top-level file assertion and all prior tests/sources.
+Frozen extra-forbidden exact capability/request/transcript contracts detach and
+revalidate stored values, rejecting subclasses and forged extras/collisions.
+Capabilities admit only 16000 Hz mono two-byte pcm_s16le and strict support flags.
+Requests admit 1..256 exact PCM frames, one stream, contiguous sequences and
+nondecreasing UTC capture times, capped at 960000 decoded bytes / 30 seconds.
+No repair, resampling, conversion, rechunking, padding or truncation occurs.
+
+PCM byte access deliberately concatenates only bounded decoded bytes in supplied
+order, without a container, cache, logging, persistence or I/O. Duration is exact
+decoded bytes / 32000.0. Caller owns frames and window selection; PHX-064 owns
+utterance/conversation policy. Language hints/results are opaque optional tokens,
+trimmed only outside, preserving case/Unicode, without locale/taxonomy/selection
+inference. Hint does not fabricate or constrain reported language/confidence.
+
+Transcript correlation binds operation/provider/stream and first/last sequences.
+Text preserves exact Unicode/whitespace, including empty evidence, capped at
+20000 characters and excluded from repr. Optional language confidence is an
+ordinary finite float 0..1 requiring a language, and stays provider-local evidence.
+Text/language/confidence are neither authentication, speaker/user identity,
+permission/approval, intent, task/startup success nor an executable instruction.
+Closed safe errors expose only canonical codes, never private audio/text/backend
+diagnostics. No automatic prompt guard or transcript-to-memory integration exists.
+
+No concrete Whisper/faster-whisper/Vosk/cloud engine, STT model or new dependency
+is introduced. Future local STT requires separately approved runtime/model
+artifacts. No microphone/device, wake/VAD invocation, TTS, conversation/barge-in,
+startup, EventBus, tool/permission/audit/model, memory/RAG/secrets, persistence,
+API/frontend or schema integration is added. Existing source/tests/manifests,
+five migrations, head 0005_audit_events and 32 EventTypes remain unchanged.
+Two independent test-only adapters plus guarded fresh/uncached module execution
+provide deterministic substitution, correlation, cancellation and inertness evidence.

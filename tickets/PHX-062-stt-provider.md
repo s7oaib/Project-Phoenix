@@ -1,6 +1,6 @@
 # PHX-062 — STT provider
 
-Status: TODO
+Status: DONE
 Phase: 6 — Voice
 
 ## Objective
@@ -1007,3 +1007,121 @@ Disclose at minimum:
 
 # Next
 PHX-063 — TTS provider. Do not start it.
+
+## Completion evidence — 2026-10-07
+
+Implemented only `phoenix/voice/stt/__init__.py` and
+`tests/test_stt_provider.py`; completion records are this ticket,
+FEATURE_TICKETS.md and ADR-059. The explicitly authorized package layout keeps
+`phoenix.voice.stt` public while preserving PHX-060's top-level layout gate and
+every previous production/test file. No dependency or model artifact changed.
+Owner is neutral `voice`; UTA is display metadata; PHOENIX remains supreme.
+
+Preparation verified a clean official D:\Project-Phoenix checkout, correct
+origin, feature/PHX-062-stt-provider and exact preparation HEAD
+463b04515ed39c45d7e9d40074e32933d7f20295. Main was
+d31f5e6b82e972104000678025140a4a656d98f2, with 0 behind / 1 ahead.
+Required contracts, relevant docs, full ticket, and existing code/tests were
+reviewed. No architecture ambiguity required reinterpretation.
+
+### Contract and acceptance evidence
+
+- Exact ten-code safe errors; only canonical enum members accepted; exception
+  messages/chains never expose private input or backend diagnostics.
+- Frozen extra-forbidden exact eight-field capabilities, three-field request
+  and eight-field transcript. Stored snapshots, subclasses, missing fields,
+  injected extras and collisions are revalidated and rejected when forged.
+- PHX-060 PCM reused unchanged: 16000 Hz, mono, two-byte pcm_s16le. Requests
+  detach 1..256 exact frames, require one stream, contiguous ordered sequences
+  and nondecreasing UTC timestamps, and reject over 960000 decoded bytes.
+  No repair, resample, rechunk, padding, truncation or automatic VAD exists.
+- Raw bytes concatenate exactly in source order, without a container, cache,
+  logging or I/O. Duration is decoded bytes / 32000.0; fractional, 0.02,
+  1.0 and 30.0 second boundaries pass.
+- Optional language tokens are ordinary UTF-8-valid strings, trimmed only at
+  the outside, 1..32 characters, control-free, preserving case/Unicode. No
+  locale lookup, taxonomy, provider selection or language guarantee is inferred.
+- Transcript text preserves exact Unicode/whitespace, admits empty evidence,
+  is capped at 20000 characters, rejects NUL/surrogates and stays out of repr.
+  Optional ordinary finite float confidence 0..1 requires a reported language.
+  Hint never fabricates or constrains reported language/confidence.
+- Response binds exact operation/provider/stream/first/last sequence values.
+  Text/language/confidence grant no authentication, speaker identity, approval,
+  task/startup success or action. Actual PermissionGrant/UserPermissionDecision/
+  ToolDefinition validation rejects transcript objects and dumps.
+- Pure async ABC exposes read-only identity, sorted immutable observational
+  active IDs, capabilities/transcribe/cancel/aclose. Two independent test-only
+  adapters prove substitution; scoped ACCEPTED cancellation leaves another
+  request active. NOT_FOUND/UNSUPPORTED and exact cancellation correlation pass.
+  ACCEPTED acknowledges a request, without proving native inference cessation.
+- Static allowlists, guarded uncached module execution and a fresh interpreter
+  exercise validation/JSON/PCM assembly and inert command-looking output with
+  file/DB/socket/DNS/process/thread/task/log/device/environment/project-integration
+  paths blocked. No concrete engine, runtime discovery or production fake exists.
+
+The ticket's 147 required categories are covered by 414 parametrized cases:
+1..12 errors/language; 13..27 capabilities; 28..50 request; 51..60 PCM assembly;
+61..92 transcript; 93..111 ABC/fakes/consumers/cancellation; 112..147 trust,
+separation, isolation, protected-source and credential/signature checks.
+All acceptance criteria PASS; no prior test was edited or weakened.
+
+### Commands and results
+
+All commands ran from the official checkout. External logs/JUnit XML are under
+C:\Users\shoai\.codex\validation\PHX-062-20261007; package artifacts are in
+its dist directory. No validation/build artifacts were added to Git.
+
+- `uv run --locked pytest tests/test_stt_provider.py -q`: three consecutive
+  PASS results, 414 each (1.62s, 1.45s, 1.49s).
+- `uv run --locked pytest tests/test_<suite>.py -q`: all 37 established suites
+  ran individually and PASS, matching their baselines:
+  vad 403; wake_word_provider 537; prompt_injection_defenses 604;
+  urahara_research_flow 492; search_provider 400; screenshot_vision_loop 397;
+  windows_ui_automation 493; browser_tool 653; secrets_boundary 402;
+  terminal_tool 270; filesystem_tool 649 passed / 16 existing skipped;
+  audit_trail 302; permission_engine 926; tool_registry 204;
+  memory_schema 244; pudding_memory_service 167; document_ingestion 300;
+  vector_store_sqlite 273; retrieval_context 367; provenance_citations 173;
+  persistence 12; agent_registry 96; phoenix_orchestrator 101;
+  aizen_planner 151; agent_model_router 213; task_graph_state_machine 348;
+  structured_agent_handoffs 214; levi_verification 242;
+  mahoraga_recovery 790; kaido_failsafe 574; model_provider 61;
+  ollama_provider 108; model_registry 83; model_lifecycle 54;
+  embeddings 182; colibri_provider 194; model_benchmark 130.
+- Aggregates: Phase 1 812; Phase 2 2729; Phase 3 1524 plus persistence 12;
+  Phase 4 2753 passed / 16 skipped; Phase 5 3039; previous Phase 6 940.
+- `uv run --locked pytest -q`: 12337 passed, 16 existing skipped,
+  one existing Starlette/httpx deprecation warning, 641.46s. No failures/errors.
+- `uv lock` and `uv sync --locked`: PASS, 43 packages, manifests unchanged.
+- `uv run --locked ruff check .`: PASS.
+- `uv run --locked ruff format --check .`: PASS, 118 files formatted.
+- `uv run --locked mypy`: PASS, 112 source files.
+- `uv build --out-dir <external dist>`: PASS, wheel and sdist contain exact
+  final phoenix/voice/stt/__init__.py, no stale flat stt.py.
+- Established foundation suites: 126 passed, existing warning only; exact
+  /health unchanged. `npm test`: 4 passed; desktop workspace typecheck/build PASS.
+- `uv run --locked alembic heads`: sole head 0005_audit_events. All five
+  migrations and EventBus/EventType source unchanged; EventType remains exactly 32.
+- Protected baseline comparison: all 137 previous Git blobs under source,
+  tests, migrations, desktop and dependency/npm manifests unchanged.
+- Repository credential/signature scan PASS; `git diff --check` PASS.
+
+### Security, invariants and limitations
+
+Reviewed INV-001..INV-024: all preserved. PermissionEngine/P4/P5, ToolRegistry,
+audit, verification, bounded recovery/fail-safe, frontend separation, text
+availability and heavy-model policy are unchanged. Audio/transcript are
+untrusted inert evidence, never automatic normal-memory or prompt input.
+No microphone/device, network, wake/VAD invocation, TTS, conversation/barge-in,
+startup health, EventBus, tool/permission/audit/model, memory/RAG/secrets,
+persistence/schema, API/frontend or dependency integration was introduced.
+The ABC exposes state/cancel/cleanup and explicit errors; later integration
+owns observable fallback and voice-failure isolation from orchestration.
+
+ADR-059 is the only new decision. No unsupported assumptions were introduced.
+This is an abstraction only: no Whisper/faster-whisper/Vosk runtime or model,
+microphone capture, automatic VAD, audio conversion, streaming partials, word
+timestamps, translation or diarization. Caller owns fixed-format frame selection
+and bounded windows <=30 seconds. Language/confidence are provider-local evidence,
+not authentication or permission. Future concrete STT requires separate approved
+runtime/model artifacts. PHX-063+ remain TODO; Phase 6 remains INCOMPLETE.
