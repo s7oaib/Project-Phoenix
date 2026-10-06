@@ -1948,3 +1948,70 @@ credential lookup, memory/RAG/embedding/citation/history persistence, EventBus,
 API/frontend/schema or dependency change. Prior production and tests are intact;
 five migrations, head 0005_audit_events and 32 EventTypes remain unchanged.
 PHX-055 generalized prompt-injection defenses remain separate future work.
+
+## ADR-056 — Always-untrusted JSON prompt boundary and guarded research adapter
+Status: Accepted. Date: 2026-10-07. Ticket: PHX-055.
+
+PromptInjectionGuard exact-revalidates AgentRegistry/AgentDefinition and requires
+neutral perimeter_security. GOJO is removable display metadata; PHOENIX remains
+supreme and PermissionEngine alone authorizes actions. The guard is a frozen,
+slotted stateless synchronous service, with no retained registry, cache or mutable
+policy. Every external origin always stays untrusted, including no-signal content.
+
+UntrustedContentItem preserves exact ordinary Unicode evidence and its UTF-8
+SHA-256; IDs/field names are strict normalized bounded control-free strings.
+Frozen extra-forbidden contracts reject stored-value/subclass/colliding-extra
+forgeries, secret objects without coercion, NUL and malformed Unicode. Seven
+origin categories are provenance only. Eight finite heuristic signals emit once
+in canonical enum order. Temporary NFKC/casefold/Cc-Cf removal/whitespace scanning
+never changes evidence. Explicit bounded substring tables perform no regex,
+decoding, semantic classification or model call. Severity none/suspicious/high
+is structural advisory signaling only, never trust, intent, permission or safety.
+
+GuardedPrompt binds exact ordered items/assessments to perimeter_security and
+phoenix-prompt-boundary-v1. Boundaries permit 0..64 items, <=50000 chars each,
+<=200000 total evidence chars, and meaningful user task <=4096. Overflow rejects,
+never truncates. A fixed code-owned PHOENIX preamble precedes one canonical JSON
+payload containing user task, original evidence/provenance and assessments.
+Sorted keys, compact separators and ASCII escaping are deterministic; additional
+JSON Unicode escapes encode <, >, &, and backticks without deleting content.
+Attacker newlines/delimiters cannot introduce structural header/footer lines;
+json.loads recovers exact originals. Text cannot interpolate into policy. Rendered
+text is sensitive ordinary str and must not be logged; separation is not proof
+that a future model will obey the policy.
+
+GuardedResearchSynthesizer implements unchanged PHX-054 ResearchSynthesizer.
+Exact-revalidate request/nested sources before converting source-order fields:
+requested_url, final_url, title, optional source_name/date_text/source_ref, content.
+For page evidence, final_url/content use web_page; other metadata and snippets
+use web_search. Content IDs hash canonical [source_id,field_name]; hashes bind
+exact text. Query becomes separate user_task. Only GuardedResearchRequest reaches
+the neutral GuardedResearchResponder ABC: research/responder IDs, UTC as_of,
+1..8 ordered unique allowed source IDs and exact correlated GuardedPrompt.
+No raw ResearchSourceEvidence/request or model-specific options reach responder.
+Future responders must use render_text() for model input. One response is exactly
+revalidated, including claims and research/synthesizer/known-source correlation;
+original draft text/order remain untrusted. No retries, fallback or trusted flag.
+
+One active caller synthesis per instance/event loop, second busy, no queue/worker.
+Scoped cancel marks an independent flag before one exact responder cancellation,
+revalidates neutral acknowledgement and cancels the still-owned caller task.
+Repeated pending cancellation does not re-delegate. Suppressed cancellation cannot
+return a draft; delayed acknowledgement cannot cancel unrelated subsequent caller
+work. Active state clears in finally. Accepted acknowledges local cancellation,
+not proven remote stop. V1 adapter OWNS responder: aclose requests active scoped
+cancellation then attempts responder close exactly once, even after cancel failure.
+Closed state begins before awaits; future synthesize/cancel raise closed. Concurrent
+close callers wait for the first close; safe cleanup failure is retained, no retry.
+Resources/deadlines/global model scheduling remain integration responsibilities.
+
+No concrete responder/model, privileged tool invocation, permission/audit mutation,
+secret resolution, URL fetch, logging, memory/RAG/citation/persistence, EventBus,
+API/frontend, schema/migration or dependency change. PHX-054 research.py and all
+previous production/tests remain unchanged. Five migrations, 0005_audit_events and
+32 EventTypes remain intact. Finite heuristics have false positives/misses; encoded,
+multilingual, visual, semantic and unknown jailbreak attacks are not fully covered.
+No-signal never means safe; evidence is not silently sanitized. Upstream secret
+admission and downstream ToolRegistry/PermissionEngine/audit remain necessary.
+Zero-source synthesis rejects invalid_input because URAHARA already skips it;
+metadata can overflow the guard's total budget even when source content alone fits.
