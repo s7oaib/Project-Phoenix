@@ -2167,3 +2167,55 @@ API/frontend or schema integration is added. Existing source/tests/manifests,
 five migrations, head 0005_audit_events and 32 EventTypes remain unchanged.
 Two independent test-only adapters plus guarded fresh/uncached module execution
 provide deterministic substitution, correlation, cancellation and inertness evidence.
+
+## ADR-060 — Provider-neutral TTS and bounded canonical synthesis evidence
+Status: Accepted. Date: 2026-10-07. Ticket: PHX-063.
+
+Conceptual owner voice; UTA is removable display metadata, with PHOENIX supreme.
+The public phoenix.voice.tts package defines a neutral async TtsProvider ABC with
+read-only provider identity, sorted immutable observational active IDs and
+capabilities/synthesize/cancel/aclose. Reuse existing CancellationResult/status
+semantics; ACCEPTED acknowledges cancellation rather than proving native inference
+stopped. Consumers exact-revalidate returned evidence and correlation. Adapters
+own bounded state/deadlines/cleanup; the base owns no runtime resources or routing,
+retry, fallback, playback or conversation policy.
+
+Frozen extra-forbidden profile/capability/request/audio snapshots reject forged
+stored values, subclasses and injected/colliding extras. Nested profile/language
+tuples are detached, ordered and unique. Capabilities admit 1..64 profiles, exactly
+one original primary, with optional original/licensed/consented profiles. Declared
+provenance is evidence, not independent proof of legal rights, consent or identity.
+No bundled profile, celebrity/character identity, cloning sample or embedding exists.
+
+Requests preserve exact meaningful UTF-8 Unicode text/whitespace up to 4096
+characters, reject NUL and exclude text from repr. Voice is explicit; optional
+language tokens are opaque, case-preserving and at most 32 characters. Missing
+voice fails unsupported_voice; a present unsupported hint fails unsupported_language.
+No implicit primary fallback, language substitution or backend request option exists.
+
+Results contain canonical standard base64 for nonempty even raw mono S16LE PCM
+at a provider-declared strict integer 8000..48000 Hz, with exact lowercase SHA-256.
+Bound encoded input before decode; decoded PCM is at most 8388608 bytes and at
+most 120 seconds. Byte access and duration exact-revalidate without I/O or cache.
+Bind operation/provider/voice/rate/channels/width/encoding to request/capabilities.
+Hashes and duration do not prove semantic synthesis correctness. PCM is excluded
+from repr; deliberate serialization/byte access remains sensitive caller data.
+Safe errors expose only a closed category, never private text/PCM/backend details.
+
+Coqui XTTS remains an optional candidate. No concrete engine, model, voice sample,
+new dependency, audio device or network synthesis is introduced. Future concrete
+local TTS requires separate dependency/model/voice-profile authorization. PHX-060,
+061 and 062 production behavior remains unchanged; only their pure neutral helpers
+and cancellation evidence are reused. PHX-064 owns playback/conversation/barge-in;
+PHX-065 owns startup. No fixed-phrase cache, automatic memory, EventBus, privileged
+tool, permission, audit, model/RAG/secrets, persistence, API/frontend or schema
+integration exists. EventType remains 32 and sole migration head 0005_audit_events.
+
+Testing compatibility: remove only stale historical repository-diff guards in
+tests/test_vad.py, tests/test_stt_provider.py, tests/test_search_provider.py and
+tests/test_urahara_research_flow.py. Their ticket-era broad diffs/dynamic origin/main
+hash equality prevented later legitimate tracked additions or test maintenance.
+Scope validation now belongs to active-ticket/final-diff review. No functional,
+security, provider, credential or semantic assertion was weakened; no skips/xfails
+were added. All other syntax in those files is unchanged. Their 403/414/400/492
+case counts are unchanged and all pass before staging and with TTS actually staged.

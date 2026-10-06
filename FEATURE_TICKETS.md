@@ -61,7 +61,7 @@ Phase 5 status: COMPLETE.
 - PHX-060 Wake-word provider — DONE
 - PHX-061 VAD — DONE
 - PHX-062 STT provider — DONE
-- PHX-063 TTS provider — TODO
+- PHX-063 TTS provider — DONE
 - PHX-064 Voice conversation/barge-in — TODO
 - PHX-065 Rise-Phoenix startup health sequence — TODO
 

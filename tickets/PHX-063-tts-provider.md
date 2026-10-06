@@ -1,6 +1,6 @@
 # PHX-063 — TTS provider
 
-Status: TODO
+Status: DONE
 Phase: 6 — Voice
 
 ## Objective
@@ -1069,3 +1069,143 @@ The final PHX-063 diff may now include exactly these historical test-only compat
 This compatibility repair must be documented truthfully in the PHX-063 completion evidence and ADR-060 testing/compatibility notes.
 
 No separate architecture ADR is required for the test-harness correction.
+
+# Completion evidence — 2026-10-07
+
+Preserved both provisional drafts and synchronized only the authoritative ticket
+by normal fetch and ff-only pull, from 0879cce27d369b8590aded3969b6fbeefab2b2a2
+to e15ffd6dd835987a3afcfd4bbce4feadbcf98f81. origin/main remained
+022b37c3daf7ef35f4f76331c3862c415abf4c66, 0 behind / 2 ahead before completion.
+Reviewed the amended ticket, contracts, tests and required architecture authority.
+
+Implemented phoenix/voice/tts/__init__.py and tests/test_tts_provider.py with
+602 deterministic synthetic cases covering the frozen contract, adversarial exact
+revalidation, privacy, canonical PCM bounds/correlation, substitution, scoped
+cancellation, explicit cleanup, guarded uncached import and side-effect isolation.
+No real voice/model/device/network TTS path or dependency was introduced.
+
+## Historical regression repair and actual staged proof
+
+Removed 71 stale process-policy lines only: VAD's historical broad production
+diff (17), STT's historical broad source/test diff (18), Search's dynamic origin/main
+hash loop plus unused generator/Iterator import (19), and URAHARA's dynamic
+origin/main hash loop (17). VAD was independently confirmed stale: its baseline
+diff includes legitimate later STT/TTS sources. Search/URAHARA dynamic equality
+guards were also repaired. Preserved all EventType/Alembic/wake/migration-count,
+functional, security, credential, static, side-effect and provider assertions.
+No skip/xfail/deselection, Git mock, fake state, environment bypass or future-ticket
+allowlist was introduced. Existing historical test functions and parametrization
+counts remain unchanged. Independent AST comparison proves every other node in
+all four files unchanged.
+
+| Suite | Before staging | Actual six-file staged state |
+| --- | --- | --- |
+| TTS | 602 passed | 602 passed |
+| VAD | 403 passed | 403 passed |
+| STT | 414 passed | 414 passed |
+| Search | 400 passed | 400 passed |
+| URAHARA | 492 passed | 492 passed |
+
+Then uv run --locked pytest tests/test_tts_provider.py -q passed three consecutive
+times, 602 each, with the implementation and repairs still staged. Scope/process
+validation is an active-ticket review outside permanent historical tests.
+
+## Required individual regressions
+
+Each row was run individually using uv run --locked pytest <path> -q, while
+the intended source/test changes were staged. No historical baseline count fell.
+
+| Suite | Result |
+| --- | --- |
+| tests/test_stt_provider.py | 414 passed |
+| tests/test_vad.py | 403 passed |
+| tests/test_wake_word_provider.py | 537 passed |
+| tests/test_prompt_injection_defenses.py | 604 passed |
+| tests/test_urahara_research_flow.py | 492 passed |
+| tests/test_search_provider.py | 400 passed |
+| tests/test_screenshot_vision_loop.py | 397 passed |
+| tests/test_windows_ui_automation.py | 493 passed |
+| tests/test_browser_tool.py | 653 passed |
+| tests/test_secrets_boundary.py | 402 passed |
+| tests/test_terminal_tool.py | 270 passed |
+| tests/test_filesystem_tool.py | 649 passed; 16 existing skips |
+| tests/test_audit_trail.py | 302 passed |
+| tests/test_permission_engine.py | 926 passed |
+| tests/test_tool_registry.py | 204 passed |
+| tests/test_memory_schema.py | 244 passed |
+| tests/test_pudding_memory_service.py | 167 passed |
+| tests/test_document_ingestion.py | 300 passed |
+| tests/test_vector_store_sqlite.py | 273 passed |
+| tests/test_retrieval_context.py | 367 passed |
+| tests/test_provenance_citations.py | 173 passed |
+| tests/test_persistence.py | 12 passed |
+| tests/test_agent_registry.py | 96 passed |
+| tests/test_phoenix_orchestrator.py | 101 passed |
+| tests/test_aizen_planner.py | 151 passed |
+| tests/test_agent_model_router.py | 213 passed |
+| tests/test_task_graph_state_machine.py | 348 passed |
+| tests/test_structured_agent_handoffs.py | 214 passed |
+| tests/test_levi_verification.py | 242 passed |
+| tests/test_mahoraga_recovery.py | 790 passed |
+| tests/test_kaido_failsafe.py | 574 passed |
+| tests/test_model_provider.py | 61 passed |
+| tests/test_ollama_provider.py | 108 passed |
+| tests/test_model_registry.py | 83 passed |
+| tests/test_model_lifecycle.py | 54 passed |
+| tests/test_embeddings.py | 182 passed |
+| tests/test_colibri_provider.py | 194 passed |
+| tests/test_model_benchmark.py | 130 passed |
+
+Phase aggregates: Phase 1 812; Phase 2 2729; Phase 3 1524 plus persistence 12;
+Phase 4 2753 passed / 16 existing skips; Phase 5 3039; previous Phase 6 1354.
+
+## Full quality, foundation and desktop
+
+- uv lock and uv sync --locked: PASS; pyproject.toml/uv.lock unchanged.
+- uv run --locked pytest: 12939 passed, 16 existing skips, one existing
+  Starlette/httpx TestClient deprecation warning; 12337 baseline plus 602 new cases.
+- uv run --locked ruff check .: PASS.
+- uv run --locked ruff format --check .: PASS, 120 files formatted.
+- uv run --locked mypy: PASS, 114 source files.
+- uv build --out-dir <external-validation-directory>/dist: PASS, wheel and sdist.
+  Both contain exact source bytes at phoenix/voice/tts/__init__.py, no flat tts.py.
+- Established bootstrap/API/config/persistence/events/hardware foundation:
+  126 passed, same existing warning. Exact /health unchanged.
+- npm test: 4 passed; desktop workspace typecheck and production build: PASS.
+  An external log wrapper console-encoding error after an initial successful npm
+  test was corrected; all three desktop commands subsequently completed normally.
+
+All logs, JUnit XML, review scripts/reports and Python package artifacts are outside
+the project in C:/Users/shoai/.codex/validation/PHX-063-20261007. Generated desktop
+build output is ignored. No artifacts are staged or delivered with this ticket.
+
+## Security, scope and invariants
+
+Independent Git-blob checks: 139 prior protected source/test/schema/desktop/
+dependency paths, with 135 unchanged and only the four explicitly authorized test
+repairs different. All prior production sources, dependency manifests, five
+migrations, EventBus/EventType and API/frontend remain unchanged. Sole Alembic head
+0005_audit_events; EventType 32. Repository credential/signature scan PASS.
+Guarded module execution denies filesystem/DB/network/subprocess/thread/task,
+EventBus, device, logging and environment-secret work during import, construction,
+validation, synthetic synthesis/cancel/close and pure PCM access. Static import/call
+review and exact authority-object tests preserve all product boundaries.
+
+Reviewed INV-001..INV-024: all preserved. PHOENIX remains supreme; AIZEN/LEVI/
+MAHORAGA/KAIDO roles and bounded recovery unchanged. PermissionEngine remains
+deterministic, P4 confirmation and P5 blocking unchanged, with no tool bypass/audit
+weakening/LLM permission/voice authority/automatic memory/heavy runtime/hidden
+fallback/dependency promotion. ADR-060 records architecture and compatibility.
+All deterministic implementation gates pass. Final complete staged diff review,
+five-suite staged recheck and whitespace check are required before the exact
+completion commit and feature-only push; no PR, main push or merge is authorized.
+
+## Limitations and next scope
+
+Abstraction only: no concrete Coqui/XTTS engine/model, playback, speaker/device,
+streaming/chunked synthesis, fixed-phrase cache, cloning, bundled themed/character
+voices or rate/pitch/style/emotion controls. Provenance is declarative evidence,
+not independent rights/consent proof. Mono S16LE, provider-declared 8–48 kHz,
+at most 8 MiB / 120 seconds per result. No conversation/barge-in/startup integration.
+Future concrete local TTS requires explicit dependency/model/voice-profile approval.
+PHX-064/065 remain TODO; Phase 6 remains INCOMPLETE. PHX-064 is not started.
