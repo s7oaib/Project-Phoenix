@@ -53,7 +53,9 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-052 Screenshot/vision loop — DONE
 - PHX-053 Search provider abstraction — DONE
 - PHX-054 URAHARA research flow — DONE
-- PHX-055 Prompt-injection defenses — TODO
+- PHX-055 Prompt-injection defenses — DONE
+
+Phase 5 status: COMPLETE.
 
 ## Phase 6 — Voice
 - PHX-060 Wake-word provider — TODO

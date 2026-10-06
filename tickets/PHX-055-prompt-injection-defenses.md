@@ -1,6 +1,6 @@
 # PHX-055 — Prompt-injection defenses
 
-Status: TODO
+Status: DONE
 Phase: 5 — Computer & Web
 
 ## Objective
@@ -1272,3 +1272,141 @@ At minimum:
 
 # Next
 PHX-060 — Wake-word provider. Do not start it.
+
+## Completion evidence — 2026-10-07
+
+All deterministic PHX-055 gates PASS. Feature preparation HEAD:
+1e9e3042fbcd7d100f1cc2691b0f43b29f2e296d. Main remains
+bfbd61b7380ab3aea57e86bf3565841d965d769f. No main push/PR/merge/PHX-060 work.
+
+Created phoenix/security/prompt_injection.py, phoenix/web/guarded_synthesis.py and
+tests/test_prompt_injection_defenses.py. Modified only DECISIONS.md (sole ADR-056),
+FEATURE_TICKETS.md and this ticket. No existing production/test/init/dependency file
+changed. PHX-055 DONE closes Phase 5; PHX-060+ remain TODO.
+
+Public guard API: UntrustedContentOrigin, PromptInjectionSignal,
+PromptInjectionSeverity, UntrustedContentItem, PromptInjectionAssessment,
+PromptBoundaryRequest, GuardedPrompt, PromptInjectionErrorCode,
+PromptInjectionError, PromptInjectionGuard (owner_id, assess, guard).
+Public adapter API: GuardedResearchRequest, GuardedResearchResponder,
+GuardedResearchSynthesizer (synthesizer_id, active_research_ids, closed,
+async synthesize/cancel/aclose). Existing ResearchSynthesizer interface satisfied.
+
+Seven exact origins and eight exact signals; severity exactly none/suspicious/high;
+ten closed errors. Errors contain category only, with private chains suppressed.
+Exact frozen six-field item preserves strict bounded Unicode text/private repr and
+exact UTF-8 hash. Six-field assessment binds ID/hash, canonical unique ordered
+signals, exact severity/suspicious and literal data_only=True. No trusted/safe/
+verified flag. NFKC/casefold/format-control scan view is temporary; original text
+and hashes never change. Finite explicit substring tables detect representative
+authority/override/permission/tool/credential/prompt/policy/role patterns without
+regex/backtracking, payload decoding, I/O or a model. False positives and misses
+are documented. SecretMaterial is rejected without str/repr/reveal coercion.
+
+Three-field boundary request and six-field guarded prompt are immutable, strict,
+extra-forbidden and exactly revalidated, including nested/colliding-extra attacks.
+IDs <=256, field name <=128, item text <=50000, user task <=4096; 0..64 unique items
+and <=200000 total text. Overflow explicitly rejects. Exact owner perimeter_security,
+version phoenix-prompt-boundary-v1, ordered one-to-one hash-correlated assessments.
+Fixed code policy precedes one sorted compact ASCII JSON line; reversible escapes
+for markup/backticks, quotes/backslashes/newlines protect structure while preserving
+exact originals after decoding. No eval/template substitution or silent sanitization.
+Rendered str contains sensitive evidence; repr/privacy applies to structured content
+fields, not a claim that an ordinary returned str can hide itself from repr/logging.
+
+Guard exact-revalidates registry/definitions and requires perimeter_security;
+GOJO aliases can be removed/renamed with identical behavior. No retained registry,
+mutable state/policy/cache, I/O or worker. Assessments grant no authority.
+
+Five-field GuardedResearchRequest binds IDs/UTC/1..8 ordered unique source IDs/
+exact prompt and boundary identity. Adapter revalidates exact PHX-054 request and
+sources, converts all seven required textual fields (optional fields only if present)
+in source order, hashes canonical source/field identity and exact original text.
+Page final_url/content have web_page origin; requested_url/search metadata/snippets
+web_search. Query stays separate user_task. Responder receives only guarded request,
+no raw sources/request or permission/action/model options. One call returns exactly
+revalidated/correlated PHX-054 draft; unknown/duplicate supporting references and
+stored/subclass/extra evidence reject. Text/order preserved; output remains untrusted.
+Real ToolRegistry/PermissionEngine plus unchanged URAHARA are exercised end-to-end
+with fake search/page/responder boundaries; report remains advisory, no actions.
+
+One active caller per instance/event loop; second busy, active IDs immutable.
+Scoped cancellation marks separate state, delegates exact research ID once and
+validates operation/provider/status. Suppression cannot return a draft. Unknown
+returns NOT_FOUND; delayed acknowledgements cannot cancel unrelated caller work.
+Finally cleans all terminal operation paths. No queue/worker/global shutdown.
+Owned responder aclose attempted exactly once after scoped cancel; closed before
+cleanup awaits, later synthesize/cancel closed, concurrent closes share completion,
+failure remains safe without retries. Acknowledgement is not remote-stop proof.
+
+### Commands and final results
+
+- THREE consecutive `uv run --locked pytest tests/test_prompt_injection_defenses.py -q`
+  runs: **604 passed each**, no warning. Complete 224 required matrix boundaries
+  plus adversarial cases; all synthetic and no live model/network/browser/credentials.
+- All **34** prior suites ran individually with locked pytest, exit 0.
+  Phase 5 previous: URAHARA **492**, search **400**, vision **397**, Windows **493**,
+  browser **653**; **2435 passed**.
+- Phase 4: secrets **402**, terminal **270**, filesystem **649 passed/16 skipped**,
+  audit **302**, permissions **926**, registry **204**; **2753 passed/16 skipped**.
+- Phase 3: memory **244**, PUDDING **167**, ingestion **300**, vector **273**,
+  retrieval **367**, citations **173**; **1524 passed**, persistence **12**.
+- All nine Phase 2 suites: **2729 passed**. All seven Phase 1 suites: **812 passed**.
+- Final `uv run --locked pytest -q`: **10983 passed, 16 skipped**, one existing
+  Starlette/httpx warning. Baseline 10379 plus all 604 new cases.
+  An earlier full run had one existing 10 ms benchmark timing failure:
+  `test_slow_optional_probe_does_not_consume_generation_deadline[2]`.
+  Its log was retained externally; the unchanged benchmark suite then passed
+  130 tests, followed by this clean full rerun. No prior code/test/timeout changed.
+- `uv lock`; `uv sync --locked`: PASS, pyproject.toml/uv.lock unchanged.
+- `uv run --locked ruff check .`: PASS; `ruff format --check .`: **111 files** PASS;
+  `uv run --locked mypy`: **105 source files** PASS.
+- `uv build --out-dir <external-validation>/dist`: sdist/wheel PASS, both new runtime
+  modules included. Logs/JUnit/archives remain outside repository/staging.
+- Foundation bootstrap/API/config/persistence/events/hardware: **126 passed**,
+  existing warning only; exact /health unchanged.
+- Desktop `npm test`: **4 passed**; desktop workspace typecheck/build PASS.
+- Protected review: **211 existing tracked files unchanged** from origin/main,
+  including previous runtime/tests/manifests/desktop and all five migrations.
+  Alembic head **[0005_audit_events]**, EventType **32**. Credential/signature scan:
+  **217 files**, zero matches. `git diff --check` PASS.
+
+### Security, invariants and network recovery
+
+INV-001 through INV-024 reviewed: PASS within ticket scope. PermissionEngine,
+ToolRegistry, AuditTrail, P0/P4/P5 behavior unchanged. External text cannot mint
+grant/decision/tool/audit authority or trigger copied commands. No direct privileged
+tool/browser/Windows/terminal/filesystem/screenshot/vision/search/model execution,
+SecretStore/environment lookup, memory/RAG/citation/persistence, EventBus/API/UI/
+schema or dependency integration. No content logging. Guarded uncached import,
+construction, assess/render and fake adapter flow deny file/DB/network/process/
+thread/task/logging/EventBus/secret environment access. Pydantic's plugin flag is
+stubbed without reading environment; all other lookups fail. Static checks and
+protected-source byte hashes complement runtime side-effect guards.
+
+Recovery: Cloudflare 1.1.1.1, Google 8.8.8.8 and Quad9 9.9.9.9 returned
+20.207.73.82. Both that edge and supplied 20.27.177.113 passed TCP 443 and secure
+curl --resolve --noproxy checks. Fetch used only ephemeral command-line options:
+`git -c http.proxy= -c https.proxy= -c http.curloptResolve=github.com:443:20.207.73.82 fetch origin`.
+TLS verification stayed enabled, remote HTTPS URL unchanged, no persistent network
+workaround configuration. Exact live main/preparation/relation/ticket-only diff
+verified before branch checkout. Ordinary `git ls-remote origin HEAD` later passed.
+Final staged/commit/push evidence is reported by this execution run.
+
+### Known limitations
+
+Finite heuristics can miss semantic/paraphrased/multilingual/encoded/visual/unknown
+jailbreak attacks and can flag benign quotations. No-signal never means safe/trusted.
+JSON/prompt separation preserves structural policy but cannot guarantee model
+obedience. No semantic intent/entailment classifier, secret discovery, payload
+decoding, model classifier or runtime policy mutation. Output stays untrusted;
+downstream ToolRegistry/PermissionEngine/audit remain required. Only this research
+input adapter adopts the boundary; other model-input paths must explicitly adopt it.
+Future responder must honor render_text() input obligation; no concrete responder
+is supplied. Caller owns genuine secret admission, deadlines/global scheduling;
+cancellation/cleanup remain cooperative and cannot prove remote stop. No silent
+truncation: metadata may make the guard budget overflow; zero-source synthesis is
+rejected because URAHARA already skips it. Rendered ordinary strings are sensitive.
+Existing skips/warning retained. Phase 5 COMPLETE; PHX-060 remains TODO.
+
+Next: **PHX-060 — Wake-word provider; not started**.
