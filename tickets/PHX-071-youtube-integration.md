@@ -928,3 +928,85 @@ relative to main is now expected to be exactly THREE commits ahead:
 3. `feat: complete PHX-071 youtube integration`
 
 No PR, merge, main push, force push or PHX-072 work.
+
+
+## Authoritative blocker resolution 2 — 2026-10-07
+
+The first PHX-060 guard clarification was itself incomplete because it attempted to compare
+all three PHX-060-owned voice files against the pre-PHX-060 baseline
+`e58d304df3a2097ae03e0b31941c9cf487a584f9`.
+
+Independent repository history verification establishes:
+
+- `phoenix/voice/__init__.py` exists at the original baseline and has blob SHA
+  `2c6454f1411a94441f1fa8d927a37aafa5a76197` both there and on current main.
+- `phoenix/voice/audio.py` does NOT exist at that baseline.
+- `phoenix/voice/wake.py` does NOT exist at that baseline.
+- PHX-060 completion commit
+  `4cc0feb59ae91bc77b72c7a3a0f1a7885f397ee3`
+  introduces the authoritative PHX-060 versions:
+  - audio.py blob `263368c5e12b65b38cc349b1e95fab79816297fc`
+  - wake.py blob `4d457b42a181e758b066bb845073b958a2c9cf30`
+- Both audio.py and wake.py have those exact same blob SHAs on current main
+  `d7c1cb166287b7272af16603bf9a3d018f13d2cb`.
+
+Therefore the historical wake guard repair is amended as follows and supersedes the
+baseline-selection portion of Authoritative blocker resolution A.
+
+### Exact historical comparison authority
+
+Keep the existing constant unchanged:
+
+`BASELINE = "e58d304df3a2097ae03e0b31941c9cf487a584f9"`
+
+Add exactly one second immutable comparison constant near it:
+
+`PHX060_COMPLETION = "4cc0feb59ae91bc77b72c7a3a0f1a7885f397ee3"`
+
+Inside only
+`test_prior_production_manifests_migrations_frontend_events_unchanged`:
+
+1. Compare `phoenix/voice/__init__.py` against `BASELINE`.
+2. Compare exactly:
+   - `phoenix/voice/audio.py`
+   - `phoenix/voice/wake.py`
+   against `PHX060_COMPLETION`.
+3. Require both diffs to be empty.
+4. Preserve the existing EventType count assertion.
+5. Preserve the existing Alembic sole-head assertion.
+6. Do not compare broad successor directories such as `phoenix/tools`.
+7. Do not compare audio.py or wake.py to the pre-PHX-060 baseline because they did not
+   exist there.
+8. Do not alter either comparison SHA.
+9. Do not modify PHX-060 production.
+10. No other historical test repair is authorized.
+
+This split-baseline test now proves the intended historical property precisely:
+the pre-existing voice package marker remains unchanged from the pre-PHX-060 baseline,
+and the two files created by PHX-060 remain unchanged from the PHX-060 completion.
+
+### Required re-verification
+
+After applying this corrected guard:
+
+- run the exact repaired test THREE consecutive times,
+- run the complete `tests/test_wake_word_provider.py` suite THREE consecutive times,
+- require 537 passed on every full-suite run,
+- then resume the full PHX-071 gate sequence from the prior clarification.
+
+All prior PHX-071 blocker resolutions remain authoritative:
+- use `X-Goog-Api-Key`, never query-string API-key transport,
+- use explicit monotonic `queue_revision` and bind
+  `expected_queue_revision` for stale-safe remove,
+- no additional historical repairs,
+- no gate waivers.
+
+Because this is a third preparation/clarification commit, successful PHX-071 completion
+is now expected to be exactly FOUR commits ahead of main:
+
+1. `docs: add PHX-071 YouTube integration ticket`
+2. `docs: resolve PHX-071 blockers`
+3. this corrected PHX-060 comparison-authority commit
+4. `feat: complete PHX-071 youtube integration`
+
+No PR, merge, main push, force push or PHX-072 work.
