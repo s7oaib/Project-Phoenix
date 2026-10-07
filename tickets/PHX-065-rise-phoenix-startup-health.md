@@ -660,3 +660,59 @@ Required repair constraints:
 12. Record this repair truthfully in PHX-065 completion evidence and ADR-062 only if ADR-062 is otherwise required. Do not rewrite PHX-016 semantics or claim a benchmark production change.
 
 All other PHX-065 authority, scope, completion requirements, exact commit message, branch-only push rule, and prohibition on PHX-070 remain unchanged.
+
+
+## Authoritative blocker resolution 2 — 2026-10-07
+
+A resumed PHX-065 full-suite run exposed a second unchanged historical timing-sensitive test:
+
+`tests/test_ollama_provider.py::test_stream_deadline_between_chunks_does_not_cancel_consumer`
+
+Observed evidence:
+
+- The authorized PHX-016 benchmark stabilization now passes.
+- `tests/test_model_benchmark.py` passed 130/130 three consecutive runs.
+- PHX-065 focused tests passed 509/509 three consecutive runs.
+- All required historical suites passed individually.
+- The full suite reached 14,397 passed and failed only this unchanged PHX-011 test.
+- The Ollama test passed individually in the PHX-065 working tree and in a separate unchanged-main snapshot.
+- The Ollama production and historical test files are unchanged from main.
+- The failure occurred before the first streamed chunk arrived inside a 0.01-second real wall-clock operation timeout.
+- PHX-011 requires deterministic mocked HTTP tests and does not require real-time scheduler latency to be part of this semantic check.
+- The equivalent Colibri test, `test_stream_deadline_between_chunks_does_not_cancel_consumer`, already avoids this scheduler-sensitive pattern by using a long operation timeout and patching the event-loop monotonic clock forward only for the post-first-chunk deadline check.
+
+This evidence identifies a deterministic-test design defect, not a PHX-065 or Ollama production defect. A separate full-suite failure on pristine main is not required before stabilizing this test because the test's semantic intent and deterministic sibling pattern are already explicit in repository authority.
+
+PHX-065 is therefore explicitly authorized to make one additional narrow historical **test-only deterministic-clock stabilization** in `tests/test_ollama_provider.py`.
+
+Required repair constraints:
+
+1. Do not modify `phoenix/models/ollama.py`. Current evidence does not authorize an Ollama production change.
+2. Modify only `test_stream_deadline_between_chunks_does_not_cancel_consumer` plus the minimal standard-library test import needed for deterministic clock patching.
+3. Preserve the exact semantic assertion:
+   - the first stream chunk is received successfully,
+   - the total operation deadline can expire while the iterator is suspended between chunks,
+   - the next iterator advance raises `ProviderUnavailableError`,
+   - the consumer task itself is not left cancelled,
+   - stream resources close and active operation IDs clear.
+4. Replace the real scheduler-sensitive timeout/sleep mechanism with the same deterministic pattern already used by the Colibri equivalent:
+   - import `patch` from `unittest.mock`,
+   - construct `OllamaProvider(..., operation_timeout=10, ...)`,
+   - receive the first chunk normally,
+   - capture `loop = asyncio.get_running_loop()` and `clock = loop.time`,
+   - only around the second `anext(iterator)`, patch `loop.time` to return `clock() + 20`,
+   - require `ProviderUnavailableError`.
+5. Remove the real `await asyncio.sleep(0.02)` from this test.
+6. Do not add retries, skips, xfail, load detection, platform checks, or blanket flaky-test handling.
+7. Do not weaken any cleanup/cancellation assertion.
+8. Do not change `test_total_deadline_cleans_operations` or other Ollama timeout tests; they continue to test real bounded timeout behavior separately.
+9. After repair, run the repaired exact test three consecutive times, then run the complete `tests/test_ollama_provider.py` suite three consecutive times and require all 108 cases to pass each run.
+10. Then rerun the entire required PHX-065 verification, including the full Python suite three consecutive times. All three full-suite runs must pass; no gate is waived.
+11. The final PHX-065 diff may now include exactly two authorized historical test files:
+    - `tests/test_model_benchmark.py` — prior timing-constant stabilization only,
+    - `tests/test_ollama_provider.py` — this deterministic event-loop-clock stabilization only.
+12. Record both historical test repairs truthfully in PHX-065 completion evidence. Do not claim any PHX-016 or PHX-011 production behavior changed.
+
+No additional historical test repair is authorized. If another unrelated historical failure appears, stop and report BLOCKED with exact evidence.
+
+All other PHX-065 authority, scope, completion requirements, exact completion commit message, feature-branch-only push rule, and prohibition on PHX-070 remain unchanged.
