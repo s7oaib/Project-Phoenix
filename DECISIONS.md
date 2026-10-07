@@ -2219,3 +2219,85 @@ Scope validation now belongs to active-ticket/final-diff review. No functional,
 security, provider, credential or semantic assertion was weakened; no skips/xfails
 were added. All other syntax in those files is unchanged. Their 403/414/400/492
 case counts are unchanged and all pass before staging and with TTS actually staged.
+
+## ADR-061 — Caller-driven voice conversation and scoped playback interruption
+Status: Accepted. Date: 2026-10-07. Ticket: PHX-064.
+
+Conceptual owner voice; UTA remains removable display metadata. PHOENIX retains
+supreme authority. Six voice-only states are sleeping/listening/thinking/speaking/
+degraded_voice/text_only, without PHOENIX ready/degraded health inference. Caller
+activation starts a session; PHX-065 owns wake/startup health and startup speech.
+No WakeWordProvider invocation or direct PhoenixOrchestrator coupling is added.
+
+Use conversation/__init__.py for the public phoenix.voice.conversation import,
+following VAD/STT/TTS packages. The preferred flat conversation.py would violate
+the unchanged PHX-060 top-level file-layout regression. No package export or prior
+source/test repair is needed. Reuse existing pure PCM/identifier/stored-evidence,
+VAD/STT/TTS and neutral cancellation contracts without changing their semantics.
+
+Exact frozen extra-forbidden observations correlate caller-supplied frames/VAD
+decisions via reconstructed VadRequest. Activity drives segmentation and barge-in;
+score does not derive activity or identity. A synchronous segmenter defaults to
+2 consecutive speech frames, 10 end-hangover silence frames and a total 256-frame
+buffer cap. Start frames are included, leading silence discarded, short internal
+silence retained if speech resumes, terminal silence excluded. The cap includes
+pending/trailing buffers; accepting any extra buffered observation beyond it resets
+and fails segment_too_long, without truncation. Stream/gap/time/invalid-evidence
+failures reset. Segments have 1..256 exact contiguous same-stream frames with
+nondecreasing timestamps and <=960000 decoded PCM bytes.
+
+VoiceResponder and AudioOutput are caller-owned neutral async ABCs with no concrete
+backend. Response request/draft text is exact meaningful UTF-8, private in repr,
+bounded to 20000/4096 characters and correlated to session/turn. Playback request
+contains exact TtsAudio plus IDs; result contains playback/output/status only.
+Canonical statuses completed/interrupted and exact cancellation acknowledgement
+correlation do not independently prove native playback stopped. All contract
+admission/integrity checks map to closed safe errors without private diagnostics.
+
+Manager construction binds no loop, invokes no collaborator/clock/event and starts
+no task. First async use binds one loop; cross-loop use fails wrong_event_loop.
+One active session/turn executes in the caller task: STT capabilities/transcribe,
+responder, TTS capabilities/synthesize, output play; each once with exact evidence
+and correlation, no routing/retry/alternate provider. STT failure yields text_only
+without text; TTS/playback failure preserves transcript/response in degraded_voice.
+Degraded input turns use STT/responder only and voice_output_unavailable fallback.
+Responder failure restores listening and raises responder_failure. Explicit
+activation is required to recover voice output; arbitrary transcript commands are
+not parsed. Injected monotonic clock drives a 30.0-second follow-up deadline;
+expire_if_idle is caller-driven, listening-only, with no hidden timer/task.
+
+Barge-in defaults to 2 consecutive speech observations; silence resets. Interrupt
+only exact active playback once, validating canonical ACCEPTED provider/playback
+acknowledgement before owning interruption. Barge-in owns interrupted/listening,
+refreshing deadline and publishing one trailing listening event. Explicit sleep
+owns interrupted/sleeping, clears session/deadline/segmenter/counters and emits no
+trailing listening. A later completed playback result cannot override either
+accepted ownership. NOT_FOUND/UNSUPPORTED/malformed/wrong acknowledgement or safe
+output failure raises cancellation_failure, without fake interruption/sleep.
+Sleep during thinking is rejected; unrelated STT/TTS/tools/models/tasks are never
+cancelled. A local asyncio lock serializes acknowledgement/events with completion,
+preventing delayed-ack races or duplicate interrupts; it creates no worker.
+
+Publish only existing voice.listening/voice.speaking/voice.interrupted, agent_id
+voice, correlation=session, payload session/turn IDs only. No text/PCM/hash/permission
+payload. Normal order listening/speaking/listening; barge-in adds interrupted;
+explicit speaking sleep has no trailing listening. Publish before committing state
+where practical. Event failure is explicit event_failure, never fabricated delivery.
+Accepted interrupt ownership may precede failed publication; the turn then aborts
+to sleeping with cleared bookkeeping and an explicit error. Cancelled interrupt
+publication likewise prevents observable-success finalization.
+
+Every awaited collaborator boundary checks caller cancellation/closed/event-stop
+state. Caller CancelledError propagates; suppressed cancellation cannot advance
+or finalize success. Cancellation aborts local state to sleeping, clears session
+and active bookkeeping, and does not cancel guessed collaborator operations.
+Same-loop close is idempotent, interrupts only active playback, clears local state
+and closes no borrowed STT/TTS/responder/output/EventBus. Late turn continuation
+after close cannot resurrect state. Post-close mutations fail closed.
+
+No microphone, speaker/backend, devices, acoustic echo cancellation, concrete
+STT/TTS/model, network voice path, hidden worker, permissions/tools/audit/model,
+memory/RAG/secrets, content logging/persistence/cache, API/frontend/schema or new
+dependency is introduced. Five migrations, sole head 0005_audit_events, 32 EventTypes
+and all previous production/tests/manifests remain unchanged. Future integration
+owns capture, real runtime, native deadlines and cancellation effectiveness.

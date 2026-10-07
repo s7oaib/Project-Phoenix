@@ -62,7 +62,7 @@ Phase 5 status: COMPLETE.
 - PHX-061 VAD — DONE
 - PHX-062 STT provider — DONE
 - PHX-063 TTS provider — DONE
-- PHX-064 Voice conversation/barge-in — TODO
+- PHX-064 Voice conversation/barge-in — DONE
 - PHX-065 Rise-Phoenix startup health sequence — TODO
 
 Phase 6 status: INCOMPLETE.
