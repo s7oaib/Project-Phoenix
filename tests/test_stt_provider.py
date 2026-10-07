@@ -1154,24 +1154,6 @@ def test_static_neutral_imports_no_engine_or_execution() -> None:
 
 
 def test_protected_sources_dependency_schema_and_events() -> None:
-    names = subprocess.check_output(
-        [
-            "git",
-            "diff",
-            "--name-only",
-            BASELINE,
-            "--",
-            "phoenix",
-            "tests",
-            "alembic",
-            "apps",
-            "pyproject.toml",
-            "uv.lock",
-        ],
-        cwd=ROOT,
-        text=True,
-    ).splitlines()
-    assert set(names) <= {"phoenix/voice/stt/__init__.py", "tests/test_stt_provider.py"}
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))

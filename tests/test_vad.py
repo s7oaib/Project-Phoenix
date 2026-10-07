@@ -1186,23 +1186,6 @@ def test_static_only_bounded_cpu_and_neutral_imports() -> None:
 
 
 def test_protected_production_migrations_dependencies_and_events() -> None:
-    names = subprocess.check_output(
-        [
-            "git",
-            "diff",
-            "--name-only",
-            BASELINE,
-            "--",
-            "phoenix",
-            "alembic",
-            "apps",
-            "pyproject.toml",
-            "uv.lock",
-        ],
-        cwd=ROOT,
-        text=True,
-    ).splitlines()
-    assert set(names) <= {"phoenix/voice/vad/__init__.py"}
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))

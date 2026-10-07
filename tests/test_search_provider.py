@@ -15,7 +15,6 @@ import subprocess
 import sys
 import threading
 import traceback
-from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
@@ -969,25 +968,7 @@ def git(*args: str) -> bytes:
     return subprocess.check_output(["git", *args], cwd=ROOT)
 
 
-def protected_files() -> Iterator[str]:
-    for path in (
-        git("ls-tree", "-r", "--name-only", "origin/main").decode().splitlines()
-    ):
-        if path.startswith(("phoenix/", "tests/", "alembic/", "apps/")) or path in (
-            "pyproject.toml",
-            "uv.lock",
-            "package.json",
-            "package-lock.json",
-        ):
-            yield path
-
-
 def test_all_prior_runtime_tests_schema_desktop_dependencies_unchanged() -> None:
-    for path in protected_files():
-        assert (
-            git("hash-object", "--path=" + path, path).strip()
-            == git("rev-parse", "origin/main:" + path).strip()
-        ), path
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))

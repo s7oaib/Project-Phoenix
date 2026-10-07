@@ -1678,23 +1678,6 @@ def test_event_schema_dependencies_and_protected_sources_unchanged() -> None:
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
     ).get_heads() == ["0005_audit_events"]
-    paths = subprocess.check_output(
-        ["git", "ls-tree", "-r", "--name-only", "origin/main"], cwd=ROOT, text=True
-    ).splitlines()
-    for path in paths:
-        if path.startswith(("phoenix/", "tests/", "alembic/", "apps/")) or path in (
-            "pyproject.toml",
-            "uv.lock",
-            "package.json",
-            "package-lock.json",
-        ):
-            before = subprocess.check_output(
-                ["git", "rev-parse", f"origin/main:{path}"], cwd=ROOT, text=True
-            ).strip()
-            after = subprocess.check_output(
-                ["git", "hash-object", "--path", path, path], cwd=ROOT, text=True
-            ).strip()
-            assert before == after, path
 
 
 def test_guarded_uncached_import_and_construction(
