@@ -2398,3 +2398,75 @@ and a unittest.mock.patch import: operation timeout 10 seconds, first chunk norm
 then patch loop.time to clock()+20 only for the second advance. Neutral timeout,
 resource cleanup and uncancelled-consumer assertions remain intact. The separate
 real-time deadline tests and all PHX-011 Ollama production remain unchanged.
+
+## ADR-063 — Permission-gated Spotify Web API and manual PKCE boundary
+Status: Accepted. Date: 2026-10-07. Ticket: PHX-070.
+
+Spotify is a tool integration in phoenix.tools.spotify, under existing media/BROOK
+reasoning and PHOENIX orchestration. No agent/router/policy/runtime change. Register
+nine exact tools: search/playback_state/devices at P1; play/pause/next/previous/
+transfer/volume at P2. Revalidate exact frozen input, canonical intent and matching
+PermissionRequest before existing PermissionEngine evaluation. Only ALLOWED can
+resolve secrets or send HTTP. Denied/approval-required results report no attempt.
+No caller risk downgrade, model-derived approval, alias or custom endpoint.
+
+Bind resource to operation, SHA-256 of the query, types, limit, offset, media URI,
+device, volume and transfer-play flag using canonical JSON. Query hashing avoids
+literal query retention in permission evidence; it does not protect low-entropy
+queries from guessing. Revalidate nested result/decision snapshots and correlate
+call/request/actor/tool/risk/resource and successful response shape. Closed safe
+errors never include raw HTTP bodies, headers, tokens or collaborator diagnostics.
+P3/P4 audit rules remain untouched; no new mandatory durable audit for these P1/P2
+actions. Spotify strings are inert third-party data, never permission or instruction.
+
+Trusted account linking uses caller-owned manual Authorization Code with PKCE.
+Generate bounded cryptographic state/verifier and S256 challenge; verifier and code
+use runtime-only SecretMaterial. Construct consent URL without opening a browser
+or hosting a callback. Caller supplies explicit client ID and registered redirect.
+Only bounded HTTPS or HTTP loopback literal 127.0.0.1/[::1] redirects, no localhost,
+aliases, unsafe HTTP, userinfo, query, fragment, wildcard or URI rewriting. Exact
+callback state/redirect and single-use pending setup are required. Scope is only
+user-read-playback-state plus user-modify-playback-state. No client secret, cookie,
+environment credential discovery, implicit/client-credentials login or OAuth UI.
+
+Fixed SecretStore references spotify.access_token / spotify.refresh_token contain
+all persisted token material; no normal settings/database/memory persistence.
+Temporary materials are closed even on failure. Validate the entire token response
+before writes; store refresh then access. Existing multi-reference writes are not
+atomic: a store failure may leave an earlier rotation written and requires explicit
+reauthorization/recovery. No rollback can safely invent transactional guarantees.
+On Web API 401 only, refresh once and replay the exact request once. Replace refresh
+only when returned, preserving it otherwise. No other HTTP/shape/device failure
+retries, hidden token timer or expiry guarantee. Current Spotify guidance requires
+manual renewal when dashboard refresh tokens expire after six months.
+
+Only api.spotify.com/v1 and accounts.spotify.com OAuth endpoints. Owned lazy HTTPX
+client explicitly verifies TLS, disables trust_env/redirects, and has connect/pool
+5s and read/write 10s deadlines inside a 30s total operation deadline. Check elapsed
+time after synchronous store boundaries; native SecretStore work is not preemptible.
+Bound successful decoded payload to 256 KiB, nesting to 32 and nodes to 10,000;
+validate only selected minimal metadata. No raw failure body is parsed/retained.
+Search supports track/artist/album/playlist, four unique types, current official
+limit 1–10 per type (default 5), offset 0–1000, query <=512. Results are bounded to
+40 items/64 devices, names <=512 and artist lists <=32. Null search entries are
+unavailable, nullable/missing device IDs remain unknown, restrictions preserved.
+State 204 means no active playback. Episode/local/unsupported playback types do
+not add playable input capability. Play accepts one track URI or album/artist/
+playlist context; optional explicit device, transfer exactly one device, strict
+integer volume 0–100. Control 204 means API command acceptance, not audible proof.
+Premium/Connect/account restrictions are explicit failures, never simulated success.
+
+Runtime has one observable caller-owned operation and first-use event-loop binding;
+no hidden task/worker/scheduler/cache. Cancellation propagates, active IDs clear,
+and suppressed cancellation/close cannot advance or report success. Explicit close
+is idempotent, wipes pending verifier and closes only owned HTTP client; injected
+client and SecretStore remain borrowed. Trusted injected transports belong to the
+owned test client; HTTPX closes them with it. Already-entered store/media operations
+cannot be undone. Python/HTTPX immutable secret copies cannot be guaranteed wiped.
+
+No audio streaming/cache/history, playlist/library mutation, memory/RAG/training,
+events, schema/migration, FastAPI/frontend, model generation or new dependency.
+AgentRegistry, ToolRegistry, PermissionEngine, AuditTrail, SecretStore, five
+migrations/sole head 0005_audit_events and 32 EventTypes remain unchanged. Current
+official API references and complete limitations are in the frozen ticket. Live
+Spotify consent/Premium acceptance remains optional user-owned manual work.
