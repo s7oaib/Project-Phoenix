@@ -24,11 +24,19 @@ memory. Third-party names are inert untrusted data. See
 
 ## YouTube
 
-- search/discovery
-- built-in player
-- play/pause/seek
-- queue/list
-- external-open fallback
+PHX-071 V1 provides P1 public search/player-state/queue-state and P2
+cue/play/pause/seek/enqueue/remove/clear tools. Public video/channel/playlist search
+uses one fixed YouTube Data API request with a SecretStore API-key header, bounded
+inert metadata and no pagination/retry. Player commands use a borrowed provider-neutral
+adapter; the concrete embedded iframe/Tauri/frontend player is deferred to Phase 8.
+Command acceptance does not prove audible playback, rendering or user viewing.
+
+The session-only queue holds at most 50 canonical video references, permits duplicates
+and never auto-plays. Explicit revisions protect removal from stale queue indices.
+External-open exposes only a canonical watch URL; PHOENIX must separately permission
+the existing browser.navigate tool. No OAuth/private-account data, transcripts,
+downloads, stream extraction, media history or memory/RAG ingestion. See
+[the PHX-071 contract](../tickets/PHX-071-youtube-integration.md) and ADR-064.
 
 ## Rule
 

@@ -69,7 +69,7 @@ Phase 6 status: COMPLETE.
 
 ## Phase 7 — Media & Documents
 - PHX-070 Spotify integration — DONE
-- PHX-071 YouTube integration — TODO
+- PHX-071 YouTube integration — DONE
 - PHX-072 Upload/parser routing — TODO
 - PHX-073 PDF/DOCX/Markdown generation — TODO
 

@@ -2470,3 +2470,91 @@ AgentRegistry, ToolRegistry, PermissionEngine, AuditTrail, SecretStore, five
 migrations/sole head 0005_audit_events and 32 EventTypes remain unchanged. Current
 official API references and complete limitations are in the frozen ticket. Live
 Spotify consent/Premium acceptance remains optional user-owned manual work.
+
+
+## ADR-064 — Permission-gated YouTube discovery, neutral player and revision-bound queue
+Status: Accepted. Date: 2026-10-08. Ticket: PHX-071.
+
+YouTube remains a tool under neutral media/BROOK reasoning and PHOENIX supreme
+orchestration. Exactly ten canonical declarations: search/player_state/queue_state
+P1; cue/play/pause/seek/enqueue/remove/clear_queue P2. Existing ToolRegistry and
+PermissionEngine remain unchanged. Validate exact call, canonical intent and matching
+PermissionRequest before any secret/network/player/queue effect. Non-ALLOWED yields
+attempted=false and zero effects. Caller/model/provider/player text cannot approve,
+lower risk or override endpoints. P4/P5 and P3/P4 durable audit remain unchanged.
+
+Public discovery uses one GET https://www.googleapis.com/youtube/v3/search with
+part=snippet, query, ordered types and maxResults only. Fixed borrowed SecretStore
+reference youtube.api_key supplies X-Goog-Api-Key; never a URL parameter. Build the
+request directly to avoid borrowed-client default parameters/cookies/auth headers;
+auth and redirects are disabled for the send. Close temporary SecretMaterial.
+Reject reflected keys in normalized evidence and a query containing the resolved key.
+No logging configuration mutation or post-request URL redaction. Python/HTTPX immutable
+header copies cannot be guaranteed wiped. Trusted injected clients/transports own their
+configuration; an owned client's injected transport follows that HTTPX client's lifetime.
+
+Search video/channel/playlist only, meaningful query <=512, 1..3 unique ordered types,
+strict max_results 1..10/default 5. One request, no pagination/retry/prefetch. Successful
+body <=256 KiB, JSON depth <=32/nodes <=10000, duplicate/nonfinite JSON rejected;
+strings <=4096 during decoding, selected names <=512, timestamps bounded/aware UTC,
+video IDs 1..64 and channel/playlist IDs 1..128 ordinary opaque ASCII tokens. Return at
+most max_results total minimal metadata; URLs are derived by code. Titles/channel names
+remain inert untrusted data, never automatic instructions or memory/RAG/model content.
+Only bounded <=8 KiB structured 403 reason evidence distinguishes quotaExceeded;
+raw failure bodies/messages are neither returned nor retained. 429 has no sleep/retry;
+5xx/network are unavailable; malformed success is invalid_response.
+
+Strict video refs admit 1..64 opaque IDs and only the four ticketed exact HTTPS forms.
+No userinfo, ports, fragments, extra/duplicate/encoded query keys, aliases/lookalikes or
+redirects. Normalize immediately to ID and canonical watch URL; syntax proves neither
+existence nor embedding availability. Borrowed YouTubePlayerAdapter is an async ABC for
+observe/cue/play/pause/seek only. Exact snapshots correlate operation/player identity,
+requested video and seconds. Stable configured player identity also binds permission
+resources. Neutral unstarted/ended/playing/paused/buffering/cued/unavailable states carry
+no permission authority. Start/seek integers and reported finite position are bounded
+0..604800; booleans rejected. Commands report correlated acceptance only, never physical
+playback, rendering, autoplay permission or user viewing. No readback/policy inference.
+
+Queue is an immutable ordered in-memory tuple, <=50 entries, duplicates allowed; each
+entry holds only canonical video ID/watch URL. No title/blob/persistence, search or
+auto-play. Revision begins 0 and increments once on a successful content-changing enqueue,
+remove or nonempty clear; reads, denials, failures and empty clear do not increment.
+Remove requires strict index and expected_queue_revision; both bind the permission
+resource. Recheck revision/index after ALLOWED immediately before synchronous mutation;
+stale/out-of-range fails existing invalid_input with unchanged state and no player/HTTP.
+Snapshots are detached immutable evidence, without cross-process or permission authority.
+Close clears the queue and closes the runtime permanently; revision need not be retained.
+
+Resources bind operation, query digest, ordered types/limit, canonical video, start/seek,
+index/revision and configured player identity, never literal query/key. Hashes correlate
+data, without hiding low-entropy queries from guessing or authenticating consent.
+Exact frozen extra-forbidden call/intent/result/nested snapshots reject subclasses,
+extras, copied malformed/stale/mis-correlated evidence and impossible outcomes. Closed
+20 safe error categories replace provider/adapter diagnostics. A canonical watch URL is
+fallback evidence only; future PHOENIX browser.navigate needs its separate existing P2
+permission. YouTube imports/invokes no BrowserTool and forwards no approval.
+
+Import/construction performs no I/O. One event loop and observable caller-owned active
+operation; no hidden task/thread/worker/scheduler/player watcher. Owned lazy HTTPX client
+verifies TLS, trust_env=False, follow_redirects=False; connect/pool 5s, read/write 10s,
+inside total 30s. Native synchronous store work is non-preemptible and checked after
+return. Cancellation propagates; suppressed cancellation/close cannot advance or return
+success. Finally clears the active ID; in-flight close retains it until the caller exits.
+Same-loop idempotent close closes only owned HTTPX, never borrowed player/store/client.
+Already-entered network/player effects cannot be undone; collaborator cooperation and
+real adapter lifetime/physical cancellation remain integration responsibilities.
+
+No iframe/React/Tauri/API/WS/Playwright player, OAuth/private-account data, transcripts,
+downloads/stream extraction, playlist mutation, embeddings/RAG/memory/training/cache,
+EventType, schema/migration or dependency addition. EventType 32; five migrations/sole
+head 0005_audit_events; Spotify/BROOK/core/security/voice production unchanged. Concrete
+embedded-player/frontend implementation remains deferred. Live search needs a user-owned
+Google project/restricted key; live player acceptance needs the later concrete adapter.
+
+The two authoritative clarifications authorize only a test-only PHX-060 compatibility
+repair: preserve BASELINE e58d304df3a2097ae03e0b31941c9cf487a584f9 for voice/__init__.py;
+add PHX060_COMPLETION 4cc0feb59ae91bc77b72c7a3a0f1a7885f397ee3 for audio.py/wake.py,
+which did not exist before PHX-060. Replace only the named test's broad successor diff
+with those exact historical comparisons, preserving EventType/Alembic and all other
+test syntax. This freezes original PHX-060 blobs without rejecting legitimate new tools.
+No skip/xfail/retry/flaky/bypass; 537 cases remain. No other historical repair authorized.

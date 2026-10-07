@@ -1,6 +1,6 @@
 # PHX-071 — YouTube integration
 
-Status: TODO
+Status: DONE
 Phase: 7 — Media & Documents
 Branch: feature/PHX-071-youtube-integration
 Starting main/base SHA: d7c1cb166287b7272af16603bf9a3d018f13d2cb
@@ -1010,3 +1010,104 @@ is now expected to be exactly FOUR commits ahead of main:
 4. `feat: complete PHX-071 youtube integration`
 
 No PR, merge, main push, force push or PHX-072 work.
+
+
+## Completion evidence — 2026-10-08
+
+Latest corrected authority: 035522ef6d1d0e738e6b030dea73c3db67642cf5.
+Main d7c1cb166287b7272af16603bf9a3d018f13d2cb unchanged. Both safe fast-forwards
+preserved exact YouTube draft hashes; the second also preserved the partial wake repair.
+No draft discard, reset, rebase, history rewrite or old-branch inheritance.
+
+| Fresh command/gate | Result |
+| --- | --- |
+| Exact repaired wake test, three consecutive runs | 1 passed each |
+| Complete wake suite, three consecutive runs | 537 passed each |
+| uv run --locked pytest tests/test_youtube_integration.py -q, three consecutive runs | 358 passed each |
+| tool_registry / permission_engine / audit_trail / secrets_boundary | 204 / 926 / 302 / 402 passed individually |
+| browser_tool / prompt_injection_defenses / spotify_integration | 653 / 604 / 345 passed individually |
+| agent_registry / agent_model_router | 96 / 213 passed individually |
+| rise_phoenix_startup / voice_conversation / tts_provider | 509 / 950 / 602 passed individually |
+| stt_provider / vad / wake_word_provider | 414 / 403 / 537 passed individually |
+| uv lock; uv sync --locked | PASS; manifests unchanged |
+| Complete uv run --locked pytest, three consecutive runs | 15101 passed, same 16 existing filesystem skips, one existing Starlette/httpx warning each |
+| uv run --locked ruff check . | PASS |
+| uv run --locked ruff format --check . | PASS, 128 files |
+| uv run --locked mypy | PASS, 122 source files |
+| uv build --out-dir <external-validation>/dist | PASS; exact YouTube source bytes verified in wheel/sdist |
+| Foundation bootstrap/API/config/persistence/events/hardware | 126 passed; exact /health unchanged |
+| npm test | 4 passed |
+| npm run typecheck --workspace @phoenix/desktop | PASS |
+| npm run build --workspace @phoenix/desktop, external output | PASS |
+
+The 358 focused cases cover all ten tools/risks, deny/approval-required zero effects,
+real grant/policy/user allow paths, fixed endpoint/header/key log privacy, all three
+search types/bounds/normalization, strict video-ref attacks, neutral exact player
+snapshots/acceptance/failures, queue capacity/duplicates/order/revisions/stale remove,
+HTTP/quota/no retry, JSON byte/depth/node/duplicate/nonfinite/text bounds, cancelled
+and suppressed-cancel/timeout/close behavior, loop/busy/owned/borrowed lifetime, nested
+forgery, no BrowserTool/memory/frontend integration. Direct HTTPX requests prevent
+borrowed-client defaults adding credential query/cookies/auth; reflected keys and a
+query containing the resolved key fail safely. Uncached guarded source execution and
+constructor probe prove no file/socket/database/process/thread/task/client/secret I/O.
+
+All 147 protected pre-existing files checked against merged main: 146 exact blobs
+unchanged; only authorized tests/test_wake_word_provider.py differs. AST comparison
+proves all syntax outside its named guard and new PHX060_COMPLETION constant unchanged.
+Original BASELINE unchanged; package marker matches its pre-PHX-060 blob, audio/wake
+match exact PHX-060 completion blobs. EventType remains 32; all five migrations and
+sole head 0005_audit_events unchanged. Seven-file credential scan clear; no new
+skip/xfail/retry/flaky marker. All 16 full-suite skip identities/reasons match PHX-070
+baseline. No other historical repair. Prior blocked receipts remain historical only.
+
+| Invariant | Concrete PHX-071 evidence |
+| --- | --- |
+| INV-001 | PASS: PHOENIX is unchanged and solely orchestrates; YouTubeTool returns subordinate tool evidence. |
+| INV-002 | PASS: AIZEN unchanged; no planner permission/finalization delegation or call. |
+| INV-003 | PASS: Only existing deterministic PermissionEngine evaluates trusted approvals/grants; titles and player states cannot approve. |
+| INV-004 | PASS: Exact ten canonical ToolRegistry declarations; full call/intent/request correlation before secret, HTTP, player or queue effects. |
+| INV-005 | PASS: Only P1/P2 tools added; P4 request-specific confirmation and original engine/tests unchanged. |
+| INV-006 | PASS: P5 global blocking unchanged; no new credential-reveal/action path. |
+| INV-007 | PASS: P3/P4 AuditTrail/schema/requirements unchanged; P1/P2 add no mandatory durable audit. |
+| INV-008 | PASS: Correlated exact adapter acceptance and typed outcomes; no physical playback claim; statuses stay TODO until all required gates pass. |
+| INV-009 | PASS: MAHORAGA budget unchanged; no YouTube retry, pagination, prefetch or recovery loop. |
+| INV-010 | PASS: KAIDO stays degraded policy; no YouTube fail-safe invocation or role expansion. |
+| INV-011 | PASS: Frontend/API unchanged; no iframe, Tauri, callback, WebSocket or direct provider/tool bypass. |
+| INV-012 | PASS: Provider-neutral player ABC; no provider-specific agent definition or BROOK routing changes. |
+| INV-013 | PASS: Tool does not select agent policy; immutable ToolRegistry/PermissionEngine own risk and authorization. |
+| INV-014 | PASS: Neutral media identity retained; BROOK alias is display metadata and never accepted as a canonical tool ID. |
+| INV-015 | PASS: Text/core/voice unchanged; YouTube failure cannot disable text paths. |
+| INV-016 | PASS: Voice production unchanged; only exact test-only split-history compatibility repair, with 537 cases preserved. |
+| INV-017 | PASS: Bounded titles/channel names remain inert third-party metadata; code-derived canonical URLs, no auto execution/navigation. |
+| INV-018 | PASS: API key only borrowed SecretStore ref youtube.api_key and explicit request header; temporary material closed; no memory/events/audit. |
+| INV-019 | PASS: One observable caller operation, one loop, finite total/HTTP deadlines, cancellation propagation and suppressed-cancel/close guards. |
+| INV-020 | PASS: All five versioned migration blobs unchanged; sole head 0005_audit_events. |
+| INV-021 | PASS: Closed 20 error categories; malformed/mis-correlated evidence rejected; failures do not fabricate playback or command acceptance. |
+| INV-022 | PASS: Explicit unavailable/not-ready/quota/HTTP/queue failures; external URL evidence only and separate BrowserTool permission later. |
+| INV-023 | PASS: No model generation, player watcher, worker or scheduler; BLAZE-6 generation policy unchanged. |
+| INV-024 | PASS: No SDK/dependency promotion; pyproject/uv/npm manifests unchanged; public docs introduce no runtime dependency. |
+
+
+Seven intended paths only: YouTube production/tests, DECISIONS.md, FEATURE_TICKETS.md,
+docs/18_MEDIA_INTEGRATIONS.md, this authoritative ticket, and the single wake test.
+All gates passed before ADR-064/DONE. Phase 7 remains INCOMPLETE; PHX-072/073 TODO.
+Final delivery report records the one exact completion commit and normal feature-only
+push, four commits ahead/zero behind required main, clean local/remote equality. No PR,
+main push, integration merge, force push, amend or PHX-072 work.
+
+Fresh logs/JUnit/commands/reviews/build output remain outside the repository at
+C:/Users/shoai/.codex/validation/PHX-071-resume2-20261007.
+
+LIVE YOUTUBE SEARCH ACCEPTANCE: PENDING — requires a user-owned Google Cloud project
+with YouTube Data API enabled and a restricted API key.
+LIVE BUILT-IN PLAYER ACCEPTANCE: PENDING — concrete IFrame/Tauri/frontend adapter
+belongs to the later desktop integration phase.
+
+No concrete player, OAuth/private data, transcripts/downloads, cache/history/persistence
+or automatic media/model-context promotion. Queue/revision is local and ephemeral.
+Adapter snapshots prove structural correlation/acceptance, not independent rendering,
+audio, autoplay or viewing. HTTPX/Python immutable secret-header copies cannot be
+guaranteed erased; synchronous native storage cannot be preempted; entered player/network
+effects cannot be undone. Real collaborators must cooperate with cancellation and own
+their actual resources. API quotas remain externally managed. External open needs a
+separate BrowserTool P2 approval. PHX-072 NOT STARTED.

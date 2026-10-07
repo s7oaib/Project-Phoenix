@@ -49,6 +49,7 @@ from phoenix.voice.wake import (
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = "e58d304df3a2097ae03e0b31941c9cf487a584f9"
+PHX060_COMPLETION = "4cc0feb59ae91bc77b72c7a3a0f1a7885f397ee3"
 NOW = datetime(2026, 10, 7, 12, tzinfo=UTC)
 PCM = b"\x01\x02\x03\x04"
 BAD = (None, True, 1, 1.5, b"text", object(), "\0", "\ud800")
@@ -1272,20 +1273,21 @@ def test_prior_production_manifests_migrations_frontend_events_unchanged() -> No
             "--name-only",
             BASELINE,
             "--",
-            "phoenix/agents",
-            "phoenix/models",
-            "phoenix/tools",
-            "phoenix/security",
-            "phoenix/web",
-            "phoenix/memory",
-            "phoenix/rag",
-            "phoenix/persistence",
-            "phoenix/core",
-            "phoenix/api",
-            "alembic",
-            "apps",
-            "pyproject.toml",
-            "uv.lock",
+            "phoenix/voice/__init__.py",
+        ],
+        cwd=ROOT,
+        text=True,
+    )
+    assert changed == ""
+    changed = subprocess.check_output(
+        [
+            "git",
+            "diff",
+            "--name-only",
+            PHX060_COMPLETION,
+            "--",
+            "phoenix/voice/audio.py",
+            "phoenix/voice/wake.py",
         ],
         cwd=ROOT,
         text=True,
