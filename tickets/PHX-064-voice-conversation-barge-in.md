@@ -429,6 +429,7 @@ Freeze exactly:
 - `stt`
 - `tts`
 - `playback`
+- `voice_output_unavailable`
 
 ## VoiceTurnResult
 Frozen, extra-forbidden exactly:
@@ -444,10 +445,13 @@ Frozen, extra-forbidden exactly:
 Rules:
 - text fields optional and repr=False,
 - spoken requires transcript+response, no failure_stage, final_state listening,
-- interrupted requires transcript+response, no failure_stage, final_state listening,
+- interrupted requires transcript+response, no failure_stage, and final_state:
+  - listening for accepted barge-in,
+  - sleeping for accepted explicit sleep during active playback,
 - text_fallback:
   - STT failure: transcript/response both None, failure_stage stt, final_state text_only,
-  - TTS/playback failure: transcript+response present, failure_stage tts/playback, final_state degraded_voice.
+  - TTS/playback failure: transcript+response present, failure_stage tts/playback, final_state degraded_voice,
+  - degraded_voice input-only turn: transcript+response present, failure_stage voice_output_unavailable, final_state degraded_voice.
 
 No raw provider error is retained.
 
@@ -643,14 +647,10 @@ If the turn started while manager was degraded_voice:
 - do not call AudioOutput,
 - remain degraded_voice,
 - refresh deadline,
-- return text_fallback with transcript+response and failure_stage playback or tts is NOT allowed here.
+- return text_fallback with transcript+response,
+- use the canonical VoiceFailureStage value `voice_output_unavailable`.
 
-Instead use failure_stage=None? To keep the frozen result consistent, a degraded-input-only turn needs explicit semantics.
-
-Therefore freeze one additional VoiceFailureStage value:
-- `voice_output_unavailable`
-
-And allow text_fallback in degraded_voice with:
+Allow text_fallback in degraded_voice with:
 - transcript+response present,
 - failure_stage=voice_output_unavailable,
 - final_state=degraded_voice.
