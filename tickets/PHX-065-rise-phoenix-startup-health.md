@@ -620,3 +620,43 @@ Disclose at minimum:
 PHX-070 — Spotify integration.
 
 Do not start it.
+
+
+## Authoritative blocker resolution — 2026-10-07
+
+A required PHX-065 full-suite run exposed one pre-existing timing-sensitive Phase-1 test:
+
+`tests/test_model_benchmark.py::test_slow_optional_probe_does_not_consume_generation_deadline[2]`
+
+Observed evidence:
+
+- PHX-065 focused suite passed three consecutive runs with 509 cases.
+- Every required historical suite passed individually.
+- `tests/test_model_benchmark.py` passed all 130 cases independently.
+- Three full-suite attempts reached 14,397 passed and failed only this unchanged case.
+- The case currently gives lifecycle acquisition + fake generation only a 0.01-second wall-clock budget while deliberately using a 0.025-second synchronous telemetry sleep. Under whole-suite scheduler/load variance, the 10 ms non-telemetry budget can expire even though the optional probe is correctly excluded.
+
+This is a deterministic-test defect, not authority to waive the full-suite gate.
+
+PHX-065 is therefore explicitly authorized to make one narrow historical **test-only timing stabilization** in `tests/test_model_benchmark.py`.
+
+Required repair constraints:
+
+1. Do not modify `phoenix/models/benchmark.py` unless a new reproducible focused failure proves a production defect. Current evidence does not authorize a production change.
+2. Preserve the exact semantic assertion: optional before/after resource-probe time must not consume the generation deadline.
+3. Preserve the separate `test_generation_that_blocks_past_deadline_remains_timeout` semantics unchanged.
+4. Change only the timing constants inside `test_slow_optional_probe_does_not_consume_generation_deadline` as needed to give ordinary lifecycle acquisition/fake generation a robust scheduler margin while keeping the artificial probe delay strictly greater than the trial timeout. Preferred stabilization:
+   - `per_trial_timeout_seconds = 0.5`
+   - artificial slow-probe sleep = `1.0` second
+5. The probe delay must remain greater than the configured trial timeout so the test would still fail if optional telemetry were incorrectly charged against the generation deadline.
+6. Do not add retries, conditional skips, xfail, environment detection, timing tolerance based on current machine load, or a blanket flaky-test exemption.
+7. Do not weaken assertions about SUCCESS, output digest, success rate, probe call count, request count, lifecycle cleanup, or provider activity.
+8. No other historical test may be edited unless another independently reproducible baseline defect is found and reported as BLOCKED rather than silently repaired.
+9. After the timing repair, run `tests/test_model_benchmark.py` three consecutive times and require all 130 cases to pass each run.
+10. Then rerun the complete required PHX-065 gate, including the full Python suite. Run the full Python suite three consecutive times; all three must pass with only the existing 16 skips and existing warning profile.
+11. The final PHX-065 diff may therefore include exactly one additional historical file:
+    `tests/test_model_benchmark.py`
+    with only the narrowly authorized timing-constant stabilization.
+12. Record this repair truthfully in PHX-065 completion evidence and ADR-062 only if ADR-062 is otherwise required. Do not rewrite PHX-016 semantics or claim a benchmark production change.
+
+All other PHX-065 authority, scope, completion requirements, exact commit message, branch-only push rule, and prohibition on PHX-070 remain unchanged.
