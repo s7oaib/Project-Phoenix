@@ -1,6 +1,6 @@
 # PHX-064 — Voice conversation / barge-in
 
-Status: TODO
+Status: DONE
 Phase: 6 — Voice
 
 ## Objective
@@ -1737,3 +1737,162 @@ In addition to the existing matrix, explicitly test:
 
 This clarification is authoritative for PHX-064 and requires no separate ADR
 beyond the existing ADR-061 completion record.
+
+# Completion evidence — 2026-10-07
+
+Original clean local HEAD 17d185841b8a2114d5652fe4e04226d0bdcff1f8 was updated only
+by normal fetch --prune and ff-only pull to authoritative preparation
+e88c8bd0177df1458932b6d6ac03604d3da3c41f. Main remained
+e60a9d8b0471940a516210437e9588c45e1ad055; 0 behind / 3 ahead, ticket-only initial diff.
+Read the complete clarified ticket; the old interrupted-result blocker is resolved.
+No preparation history was rewritten. No next-ticket work/PR/merge/main push.
+
+Implemented phoenix/voice/conversation/__init__.py and tests/test_voice_conversation.py.
+Package layout preserves the public import and unchanged PHX-060 file-layout test;
+no prior production/test or export change is needed. ADR-061 records all architecture,
+failure/event/cancellation ownership and the layout choice.
+
+## Contract, lifecycle and matrix evidence
+
+950 synthetic deterministic cases cover the 270 numbered ticket boundaries and
+post-blocker clarification through grouped behavioral/adversarial tests: exact
+vocabularies/fields/frozen JSON snapshots, extras/subclass/stored forgery rejection,
+strict IDs/ints/floats/languages/text, private repr/safe errors, exact PCM/VAD and
+segment evidence, 2/10/256 segmentation, terminal exclusion, total buffer overflow,
+same-stream/sequence/time continuity, responder/output/cancellation correlation,
+one-turn lifecycle, follow-up expiry, stage call counts/failure/text fallback,
+degraded input-only recovery, events, explicit sleep, cancellation and cleanup.
+Exhaustive result-consistency combinations verify all outcome/failure/state/text
+combinations; interrupted may only be listening or sleeping with both texts.
+
+Normal pipeline calls STT cap/transcribe -> responder -> TTS cap/synthesize -> play
+once each. Follow-up needs no repeated wake phrase. STT failure returns text_only
+with no text/deadline. TTS/playback failure returns degraded_voice preserving text;
+subsequent degraded turns skip TTS/output and use voice_output_unavailable.
+Responder failure restores listening/deadline and raises responder_failure.
+No automatic provider retry/switch/voice recovery exists.
+
+Barge-in uses activity only, default two consecutive speech frames, silence reset,
+one exact active-playback interrupt and canonical correlated acknowledgement.
+Accepted barge-in returns interrupted/listening with refreshed deadline and trailing
+listening event. Accepted speaking sleep returns interrupted/sleeping, clears
+session/deadline/local buffers and publishes no trailing listening. Both retain
+ownership if fake playback later returns completed. Failed acknowledgements cannot
+claim interruption or sleep. Delayed acknowledgement racing completed playback and
+concurrent duplicate observations cannot produce spoken success/duplicate interrupts.
+No unrelated provider/model/tool/orchestration cancellation occurs.
+
+Real EventBus tests verify normal/barge-in/sleep order, agent voice, deterministic
+session correlation and IDs-only payloads. Full queue/failure/cancelled publication
+raises explicit error and prevents false observable completion; state/bookkeeping
+are safely cleared. Caller-task cancellation, including suppression at all six
+collaborator awaits, cannot advance/finalize a turn. Close interrupts only playback,
+is same-loop/idempotent, clears state, closes no borrowed collaborator and blocks
+late continuation. Constructor/explicit operations create no hidden manager tasks.
+
+## Commands and exact results
+
+THREE consecutive uv run --locked pytest tests/test_voice_conversation.py -q:
+950 passed each after the final buffer/event-cancellation review changes.
+Earlier development runs found safe-wrapper ordering and two fixture coroutine
+issues; these were fixed. No prior tests were changed or bypassed.
+
+All 39 previous focused suites ran individually with uv run --locked pytest <path>
+-q and JUnit logs outside the repository. Their historical case counts are unchanged.
+
+| Suite | Result |
+| --- | --- |
+| tests/test_tts_provider.py | 602 passed |
+| tests/test_stt_provider.py | 414 passed |
+| tests/test_vad.py | 403 passed |
+| tests/test_wake_word_provider.py | 537 passed |
+| tests/test_prompt_injection_defenses.py | 604 passed |
+| tests/test_urahara_research_flow.py | 492 passed |
+| tests/test_search_provider.py | 400 passed |
+| tests/test_screenshot_vision_loop.py | 397 passed |
+| tests/test_windows_ui_automation.py | 493 passed |
+| tests/test_browser_tool.py | 653 passed |
+| tests/test_secrets_boundary.py | 402 passed |
+| tests/test_terminal_tool.py | 270 passed |
+| tests/test_filesystem_tool.py | 649 passed; 16 existing skips |
+| tests/test_audit_trail.py | 302 passed |
+| tests/test_permission_engine.py | 926 passed |
+| tests/test_tool_registry.py | 204 passed |
+| tests/test_memory_schema.py | 244 passed |
+| tests/test_pudding_memory_service.py | 167 passed |
+| tests/test_document_ingestion.py | 300 passed |
+| tests/test_vector_store_sqlite.py | 273 passed |
+| tests/test_retrieval_context.py | 367 passed |
+| tests/test_provenance_citations.py | 173 passed |
+| tests/test_persistence.py | 12 passed |
+| tests/test_agent_registry.py | 96 passed |
+| tests/test_phoenix_orchestrator.py | 101 passed |
+| tests/test_aizen_planner.py | 151 passed |
+| tests/test_agent_model_router.py | 213 passed |
+| tests/test_task_graph_state_machine.py | 348 passed |
+| tests/test_structured_agent_handoffs.py | 214 passed |
+| tests/test_levi_verification.py | 242 passed |
+| tests/test_mahoraga_recovery.py | 790 passed |
+| tests/test_kaido_failsafe.py | 574 passed |
+| tests/test_model_provider.py | 61 passed |
+| tests/test_ollama_provider.py | 108 passed |
+| tests/test_model_registry.py | 83 passed |
+| tests/test_model_lifecycle.py | 54 passed |
+| tests/test_embeddings.py | 182 passed |
+| tests/test_colibri_provider.py | 194 passed |
+| tests/test_model_benchmark.py | 130 passed |
+
+Aggregates: previous Phase 6 1956; Phase 5 3039; Phase 4 2753 / 16 existing skips;
+Phase 3 1524 plus persistence 12; all nine Phase 2 suites 2729; all seven Phase 1
+suites 812. Every suite passed individually.
+
+- uv lock; uv sync --locked: PASS, manifests unchanged.
+- uv run --locked pytest: 13889 passed, 16 existing skips, one existing
+  Starlette/httpx TestClient deprecation warning. Baseline 12939 plus 950 new cases.
+- uv run --locked ruff check .: PASS.
+- uv run --locked ruff format --check .: PASS, 122 files formatted.
+- uv run --locked mypy: PASS, 116 source files.
+- uv build --out-dir <external-validation>/dist: wheel/sdist PASS; both contain
+  exact conversation/__init__.py source bytes, no flat conversation.py.
+- Foundation bootstrap/API/config/persistence/events/hardware: 126 passed,
+  existing warning only. Exact /health unchanged.
+- npm test: 4 passed; desktop workspace typecheck/build PASS, desktop source unchanged.
+
+Logs/JUnit/review scripts/reports/Python build artifacts remain outside the project:
+C:/Users/shoai/.codex/validation/PHX-064-20261007. Ignored desktop build output is
+not part of the delivered diff. No recordings, models, PCM/text dumps, DB/log/cache,
+credential or unrelated artifacts are staged.
+
+## Security, invariants, scope and acceptance
+
+Independent normalized Git-blob review proves all 141 prior protected production,
+tests, migrations, desktop and dependency paths unchanged. EventType definitions
+unchanged with 32 members; sole head 0005_audit_events and five unchanged migrations.
+Credential/signature scan PASS. Guarded uncached construction and cold import deny
+unrelated integrations; static import/call checks rule out capture/device/network/
+subprocess/background/provider startup. PCM/transcript/response stays caller data,
+private in repr, never logged/persisted/events. Real authority contracts reject
+voice evidence as PermissionGrant/UserPermissionDecision/ToolDefinition.
+
+Reviewed INV-001..INV-024: all preserved. PHOENIX supreme; AIZEN/LEVI/MAHORAGA/KAIDO,
+deterministic permissions, P4 explicit confirmation, P5 blocking and P3/P4 audit
+unchanged. No tool bypass, LLM permission, voice authority, task verification claim,
+automatic memory, hidden provider fallback, heavy runtime or dependency promotion.
+Only existing three voice events publish; observability grants no authority.
+
+All deterministic implementation/regression/quality/security gates passed before
+DONE. Complete staged line review and final voice/TTS/STT/VAD/wake recheck are required
+before the exact completion commit and feature-only push; execution final report
+records those results. PHX-065 remains TODO and Phase 6 INCOMPLETE.
+
+## Known limitations
+
+No microphone/capture or concrete speaker/output/STT/TTS runtime. Caller supplies
+PCM/VAD evidence and owns collaborators/deadlines/native cleanup. Noise/TTS echo
+can trigger VAD/barge-in; no acoustic echo cancellation or identity authentication.
+No streaming STT/TTS; one active session/turn; timeout requires expire_if_idle calls;
+sleep-intent parsing is external. Segment cap includes pending terminal silence;
+overflow resets rather than truncating. Playback interruption acknowledgement does
+not prove native cessation and affects no unrelated work. Degraded voice preserves
+voice input/text output; text_only requires typed/UI fallback and explicit activation
+recovers voice. No wake/startup health integration; PHX-065 is NOT STARTED.
