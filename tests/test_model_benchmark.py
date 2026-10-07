@@ -673,7 +673,7 @@ def test_slow_optional_probe_does_not_consume_generation_deadline(
         def sample(self) -> ResourceSnapshot:
             result = super().sample()
             if self.calls == slow_sample:
-                time.sleep(0.025)
+                time.sleep(1.0)
             return result
 
     async def exercise() -> None:
@@ -687,7 +687,7 @@ def test_slow_optional_probe_does_not_consume_generation_deadline(
             "model",
             suite=suite(),
             config=BenchmarkConfig(
-                warmup_runs=0, measured_runs=1, per_trial_timeout_seconds=0.01
+                warmup_runs=0, measured_runs=1, per_trial_timeout_seconds=0.5
             ),
         )
         assert report.trials[0].status is TrialStatus.SUCCESS

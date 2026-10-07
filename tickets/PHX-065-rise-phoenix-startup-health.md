@@ -1,6 +1,6 @@
 # PHX-065 — Rise-Phoenix startup health sequence
 
-Status: TODO
+Status: DONE
 Phase: 6 — Voice
 
 ## Objective
@@ -716,3 +716,243 @@ Required repair constraints:
 No additional historical test repair is authorized. If another unrelated historical failure appears, stop and report BLOCKED with exact evidence.
 
 All other PHX-065 authority, scope, completion requirements, exact completion commit message, feature-branch-only push rule, and prohibition on PHX-070 remain unchanged.
+
+## Completion evidence — 2026-10-07
+
+Original drafts were based on 086461f268d2358b1acad317ec5af882537a228d. Final resume
+preserved startup drafts and the authorized benchmark edit at a953907350fc19e94b8b4de1cbacb5b4a8eecca1.
+Normal fetch --prune and FF-only synchronization brought the existing feature branch
+to second authoritative blocker-resolution HEAD bb62864da04ca2279249cbcd2cf3f3d59a4f7fd5;
+main 98198ee7d349e57999bc3bdbf2e2588b3fafbc61, 0 behind / 3 ahead, ticket-only diff.
+All three preserved files had identical SHA-256 hashes before and after synchronization.
+Read complete ticket and current architecture/security/voice/KAIDO/event authority.
+No history rewrite, main modification/push, PR, merge or next-ticket work.
+
+Preserved and freshly reviewed phoenix/voice/startup/__init__.py and
+tests/test_rise_phoenix_startup.py without rewriting their correct implementation.
+Only the two explicitly authorized historical test repairs changed earlier files.
+ADR-062 records architecture, evidence,
+failure/event/cancellation rules and caller-owned integration limitations.
+
+### Contract and behavior evidence
+
+509 deterministic synthetic cases cover the complete ticket matrix, including exact
+three text constants/vocabularies/errors, frozen/extra-forbidden exact snapshots,
+stored/subclass/nested/extra/foreign-enum forgeries, strict bounded IDs/languages,
+exact Rise-Phoenix request/capability/detection correlation and detected-only truth.
+False detection returns None with no startup effects. Constructor invokes no probe,
+provider, event or I/O and binds no loop. Wrong-loop, closed and duplicate busy
+paths are explicit. One caller task owns startup, without hidden tasks/workers.
+
+All six mandatory caller probes execute sequentially in canonical order on each
+accepted startup; no default-success or cached READY path exists. Every subsystem's
+degraded/unavailable evidence forces DEGRADED and does not short-circuit remaining
+checks. Exceptions safely become unavailable; malformed/wrong-ID/subsystem/status,
+forged evidence and changed/failed identity access raise health_failure. Repeated
+startup after explicit sleep reruns all checks and observes changed health.
+
+Acknowledgement and final speech reuse PHX-063/064 boundaries, exact explicit voice/
+language, one capability/synthesis/play each and completed correlation. Ack failure
+skips final speech while checks continue. Final READY speech failure downgrades
+result/text/event to degraded, activates KAIDO once and never retries a degraded
+phrase. Already-degraded final failure stays degraded with one policy activation.
+Healthy flow never activates KAIDO. Degraded selection exactly correlates startup,
+failsafe agent, trigger, fixed reason and three capabilities, with no tool routing
+or recovery evidence. Exhaustive result consistency enforces six checks, exact
+texts/degradation/fail-safe evidence and listening; no raw audio/diagnostics retained.
+
+Real PHX-064 activation occurs once with the exact session, owns the sole listening
+event and exposes listening only through its API. Property/activation failures are
+safe conversation_failure. Healthy events: started/listening/ready; degraded:
+started/listening/degraded. Only safe metadata payloads; no startup voice-speaking
+event. Started failure prevents checks/activation. Final publication failure produces
+no result and best-effort sleep rollback. Real capacity rejection and rollback
+failure tests preserve the correct error and observable manager state.
+
+Cancellation and suppressed cancellation are tested at all 18 awaited points:
+wake capability/detect, both TTS capability/synthesis/playback phases, all six probes,
+activation, started/listening/final publication. No later startup stage or result
+is permitted after cancellation. Nested activation may call its own publisher
+before returning; the startup boundary still aborts and emits no false final result.
+Close at each boundary prevents returned success and clears bookkeeping without
+closing borrowed wake/probes/TTS/output/conversation/EventBus/KAIDO. No guessed or
+unrelated provider/model/tool operation is cancelled. Already-entered collaborator
+effects/events cannot be retracted; no native hard-stop claim is made.
+
+### Commands and exact results
+
+THREE consecutive uv run --locked pytest tests/test_rise_phoenix_startup.py -q:
+509 passed each on the final implementation. No new warning/skip/xfail.
+Initial development corrected a cancellation-count fixture expectation and moved
+synthetic fixtures into this new test file to avoid a mypy module-name conflict.
+No PHX-065 draft change was required on resume; no case/assertion was removed.
+
+Previous BLOCKED reason: three required full-suite attempts each reached 14397
+passed, one failure and 16 existing skips, exclusively the unchanged historical
+test_slow_optional_probe_does_not_consume_generation_deadline[2]. The benchmark
+suite passed independently. ChatGPT's authoritative 2026-10-07 ticket clarification
+at a953907350fc19e94b8b4de1cbacb5b4a8eecca1 authorizes exactly two test constants:
+time.sleep(0.025) -> time.sleep(1.0), per_trial_timeout_seconds=0.01 -> 0.5, inside
+that function only. Delay 1.0 > deadline 0.5 preserves the telemetry-exclusion proof
+while providing scheduler margin. All SUCCESS/digest/rate/call-count/cleanup/activity
+assertions remain unchanged; the separate blocking-generation timeout test is
+unchanged. No benchmark production change, retry, skip, xfail, flaky marker or
+environment-conditioned behavior. Exact repaired test: 2 passed. Dedicated
+benchmark suite THREE consecutive runs: 130 passed each, no skips/xfails/warnings.
+
+Second BLOCKED reason: after benchmark repair, a full run reached 14397 passed,
+one failure and 16 existing skips at the unchanged Ollama test
+test_stream_deadline_between_chunks_does_not_cancel_consumer. Its 0.01-second
+real-time operation deadline expired before the first chunk. The exact test passed
+individually in the working tree and an unchanged-main snapshot; Ollama production
+and test blobs matched main. No pristine-main full-suite reproduction was claimed.
+ChatGPT's second authoritative ticket clarification at
+bb62864da04ca2279249cbcd2cf3f3d59a4f7fd5 authorizes the existing Colibri sibling's
+deterministic-clock pattern. Add only unittest.mock.patch import, change only this
+test's operation_timeout 0.01 -> 10, receive first chunk normally, replace real
+sleep(0.02) with loop=asyncio.get_running_loop(), clock=loop.time, and patch.object
+(loop, 'time', lambda: clock()+20) only around the second advance expecting neutral
+ProviderUnavailableError. Source closure, empty active IDs, current task existence
+and not-cancelling assertions are unchanged. test_total_deadline_cleans_operations
+and every other Ollama test remain unchanged. No PHX-011 production change.
+Repaired exact Ollama test THREE consecutive runs: 1 passed each. Complete Ollama
+suite THREE consecutive runs: 108 passed each, no skips/xfails/warnings. No retry,
+skip, xfail, flaky marker, platform/load condition or weakened assertion.
+
+All 40 prior suites were run individually with uv run --locked pytest <path> -q;
+all established counts remain unchanged, with JUnit/logs outside the repository.
+
+| Suite | Result |
+| --- | --- |
+| tests/test_voice_conversation.py | 950 passed |
+| tests/test_tts_provider.py | 602 passed |
+| tests/test_stt_provider.py | 414 passed |
+| tests/test_vad.py | 403 passed |
+| tests/test_wake_word_provider.py | 537 passed |
+| tests/test_prompt_injection_defenses.py | 604 passed |
+| tests/test_urahara_research_flow.py | 492 passed |
+| tests/test_search_provider.py | 400 passed |
+| tests/test_screenshot_vision_loop.py | 397 passed |
+| tests/test_windows_ui_automation.py | 493 passed |
+| tests/test_browser_tool.py | 653 passed |
+| tests/test_secrets_boundary.py | 402 passed |
+| tests/test_terminal_tool.py | 270 passed |
+| tests/test_filesystem_tool.py | 649 passed; 16 existing skips |
+| tests/test_audit_trail.py | 302 passed |
+| tests/test_permission_engine.py | 926 passed |
+| tests/test_tool_registry.py | 204 passed |
+| tests/test_memory_schema.py | 244 passed |
+| tests/test_pudding_memory_service.py | 167 passed |
+| tests/test_document_ingestion.py | 300 passed |
+| tests/test_vector_store_sqlite.py | 273 passed |
+| tests/test_retrieval_context.py | 367 passed |
+| tests/test_provenance_citations.py | 173 passed |
+| tests/test_persistence.py | 12 passed |
+| tests/test_agent_registry.py | 96 passed |
+| tests/test_phoenix_orchestrator.py | 101 passed |
+| tests/test_aizen_planner.py | 151 passed |
+| tests/test_agent_model_router.py | 213 passed |
+| tests/test_task_graph_state_machine.py | 348 passed |
+| tests/test_structured_agent_handoffs.py | 214 passed |
+| tests/test_levi_verification.py | 242 passed |
+| tests/test_mahoraga_recovery.py | 790 passed |
+| tests/test_kaido_failsafe.py | 574 passed |
+| tests/test_model_provider.py | 61 passed |
+| tests/test_ollama_provider.py | 108 passed |
+| tests/test_model_registry.py | 83 passed |
+| tests/test_model_lifecycle.py | 54 passed |
+| tests/test_embeddings.py | 182 passed |
+| tests/test_colibri_provider.py | 194 passed |
+| tests/test_model_benchmark.py | 130 passed |
+
+Aggregates: previous Phase 6 2906; Phase 5 3039; Phase 4 2753 / 16 existing skips;
+Phase 3 1524 plus persistence 12; all nine Phase 2 suites 2729; all seven Phase 1
+suites 812. All individual commands exited 0.
+
+- uv lock; uv sync --locked: PASS; manifests unchanged.
+- uv run --locked pytest: THREE consecutive complete runs, each 14398 passed,
+  16 existing skips and one existing Starlette/httpx TestClient deprecation warning.
+  Baseline 13889 plus 509 new cases. All three prior BLOCKED full-attempt logs/XML/
+  results remain preserved in the original PHX-065-20261007 validation directory;
+  The second blocked attempt and main snapshot evidence remain in
+  PHX-065-resume-20261007. All three fresh successful runs in the final resume
+  have separate full-1/full-2/full-3 XML and logs.
+- uv run --locked ruff check .: PASS.
+- uv run --locked ruff format --check .: PASS, 124 files formatted.
+- uv run --locked mypy: PASS, 118 source files.
+- uv build --out-dir <external-validation>/dist: sdist/wheel PASS; exact startup
+  package source bytes verified, no startup.py.
+- Foundation bootstrap/API/config/persistence/events/hardware: 126 passed,
+  existing warning only; exact /health unchanged.
+- npm test: 4 passed; desktop workspace typecheck/build: PASS; source unchanged.
+
+All logs/JUnit/review scripts/reports/Python package artifacts stay outside the
+project at C:/Users/shoai/.codex/validation/PHX-065-resume2-20261007. Ignored desktop build
+output is not delivered. No recordings/models/PCM dumps/transcript dumps/DB/log/
+cache/build/credentials or unrelated files enter the intended diff.
+
+### Security, invariants and final scope
+
+Independent normalized Git-blob review proves 141 of 143 prior protected production,
+test, migration, desktop and dependency files unchanged, including PHX-060..064.
+Only the two authorized historical tests differ: exact benchmark constants and
+exact Ollama import/clock stabilization. Normalized byte comparison proves all
+other syntax in both files unchanged; all prior production remains unchanged.
+Sole Alembic head 0005_audit_events, five migrations unchanged, EventType 32 and
+definitions unchanged. Secret-signature scan PASS. Guarded uncached import/
+construction and cold interpreter/static import/call review rule out unauthorized
+runtime integration and side effects. Real permission/decision/tool contracts
+reject startup evidence; no readiness output grants task/verification/permission
+authority. Six actual same-run check invocations and voice success are required
+for READY; no score/model/alias/string/event can override degradation.
+
+Reviewed INV-001..INV-024: preserved. PHOENIX supreme; P4/P5/audit unchanged;
+no tool bypass/LLM permission, AIZEN/LEVI/MAHORAGA execution, automatic memory,
+heavy runtime or dependency promotion. KAIDO stays explicit degraded policy only.
+No capture/device/backend/network-specific voice runtime, task/model/tool execution,
+memory/RAG/secrets/persistence/API/frontend/schema changes. Degradation observable.
+
+All required implementation/regression/quality/security gates passed before DONE.
+Complete staged line/whitespace/scope review and final startup/previous-voice staged
+and both historical-test rechecks precede the exact completion commit and feature-only push; the execution
+report records these results. PHX-065 DONE closes Phase 6 COMPLETE; PHX-070 TODO.
+
+### Known limitations
+
+No microphone/continuous wake or concrete wake/STT/TTS/output backend. Caller supplies
+bounded wake PCM and six real probe implementations; their exact evidence is not
+independently authenticated. Probes are sequential, with caller-owned outer/native
+deadlines and collaborator lifetimes. No fixed PCM cache. Startup speech is not
+managed by barge-in. No automatic task/model/tool/recovery execution; KAIDO is policy
+evidence only. No API/frontend runtime wiring. Caller must not feed conversation
+observations until handle_wake returns. Best-effort rollback can fail; actual state
+remains observable and entered/delivered effects cannot be undone. PHX-070 NOT STARTED.
+
+### Individual invariant review
+
+| Invariant | Evidence |
+| --- | --- |
+| INV-001 | PASS: coordinator owner is phoenix; no independent agent execution. |
+| INV-002 | PASS: no AIZEN invocation or permission/finalization delegation. |
+| INV-003 | PASS: no model output; exact startup evidence rejects permission/tool contracts. |
+| INV-004 | PASS: no privileged tool execution; existing registry and permissions unchanged. |
+| INV-005 | PASS: P4 confirmation engine and tests unchanged; no startup approval field. |
+| INV-006 | PASS: P5 blocking unchanged; no execution path added. |
+| INV-007 | PASS: no P3/P4 action; audit implementation, tests and migration unchanged. |
+| INV-008 | PASS: six executed same-run checks plus voice completion required for READY; malformed or failed delivery returns no success. |
+| INV-009 | PASS: no MAHORAGA invocation; recovery budget unchanged; no startup retries. |
+| INV-010 | PASS: KAIDO called exactly once on actual degraded health/voice evidence and never on healthy startup. |
+| INV-011 | PASS: no frontend/API change or direct provider/tool integration. |
+| INV-012 | PASS: only neutral wake/TTS/playback/probe interfaces; no concrete backend imports. |
+| INV-013 | PASS: no tool implementation changes; probe and voice evidence cannot choose agent policy. |
+| INV-014 | PASS: neutral phoenix/voice/failsafe IDs; UTA and KAIDO display names are not runtime authority. |
+| INV-015 | PASS: text orchestration unchanged; voice failure degrades startup output without invoking orchestration. |
+| INV-016 | PASS: TTS/playback errors yield explicit degraded startup; other boundary errors are safe and typed. |
+| INV-017 | PASS: wake/health/provider evidence exactly revalidated; no trusted-content or executable field. |
+| INV-018 | PASS: no memory/RAG/secrets imports, writes or private-content event payloads. |
+| INV-019 | PASS: active startup observable, caller cancellation propagates, suppression and close block continuation, no hidden worker. |
+| INV-020 | PASS: no persistence changes; five versioned migrations unchanged; head 0005_audit_events. |
+| INV-021 | PASS: probe exceptions become explicit unavailable; malformed evidence errors; voice errors cannot produce READY. |
+| INV-022 | PASS: explicit degraded result, voice failure stage, nonhealthy checks, KAIDO decision and phoenix.degraded event. |
+| INV-023 | PASS: no expensive generation; lifecycle/benchmark/Ollama production unchanged. Separate blocking-generation and real Ollama deadline tests unchanged; both authorized historical repairs retain deadline and cleanup assertions. |
+| INV-024 | PASS: no new runtime dependency or concrete research/voice engine; manifests unchanged. |

@@ -9,6 +9,7 @@ import sys
 from collections.abc import AsyncIterator
 from datetime import UTC
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -730,16 +731,18 @@ def test_stream_deadline_between_chunks_does_not_cancel_consumer(
     async def run() -> None:
         source = ByteStream([encoded(wire(done=False)), encoded(wire())])
         async with OllamaProvider(
-            operation_timeout=0.01,
+            operation_timeout=10,
             transport=httpx.MockTransport(
                 lambda req: httpx.Response(200, stream=source)
             ),
         ) as backend:
             iterator = backend.stream(generation_request)
             await anext(iterator)
-            await asyncio.sleep(0.02)
-            with pytest.raises(ProviderUnavailableError):
-                await anext(iterator)
+            loop = asyncio.get_running_loop()
+            clock = loop.time
+            with patch.object(loop, "time", lambda: clock() + 20):
+                with pytest.raises(ProviderUnavailableError):
+                    await anext(iterator)
             assert source.closed and backend.active_operation_ids == ()
             task = asyncio.current_task()
             assert task is not None and not task.cancelling()

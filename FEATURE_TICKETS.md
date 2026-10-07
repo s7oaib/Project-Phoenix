@@ -63,9 +63,9 @@ Phase 5 status: COMPLETE.
 - PHX-062 STT provider — DONE
 - PHX-063 TTS provider — DONE
 - PHX-064 Voice conversation/barge-in — DONE
-- PHX-065 Rise-Phoenix startup health sequence — TODO
+- PHX-065 Rise-Phoenix startup health sequence — DONE
 
-Phase 6 status: INCOMPLETE.
+Phase 6 status: COMPLETE.
 
 ## Phase 7 — Media & Documents
 - PHX-070 Spotify integration — TODO
