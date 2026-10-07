@@ -1536,3 +1536,161 @@ No PR.
 No merge.
 No main push.
 No PHX-073.
+
+
+## Authoritative blocker resolution — foundation dependency guard / formatting / runner — 2026-10-08
+
+PHX-072 correctly stopped after the DOCX/mypy repairs when three later gates exposed:
+1. two formatter-only defects in already-authorized historical test files,
+2. a current foundation dependency assertion that has not yet been evolved for PHX-072's
+   explicitly authorized direct parser dependencies,
+3. an external validation-runner console encoding failure after desktop npm tests passed.
+
+This section is authoritative for resume and does not waive any original gate.
+
+### A. Foundation runtime dependency guard — EXACT scope expansion authorized
+
+File:
+`tests/test_bootstrap.py`
+
+Only test:
+`test_distribution_has_foundation_runtime_dependencies`
+
+Independent current-main inspection confirms this test asserts the CURRENT installed
+Phoenix distribution's direct `Requires-Dist` names. It is not an immutable historical
+PHX-000 snapshot.
+
+PHX-072 explicitly promotes exactly two new direct runtime requirements:
+- `pypdf>=6.19,<7`
+- `python-docx>=1.2,<2`
+
+Therefore evolve only this exact expected direct-dependency set to include:
+- `pypdf`
+- `python-docx`
+
+Preserve every existing expected direct dependency:
+- alembic
+- fastapi
+- httpx
+- playwright
+- psutil
+- pydantic
+- pydantic-settings
+- pywinauto
+- sqlalchemy
+- uvicorn
+
+Do NOT add `lxml` to `Requires-Dist`; it is a transitive dependency of python-docx,
+not a Phoenix direct dependency.
+
+Do NOT weaken the assertion into subset containment.
+It must continue asserting the exact direct dependency-name set of the installed Phoenix
+distribution.
+
+Preserve the exact Python requirement assertion:
+- >=3.11
+- <3.12
+
+No other `tests/test_bootstrap.py` change is authorized.
+
+Required verification:
+- run the exact dependency test THREE consecutive times,
+- run the full foundation suite and require all 126 tests pass,
+- final diff of `tests/test_bootstrap.py` contains only the two added expected names.
+
+This expands PHX-072's maximum authorized final path scope from 13 to 14 paths.
+
+### B. Formatter defects in already-authorized historical files
+
+Files:
+- `tests/test_browser_tool.py`
+- `tests/test_prompt_injection_defenses.py`
+
+These paths were already authorized for narrow historical dependency-guard evolution.
+
+The full Ruff format check reports only these two files need formatting.
+
+Authorized repair:
+- apply Ruff-compatible formatting only to these two files,
+- no semantic change,
+- no additional assertion removal/weakening,
+- no production change,
+- inspect each diff after formatting and require changes are limited to the already
+  authorized guard edits plus formatter-only layout.
+
+`tests/test_screenshot_vision_loop.py` is not authorized for additional semantic change;
+leave it untouched unless Ruff itself reports it and a new clarification is obtained.
+
+After formatting:
+- targeted Ruff format check for the two files must pass,
+- full `ruff format --check .` must pass before completion.
+
+### C. Desktop validation-runner cp1252 failure — NO repository repair authorized
+
+Observed behavior:
+- `npm test` itself completed successfully with 4 tests passed,
+- an external validation runner then raised Python `UnicodeEncodeError` under cp1252
+  while printing/capturing command output,
+- desktop typecheck/build therefore did not run.
+
+This is validation-harness behavior, not Phoenix desktop code.
+
+Do NOT modify repository code/tests/configuration to accommodate the runner encoding.
+
+For final desktop evidence, run the required commands directly in the user's terminal,
+outside the failing wrapper:
+- `npm test`
+- `npm run typecheck --workspace @phoenix/desktop`
+- `npm run build --workspace @phoenix/desktop`
+
+If receipts are captured by Python tooling, configure that external process/console for
+UTF-8 or redirect output to an external UTF-8 file. Such validation-environment changes
+must remain outside the repository.
+
+Required final evidence:
+- npm test: 4 passed,
+- typecheck: PASS,
+- build: PASS,
+- desktop source unchanged.
+
+A repeated failure of an external receipt/printing wrapper after the underlying commands
+pass is not a Phoenix code failure and does not require repository modification.
+
+### D. Resume rules
+
+Preserve all successful local PHX-072 work, including:
+- explicit `os` / `os.sep` mypy repair,
+- `ZipInfo.orig_filename` archive-member validation,
+- raw backslash ZIP fixture,
+- focused 336-test suite work,
+- exact dependency delta:
+  - pypdf 6.19.0
+  - python-docx 1.2.0
+  - lxml 6.1.3.
+
+No other historical scope expansion is authorized.
+
+After synchronizing this clarification, resume all outstanding original PHX-072 gates.
+Previously completed gate receipts may inform diagnosis, but final completion must satisfy
+the ticket's required deterministic verification sequence, including full Python x3,
+full mypy, package verification, direct desktop commands, security/invariants and final
+diff review.
+
+If another unchanged historical test outside the four now-authorized historical files
+fails, reproduce it individually and STOP BLOCKED.
+
+The four authorized historical test paths are now:
+- `tests/test_browser_tool.py`
+- `tests/test_screenshot_vision_loop.py`
+- `tests/test_prompt_injection_defenses.py`
+- `tests/test_bootstrap.py`
+
+Expected maximum final scope is now 14 paths.
+
+Because this clarification is an additional preparation commit, successful PHX-072 branch
+ancestry relative to main is now expected to be exactly THREE commits ahead:
+1. `docs: add PHX-072 upload parser routing ticket`
+2. this blocker-resolution commit
+3. `feat: complete PHX-072 upload parser routing`
+
+No PR, merge, main push, force push or PHX-073 work.
