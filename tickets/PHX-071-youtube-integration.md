@@ -761,10 +761,170 @@ Do not automate account login.
 - no concrete embedded player in PHX-071,
 - player adapter evidence is not independent proof of rendering/audio/user viewing,
 - API quotas are externally managed and may change,
-- API key query transport can exist inside HTTPX request objects and cannot be guaranteed
-  wiped from immutable runtime copies,
+- API key header transport can exist inside HTTPX request objects and cannot be guaranteed
+  wiped from immutable runtime copies; application/HTTPX INFO logging must not expose it,
 - synchronous SecretStore work cannot be preempted,
 - already-entered player/network effects cannot be undone after cancellation,
 - queue is intentionally ephemeral and process-local,
 - external-open requires a separately permissioned BrowserTool navigation,
 - no transcript/caption ingestion or long-term media history.
+
+
+## Authoritative blocker resolution — 2026-10-07
+
+PHX-071 was correctly stopped after two reproducible failures. This section amends the
+ticket narrowly and is authoritative for resume.
+
+### A. Historical PHX-060 wake-word guard repair — AUTHORIZED
+
+The unchanged PHX-060 test
+`test_prior_production_manifests_migrations_frontend_events_unchanged` still uses:
+
+`BASELINE = "e58d304df3a2097ae03e0b31941c9cf487a584f9"`
+
+and diffs broad repository areas including `phoenix/tools`. That baseline predates the
+legitimately merged PHX-070 Spotify tool, so the assertion no longer tests only PHX-060
+isolation and now rejects valid successor-ticket production.
+
+Exactly one historical test-only repair is authorized in:
+
+`tests/test_wake_word_provider.py`
+
+Required repair:
+
+1. Do NOT modify PHX-060 production.
+2. Keep the original PHX-060 baseline constant unchanged.
+3. Replace only the broad repository-diff portion of
+   `test_prior_production_manifests_migrations_frontend_events_unchanged` with a
+   narrow PHX-060-owned production guard comparing that baseline against exactly:
+   - `phoenix/voice/__init__.py`
+   - `phoenix/voice/audio.py`
+   - `phoenix/voice/wake.py`
+4. Preserve the existing EventType count assertion and Alembic sole-head assertion.
+5. Do not weaken or delete the earlier static/import/constructor/credential/security
+   tests in the PHX-060 suite.
+6. Do not update the baseline SHA to current main; doing so would merely move the same
+   historical defect forward.
+7. Do not add skip/xfail/retry/flaky/platform/load handling.
+8. Do not modify any other historical file unless a new blocker is separately authorized.
+9. Run the repaired exact test three consecutive times, then the complete
+   `tests/test_wake_word_provider.py` suite three consecutive times and require all
+   537 cases to pass each run.
+10. The final PHX-071 diff may include this ONE authorized historical test file in
+    addition to normal PHX-071-owned files.
+
+This repair preserves the original invariant: PHX-060-owned wake production remains
+unchanged, while later authorized tools no longer make a historical unit test fail.
+
+### B. API-key transport privacy — USE X-Goog-Api-Key
+
+The PHX-071 draft's query-string API key transport is rejected because HTTPX INFO logging
+can include request URLs. The existing ticket already requires that the API key never
+appear in logs or final request URLs.
+
+Use the Google system-parameter header:
+
+`X-Goog-Api-Key: <secret>`
+
+for the fixed YouTube Data API request.
+
+This is now REQUIRED.
+
+Do NOT place the API key in:
+- `key=` query parameter,
+- any other URL component,
+- permission resource,
+- result,
+- exception,
+- log message,
+- model dump,
+- queue/player evidence.
+
+Search request query parameters remain only the non-secret fixed/search parameters such
+as `part`, `q`, `type`, and `maxResults`.
+
+Add deterministic tests proving:
+- outgoing URL contains no API key,
+- outgoing request has the exact `X-Goog-Api-Key` header,
+- application logs and HTTPX INFO logs do not expose the synthetic key,
+- denied/approval-required calls still perform zero secret lookup and zero HTTP,
+- raw request/result/error representations produced by PHX-071 do not expose the key.
+
+This is not a dependency, endpoint, OAuth, permission or quota-model change.
+
+### C. Explicit queue revision for stale remove — REQUIRED
+
+Index-only removal is insufficient because a caller can hold an older queue snapshot;
+after an intervening queue mutation, the same index may refer to a different video.
+
+Add a monotonic in-memory `queue_revision`.
+
+Exact contract:
+
+1. Initial revision is 0.
+2. `youtube.queue_state` returns the current nonnegative revision with the detached
+   ordered queue snapshot.
+3. Every successful queue mutation that changes queue contents increments revision
+   exactly once:
+   - successful enqueue,
+   - successful remove,
+   - successful clear of a non-empty queue.
+4. Clearing an already-empty queue does not change revision.
+5. `youtube.remove` requires an explicit strict nonnegative
+   `expected_queue_revision`; booleans are rejected.
+6. The remove permission resource binds BOTH:
+   - exact queue index,
+   - exact expected queue revision.
+7. After PermissionEngine returns ALLOWED and immediately before mutation, compare the
+   supplied expected revision with the current revision.
+8. A mismatch is a stale request and must fail safely with existing
+   `invalid_input`; perform zero queue mutation and zero player/network effect.
+9. Out-of-range index remains `invalid_input`.
+10. Do not add a new error vocabulary member.
+11. Enqueue and clear do not require an expected revision because their semantics do
+    not target an item by stale positional identity.
+12. Queue revision is runtime-only:
+    - no persistence,
+    - no memory/RAG,
+    - no EventType,
+    - no audit payload,
+    - no cross-process guarantee.
+13. Explicit close clears queue contents; close does not need to preserve revision
+    because the runtime becomes closed and cannot be reused for later queue mutation.
+14. Add adversarial tests showing an old queue snapshot cannot remove a different
+    current item after enqueue/remove/clear changes the revision.
+
+### D. Resume and completion gates
+
+Preserve the current local PHX-071 production/test drafts if they otherwise satisfy the
+ticket. Do not rewrite correct work merely because the ticket was amended.
+
+After synchronizing this authoritative clarification, rerun:
+- focused PHX-071 suite THREE consecutive times,
+- repaired wake exact test x3,
+- full wake suite x3,
+- every required impacted regression,
+- all protected Phase-6 regressions,
+- Spotify regression,
+- full Python suite THREE consecutive times,
+- Ruff/format/mypy/build/foundation/desktop/security/invariants/final diff review.
+
+No gate is waived.
+
+If another unrelated unchanged historical failure appears, STOP BLOCKED. No further
+historical repair is authorized by this clarification.
+
+Only after every required gate passes:
+- PHX-071 DONE,
+- Phase 7 remains INCOMPLETE,
+- PHX-072/073 remain TODO,
+- exact completion commit remains:
+  `feat: complete PHX-071 youtube integration`.
+
+Because this clarification is a second preparation commit, completed branch ancestry
+relative to main is now expected to be exactly THREE commits ahead:
+1. `docs: add PHX-071 YouTube integration ticket`
+2. this authoritative blocker-resolution commit
+3. `feat: complete PHX-071 youtube integration`
+
+No PR, merge, main push, force push or PHX-072 work.
