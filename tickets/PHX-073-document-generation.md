@@ -1260,3 +1260,139 @@ No PR.
 No merge.
 No main push.
 No PHX-080.
+
+
+## Authoritative blocker resolution — Pydantic discriminator / ReportLab typing — 2026-10-08
+
+PHX-073 correctly stopped during initial validation before any completion commit/push.
+
+Observed blockers:
+1. Pydantic rejects a before-field validator applied directly to the discriminated-union
+   discriminator field `kind`; module import fails.
+2. Strict mypy reports missing ReportLab typing information plus ordinary PHX-073-local
+   typing errors.
+3. Ruff identified local formatting/line-length issues; formatting was run but the final
+   lint gate has not yet been reverified.
+
+This section authorizes only the following narrow repairs.
+
+### A. Discriminator validation repair
+
+The frozen block vocabulary remains exactly:
+- paragraph,
+- bullet_list,
+- table.
+
+Each block model must keep an exact `Literal` discriminator:
+- `Literal["paragraph"]`
+- `Literal["bullet_list"]`
+- `Literal["table"]`
+
+Do NOT attach a `field_validator(..., mode="before")` to the discriminator field used by
+Pydantic's discriminated union.
+
+Remove that invalid discriminator field validator.
+
+Use Pydantic's discriminated-union Literal contract as the canonical discriminator
+validation.
+
+If additional anti-coercion/forgery validation is required, perform it at the model-level
+or existing exact-contract wrapper, not as a before-validator on the discriminator field.
+
+Preserve:
+- frozen models,
+- extra="forbid",
+- strict validation,
+- exact three block variants,
+- model-copy/subclass/extras revalidation requirements.
+
+No weakening to an open `str` discriminator is authorized.
+
+### B. ReportLab typing repair — no additional dependency
+
+Do NOT add `types-reportlab` or any other typing package.
+
+Current external verification on 2026-10-08:
+- ReportLab runtime is 5.0.1,
+- the current `types-reportlab` package targets ReportLab 5.0.0,
+- adding it would create a fourth new lock identity and violate PHX-073's frozen
+  dependency delta.
+
+Instead, add a narrowly scoped mypy override in `pyproject.toml` for external,
+untyped ReportLab modules only:
+
+```toml
+[[tool.mypy.overrides]]
+module = ["reportlab", "reportlab.*"]
+ignore_missing_imports = true
+```
+
+Equivalent TOML ordering is acceptable.
+
+The override must NOT:
+- disable mypy globally,
+- disable strict mode,
+- ignore Phoenix-local errors,
+- add `ignore_errors = true`,
+- silence python-docx/pypdf/Phoenix modules,
+- add per-line `# type: ignore` merely to avoid fixing local typing.
+
+All PHX-073-local typing errors in `phoenix/documents/generation.py` and focused tests
+must be fixed normally with precise annotations/narrowing/protocols/casts where justified.
+
+The ReportLab override is type-checker configuration only; it is not a runtime dependency.
+
+### C. Dependency delta remains frozen
+
+Direct runtime addition remains exactly:
+- `reportlab>=5.0.1,<6`
+
+New runtime lock identities remain exactly:
+- reportlab 5.0.1,
+- pillow 12.3.0,
+- charset-normalizer 3.5.2.
+
+No fourth package identity.
+No `types-reportlab`.
+No unrelated package mutation.
+
+The Phoenix direct runtime dependency set adds only ReportLab.
+
+### D. Ruff repair
+
+Run Ruff formatting only over PHX-073-local changed files as needed, then verify:
+
+- targeted `ruff check`,
+- targeted `ruff format --check`,
+- final full-project `ruff check .`,
+- final full-project `ruff format --check .`.
+
+Formatter changes must not alter semantics or expand scope.
+
+### E. Resume rules
+
+Preserve the current uncommitted:
+- `phoenix/documents/generation.py`,
+- `pyproject.toml`,
+- `uv.lock`.
+
+After synchronizing this clarification, first verify:
+1. module import succeeds,
+2. targeted Pydantic contract/discriminator smoke tests pass,
+3. targeted mypy for generation/tests passes,
+4. targeted Ruff lint/format passes.
+
+Only then continue the full original PHX-073 test matrix.
+
+No additional historical repair is authorized.
+
+Because this clarification adds a second preparation commit, successful PHX-073 history
+relative to main is now expected to be exactly THREE commits ahead:
+1. `docs: add PHX-073 document generation ticket`
+2. this blocker-resolution commit
+3. `feat: complete PHX-073 document generation`
+
+Expected maximum final path scope remains 11 paths because the clarification modifies only
+the already-authorized PHX-073 ticket and `pyproject.toml` was already authorized.
+
+No PR, merge, main push, force push or PHX-080 work.
