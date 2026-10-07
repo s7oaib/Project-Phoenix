@@ -2301,3 +2301,100 @@ memory/RAG/secrets, content logging/persistence/cache, API/frontend/schema or ne
 dependency is introduced. Five migrations, sole head 0005_audit_events, 32 EventTypes
 and all previous production/tests/manifests remain unchanged. Future integration
 owns capture, real runtime, native deadlines and cancellation effectiveness.
+
+## ADR-062 — Evidence-derived Rise-Phoenix startup and degraded policy
+Status: Accepted. Date: 2026-10-07. Ticket: PHX-065.
+
+PHOENIX owns startup/readiness (phoenix); voice/UTA supplies subordinate interface
+evidence. Use phoenix.voice.startup as startup/__init__.py, preserving the PHX-060
+top-level file-layout contract. No previous voice/agent/core semantics change.
+No concrete wake/STT/TTS/output backend or runtime wiring is added.
+
+RisePhoenixStartupRequest is an exact frozen extra-forbidden five-field snapshot:
+startup/session IDs, bounded PHX-060 WakeWordRequest, explicit TTS profile/language.
+Only canonical rise_phoenix / Rise, Phoenix phrase evidence is accepted. Wake
+capabilities/detection run once, exact-revalidated and correlated. detected alone
+drives startup; score has no authority. False detection returns None without events,
+probes, TTS/output, KAIDO or conversation activation. No retry/provider fallback.
+
+StartupHealthProbe is an abstract caller-owned async check with read-only canonical
+subsystem. Constructor requires six probes in exact persistence/hardware/model_provider/
+tools/voice/agents order, detached from supplied tuple/list. No default probe/result
+or cached health exists. Each accepted startup invokes all six sequentially once,
+including after ordinary degraded/unavailable evidence or voice failure. Exact
+three-field StartupCheckResult binds startup/subsystem/status without details or
+authority. Probe exceptions become unavailable without diagnostics; malformed or
+mis-correlated evidence raises health_failure. Identity is checked before execution
+and after returned evidence. Caller-supplied checks are structural evidence, not
+independent authentication or proof of their implementation's thoroughness.
+
+Freeze exact acknowledgement, healthy and degraded texts from the ticket:
+- Wake command acknowledged. Initializing Phoenix network. Checking all agents and core systems.
+- All agents online. All core systems operational. What's the mission?
+- Phoenix initialized in degraded mode. Some core systems are unavailable. Continuing with available capabilities.
+
+After phoenix.started, attempt acknowledgement through existing TtsProvider/AudioOutput
+only. Each speech phase fetches exact capabilities, validates explicit profile/
+language/provider, synthesizes once, correlates bounded TtsAudio and plays once with
+exact completed result. Phase-specific bounded operation/playback IDs derive from
+startup ID without retaining audio. No generated text, alternate voice or retry.
+Acknowledgement TTS/playback failure forces degraded and skips all later speech,
+while all actual health checks continue. Startup speech publishes no voice events.
+
+READY requires six same-run healthy checks and no startup voice failure, cancellation,
+close or error. Any unhealthy check or voice failure forces DEGRADED. Only degraded
+startup invokes pure synchronous KaidoFailSafe.activate, once, with correlated
+failsafe_id=startup_id, critical_subsystem_degradation, fixed safe reason and exact
+basic_conversation/diagnostics/recovery_guidance order. No safe_limited_tool_routing
+or recovery_result. Exact decision validation rejects identity/mode/trigger/reason/
+capability/recovery/extras/enum forgeries. KAIDO selects policy only, grants no
+permission and runs no tool/model/recovery. Invalid decision raises failsafe_failure.
+
+Activate borrowed PHX-064 manager exactly once after derivation/policy. It must
+begin sleeping and end correlated listening; only PHX-064 emits voice.listening.
+Caller must not feed listening observations until startup returns. Provisional
+ready attempts healthy final speech; failure downgrades the final result/text/event,
+selects KAIDO if absent and never retries the degraded phrase. Already-degraded
+speech failure remains degraded without a second policy activation or retry.
+Eight-field RisePhoenixStartupResult enforces six canonical correlated checks,
+exact text, voice failure/fail-safe consistency and final listening state. It carries
+no raw wake/audio/backend evidence and grants no task/verification/permission success.
+
+Publish only existing phoenix.started/ready/degraded, agent phoenix and correlation
+startup_id. Started payload is startup/session IDs only; final adds outcome,
+unhealthy subsystem names and voice-failure stage only. No private content, score,
+PCM/hash, provider diagnostics, fail-safe reason or permission data. Normal order
+started -> PHX-064 listening -> one ready/degraded. Started failure prevents checks
+and activation. Final event failure returns no result, best-effort sleeps only the
+matching activated session and retains event_failure even if rollback fails. Actual
+borrowed manager state remains observable; delivered events cannot be retracted.
+
+Coordinator construction calls no provider/probe/clock/event, performs no I/O,
+starts no worker/task/timer and binds no loop. First async use binds one loop;
+cross-loop use fails wrong_event_loop. One active startup runs in the caller task.
+Every awaited collaborator boundary checks cancellation/close before advancement.
+CancelledError propagates; suppression cannot advance later stages or return a
+successful result. Active bookkeeping always clears. Same-loop close is idempotent
+and closes no borrowed collaborator. Aborts after activation best-effort sleep the
+matching session; rollback failure preserves original safe category/cancellation.
+Caller/injected collaborators own outer/native deadlines and cancellation effects;
+an already-entered publication/physical operation cannot be retroactively undone.
+
+No microphone, continuous wake, devices, concrete backends, phrase PCM cache,
+network-specific voice runtime, user-task/orchestrator/AIZEN/LEVI/MAHORAGA execution,
+ToolRegistry/PermissionEngine/audit/model generation, memory/RAG/secrets/persistence,
+API/frontend/schema/EventType or dependency changes. PHOENIX remains supreme,
+P4/P5/audit authority unchanged; degraded fallback is explicit subordinate evidence.
+Five migrations, sole head 0005_audit_events and 32 EventTypes remain unchanged.
+This completes Phase 6's authorized contracts/integration, not deployment wiring.
+
+The amended ticket also authorizes one historical deterministic-test stabilization:
+only test_slow_optional_probe_does_not_consume_generation_deadline changes probe
+sleep 0.025 -> 1.0 seconds and generation timeout 0.01 -> 0.5 seconds. Probe delay
+still exceeds the generation deadline; all assertions and the separate blocking-
+generation timeout test stay intact. PHX-016 benchmark production is unchanged.
+The second clarification authorizes only the Ollama between-chunk deadline test
+and a unittest.mock.patch import: operation timeout 10 seconds, first chunk normally,
+then patch loop.time to clock()+20 only for the second advance. Neutral timeout,
+resource cleanup and uncancelled-consumer assertions remain intact. The separate
+real-time deadline tests and all PHX-011 Ollama production remain unchanged.
