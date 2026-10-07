@@ -1,6 +1,6 @@
 # PHX-070 — Spotify integration
 
-Status: TODO
+Status: DONE
 Phase: 7 — Media & Documents
 Branch: feature/PHX-070-spotify-integration-recovery
 Starting main/base SHA: 2ee67fad9c3864039185448cf80e0984fa258607
@@ -279,3 +279,99 @@ developer documentation after the ancestry issue was discovered:
 
 These are validation facts only; they do not authorize capabilities beyond the frozen
 PHX-070 scope above.
+
+
+## Fresh recovery completion evidence - 2026-10-07
+
+Recovered content only from source commit 0a938a4ffa251df3bcd33d57360346fae059e95a
+relative to f7f1efb7ceec7f1f92b01e3a3c44eb695919f868. The old parent tree was
+byte-identical to merged main 2ee67fad9c3864039185448cf80e0984fa258607;
+all three pre-existing target blobs were checked before applying the five-path
+Git patch. No old commit/history or old ticket was imported. Starting recovery
+HEAD e1e2a37d520f2531909d34aa4e2d80b2b6ea82f9 remains the completion parent.
+
+Fresh complete source/test review preserves the frozen V1 design. Production
+Spotify code matches the reviewed source blob exactly. Added three refresh storage
+failure cases (rotation failure, partial non-atomic write, omitted-refresh access
+write failure), one JSON node-budget case, and stronger device assertions. The
+non-ASCII mismatched-state fixture uses its intended UTF-8 character.
+
+Fresh required commands and results:
+
+| Gate | Result |
+| --- | --- |
+| uv run --locked pytest tests/test_spotify_integration.py -q, three consecutive runs | 345 passed each |
+| tool_registry / permission_engine / audit_trail / secrets_boundary | 204 / 926 / 302 / 402 passed individually |
+| agent_registry / agent_model_router / prompt_injection_defenses | 96 / 213 / 604 passed individually |
+| rise_phoenix_startup / voice_conversation / tts_provider | 509 / 950 / 602 passed individually |
+| stt_provider / vad / wake_word_provider | 414 / 403 / 537 passed individually |
+| uv lock; uv sync --locked | PASS, manifests unchanged |
+| uv run --locked pytest, three consecutive complete runs | 14743 passed, 16 existing filesystem skips, one existing Starlette/httpx warning each |
+| uv run --locked ruff check . | PASS |
+| uv run --locked ruff format --check . | PASS |
+| uv run --locked mypy | PASS |
+| uv build --out-dir <external-validation>/dist | PASS, exact Spotify source verified in wheel and sdist |
+| Foundation bootstrap/API/config/persistence/events/hardware | 126 passed, exact /health unchanged |
+| npm test | 4 passed |
+| npm run typecheck --workspace @phoenix/desktop | PASS |
+| npm run build --workspace @phoenix/desktop | PASS |
+
+All JUnit/logs/commands/review scripts/build artifacts remain outside the project:
+C:/Users/shoai/.codex/validation/PHX-070-recovery-20261007. Historical receipts
+were not reused as gate evidence. All 16 skip IDs/reasons match PHX-065 merged
+baseline; no new skip/xfail/retry/flaky marker. No unrelated historical test repair.
+
+All 145 pre-existing production/test/migration/desktop/dependency blobs match merged
+main, including startup implementation/tests, model benchmark and Ollama provider
+tests. ToolRegistry, PermissionEngine, AuditTrail, SecretStore, AgentRegistry/BROOK,
+PHOENIX, P4/P5 and P3/P4 audit authority remain unchanged. Exact nine P1/P2 Spotify
+definitions gate secret/network use through existing deterministic permissions.
+No memory/RAG/model-context/training ingestion, audio runtime, hidden worker,
+frontend/API, dependency, schema or EventType change. EventType remains 32;
+five migrations, sole head 0005_audit_events. Full six-file credential-signature
+scan passed. INV-001 through INV-024 individually reviewed and preserved.
+
+| Invariant | Fresh review |
+| --- | --- |
+| INV-001 | PASS: PHOENIX remains the only orchestrator; SpotifyTool exposes tool evidence. |
+| INV-002 | PASS: AIZEN definitions and execution unchanged; no permission or finalization delegation. |
+| INV-003 | PASS: Only existing deterministic PermissionEngine evaluates trusted grants/decisions; provider text never authorizes. |
+| INV-004 | PASS: Nine exact ToolRegistry definitions and canonical call/intent/request validation precede secret lookup and HTTP. |
+| INV-005 | PASS: Only P1/P2 Spotify operations; global P4 explicit-confirmation implementation unchanged. |
+| INV-006 | PASS: P5 deterministic blocking and all prior permission logic unchanged. |
+| INV-007 | PASS: P3/P4 AuditTrail, migrations and durable audit requirements unchanged. |
+| INV-008 | PASS: Exact successful status/response/outcome correlation required; no physical-playback verification claim. |
+| INV-009 | PASS: MAHORAGA budget unchanged; only one explicit 401 refresh and one replay, no generic recovery loops. |
+| INV-010 | PASS: KAIDO stays degraded policy; all Phase-6 production unchanged. |
+| INV-011 | PASS: Frontend and API source unchanged; no OAuth callback/UI wiring. |
+| INV-012 | PASS: Provider-independent AgentRegistry/BROOK definitions unchanged. |
+| INV-013 | PASS: Tool supplies no agent policy; existing PermissionEngine owns authorization. |
+| INV-014 | PASS: Neutral media identity retained; BROOK alias grants no authority. |
+| INV-015 | PASS: Text and voice paths unchanged; Spotify has no orchestration dependency. |
+| INV-016 | PASS: Voice unchanged; safe Spotify failures are bounded tool evidence. |
+| INV-017 | PASS: Spotify names are bounded inert third-party text; no ingestion/context execution. |
+| INV-018 | PASS: Only fixed SecretStore token references; runtime verifier/code, no normal memory persistence. |
+| INV-019 | PASS: Observable active ID, total/HTTP deadlines, propagated cancellation, close and borrowed ownership. |
+| INV-020 | PASS: All five versioned migration blobs unchanged; sole head 0005_audit_events. |
+| INV-021 | PASS: Closed 16 error categories and documented success statuses; no raw diagnostics or fake playback success. |
+| INV-022 | PASS: Explicit refresh/error evidence; no automatic device/backend fallback. |
+| INV-023 | PASS: No model generation or hidden task; shared BLAZE-6 scheduling unchanged. |
+| INV-024 | PASS: No added dependency/SDK; manifests unchanged; research docs introduce no runtime dependency. |
+
+
+Exactly six ticket-owned final paths: DECISIONS.md, FEATURE_TICKETS.md,
+docs/18_MEDIA_INTEGRATIONS.md, phoenix/tools/spotify.py,
+tests/test_spotify_integration.py, tickets/PHX-070-spotify-integration.md.
+One ADR-063; no duplicated ADR-062 or predecessor status change. Required gates
+passed before TODO -> DONE. Phase 7 remains INCOMPLETE; PHX-071/072/073 TODO.
+The final delivery report follows the latest 62-field execution request and records
+the single completion commit and feature-only
+normal push; no PR, merge, reset, rebase, cherry-pick, amend or force push.
+
+LIVE SPOTIFY ACCEPTANCE: PENDING - requires user-owned Spotify developer app and
+manual OAuth consent. Premium/Connect/account restrictions remain explicit; API
+acceptance is not proof of audible playback. SecretStore multi-reference writes
+are non-atomic; partial rotation can require explicit recovery. Python/HTTPX
+immutable secret copies cannot be guaranteed wiped. Synchronous native store work
+and already-entered media effects cannot be preempted/undone. No callback/UI
+wiring, refresh worker, streaming/cache or quota infrastructure. PHX-071 NOT STARTED.
