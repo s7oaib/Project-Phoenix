@@ -1584,3 +1584,156 @@ Disclose at minimum:
 PHX-065 — Rise-Phoenix startup health sequence.
 
 Do not start it.
+
+
+# Authoritative clarification — interrupted turn result and explicit sleep
+
+This section resolves the PHX-064 blocker discovered before implementation and
+**supersedes any earlier conflicting wording in this ticket**.
+
+## VoiceFailureStage final vocabulary
+
+Freeze exactly:
+
+- `stt`
+- `tts`
+- `playback`
+- `voice_output_unavailable`
+
+The earlier Part J three-value list is incomplete. The
+`voice_output_unavailable` value defined in Part O is canonical and required.
+
+## VoiceTurnResult interrupted-state semantics
+
+For `outcome=interrupted`:
+
+- `transcript_text` is present,
+- `response_text` is present,
+- `failure_stage=None`,
+- `final_state` is allowed to be exactly one of:
+  - `listening`
+  - `sleeping`
+
+These two final states have distinct manager meanings:
+
+### Barge-in-owned interruption
+
+When interruption was accepted because of
+`observe_barge_in(...)` for the active playback:
+
+- `outcome=interrupted`
+- `failure_stage=None`
+- `final_state=listening`
+- manager state ends `listening`
+- follow-up deadline is refreshed
+- exactly one `voice.listening` follows the accepted interruption/completion path
+
+This preserves focused-test requirements 198–201.
+
+### Explicit-sleep-owned interruption
+
+When `sleep()` is called while speaking and
+`AudioOutput.interrupt(active_playback_id)` returns exact correlated
+`CancellationStatus.ACCEPTED`:
+
+- explicit sleep owns the terminal voice state,
+- `outcome=interrupted`
+- `failure_stage=None`
+- `final_state=sleeping`
+- manager state ends `sleeping`
+- session is cleared
+- follow-up deadline is cleared
+- segmenter/barge-in local state is reset
+- no `voice.listening` event is published after explicit sleep
+
+This preserves focused-test requirements 213–216.
+
+An interrupted result may not use `thinking`, `speaking`,
+`degraded_voice`, or `text_only` as final_state.
+
+## Suppressed-interruption safety for explicit sleep
+
+After an exact ACCEPTED sleep interruption, the sleep request owns the terminal
+voice outcome just as an accepted barge-in owns its interruption outcome.
+
+Therefore, if the injected AudioOutput collaborator suppresses the interruption
+and later returns `completed` for that same active playback:
+
+- do NOT report `spoken`,
+- do NOT return to `listening`,
+- do NOT refresh the follow-up deadline,
+- do NOT publish `voice.listening`,
+- finalize the voice turn as `interrupted` with `final_state=sleeping`.
+
+This is deterministic suppression safety, not a claim that native playback
+actually stopped.
+
+## Failed explicit-sleep interruption
+
+If the sleep-time `AudioOutput.interrupt(...)` result is:
+
+- `NOT_FOUND`,
+- `UNSUPPORTED`,
+- wrongly correlated,
+- malformed,
+- or raises a safe AudioOutput/cancellation failure,
+
+then:
+
+- raise/map `cancellation_failure` as defined by PHX-064,
+- do not set `sleep_requested`,
+- do not publish `voice.interrupted`,
+- do not claim an interrupted/sleeping turn result solely from that failed
+  acknowledgement.
+
+No fake interruption may be reported.
+
+## Event ordering clarification
+
+For an accepted explicit sleep while speaking, the relevant observable order is:
+
+`voice.speaking -> voice.interrupted`
+
+There is **no** trailing `voice.listening` event.
+
+For barge-in, the existing required order remains:
+
+`voice.speaking -> voice.interrupted -> voice.listening`
+
+Activation's earlier `voice.listening` event remains unchanged.
+
+## Result-contract implementation requirement
+
+The frozen `VoiceTurnResult` validator may admit
+`outcome=interrupted` with final_state `listening` or `sleeping`.
+
+The `VoiceConversationManager` is responsible for enforcing the cause-specific
+mapping:
+
+- accepted barge-in -> `listening`
+- accepted explicit sleep -> `sleeping`
+
+No new field is added to `VoiceTurnResult`.
+
+## Additional deterministic focused cases
+
+In addition to the existing matrix, explicitly test:
+
+1. `VoiceFailureStage` exact four-value vocabulary including
+   `voice_output_unavailable`.
+2. interrupted result accepts final_state `listening`.
+3. interrupted result accepts final_state `sleeping`.
+4. interrupted result rejects every other final_state.
+5. barge-in cannot produce interrupted/sleeping.
+6. explicit sleep while speaking cannot produce interrupted/listening.
+7. accepted explicit sleep + collaborator returns `completed` still resolves
+   interrupted/sleeping.
+8. accepted explicit sleep clears session/deadline and emits no trailing
+   listening event.
+9. failed/unsupported/not-found sleep interruption does not claim sleeping
+   interruption or emit `voice.interrupted`.
+10. exact cancellation provider/playback correlation is required before
+    sleep ownership is established.
+
+This clarification is authoritative for PHX-064 and requires no separate ADR
+beyond the existing ADR-061 completion record.
