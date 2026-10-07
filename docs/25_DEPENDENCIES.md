@@ -41,6 +41,28 @@ before that admission check. No physical input or process-launch fallback exists
 No Pillow, screenshot/OCR/vision, hooks or alternate automation framework is added.
 See https://pywinauto.readthedocs.io/en/latest/code/pywinauto.uia_element_info.html.
 
+### Document parsers (Phase 7)
+
+ADR-065 promotes exactly `pypdf>=6.19,<7` (locked **6.19.0**) and
+`python-docx>=1.2,<2` (locked **1.2.0**) as required Python runtime dependencies
+for PHX-072 in-memory text-layer PDF and top-level DOCX paragraph/table parsing.
+**lxml 6.1.3** is the only new transitive identity, required by python-docx;
+typing-extensions was already compatible. lxml is not a Phoenix direct requirement.
+All 42 existing non-Phoenix lock records/versions/hashes remain exact; the Phoenix
+record changes only for those two direct references. No extras/OCR package added.
+
+Readers receive BytesIO, never a filename/path. Source/page/stream/text/segment and
+ZIP entry/member/total/ratio bounds are caller supplied. DOCX original archive names
+are checked before host normalization, and bounded XML rejects DTD/entities before
+python-docx. No extraction, external entity resolution or native OCR executable.
+Public pypdf decoder limits are scoped to synchronous calls, external JBIG2 decoder
+disabled, diagnostics redacted and configuration restored. Third-party synchronous
+parsing is not hard-preemptible and cannot guarantee a strict process-memory ceiling.
+pypdf is not OCR; image-only PDFs fail explicitly. DOCX does not claim full Word
+semantic fidelity. Images require an explicit borrowed adapter; none is instantiated.
+See https://pypdf.readthedocs.io/en/stable/user/extract-text.html and
+https://python-docx.readthedocs.io/en/latest/api/document.html.
+
 ## Optional V1 runtime
 
 ### Colibri

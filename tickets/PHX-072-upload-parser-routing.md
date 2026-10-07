@@ -1,6 +1,6 @@
 # PHX-072 — Upload / parser routing
 
-Status: TODO
+Status: DONE
 Phase: 7 — Media & Documents
 Branch: feature/PHX-072-upload-parser-routing
 Starting main/base SHA: f6162fd3f231725ccef8006484d9c67208b37efb
@@ -1694,3 +1694,99 @@ ancestry relative to main is now expected to be exactly THREE commits ahead:
 3. `feat: complete PHX-072 upload parser routing`
 
 No PR, merge, main push, force push or PHX-073 work.
+
+
+## Completion evidence — 2026-10-08
+
+Accepted implementation consumes the unchanged PHX-032 boundary. Exact supported
+routes, MIME/signatures, required limits, safe failures, inert parsing, provenance,
+explicit image collaborator and synchronous-library limitations are documented in
+ADR-065 and docs/19_DOCUMENT_SYSTEM.md and docs/25_DEPENDENCIES.md.
+
+Resume authority: 97341a55fd8d6d9bcb51b3e171f2355cd0b351b6, fast-forward only;
+main remained f6162fd3f231725ccef8006484d9c67208b37efb. One completion commit follows
+both preparation commits; normal feature-only delivery, no main push/PR/merge.
+
+Blocker evidence: original DOCX backslash reproduction had 1 failed, 327 deselected
+before repair; original-name validation now precedes normalized lookup. Raw local/central
+ZIP filename fields encode the attack, preserve payload/offsets/lengths and assert
+orig_filename and platform filename evidence. Individual backslash 1 passed x3;
+complete path family 6 passed x3; canonical/unsafe required names, aliases and controls
+covered. Explicit import os/os.sep fixes the reproduced zipfile.os.sep mypy defect;
+both targeted mypy checks and full-project mypy pass. Original foundation 125/1
+failure is repaired only by adding pypdf/python-docx to exact current direct names;
+lxml remains transitive and Python requirements unchanged. Exact test 1 passed x3;
+final foundation 126 passed. Browser/injection formatting preserves semantics and
+full format passes. External cp1252 runner issue introduces no repository workaround:
+direct npm test 4 passed, direct typecheck/build passed, desktop sources unchanged.
+
+Commands: uv lock; exact TOML dependency-delta inspection; uv sync --locked; all
+three-run focused/blocker/historical pytest gates; individual impacted regressions;
+complete pytest x3; ruff check .; ruff format --check .; mypy; external wheel/sdist
+build and metadata/source inspection; foundation bootstrap/api/config/persistence/
+events/hardware; direct npm test/typecheck/build; security/invariant/source/AST/credential
+reviews; complete unstaged/staged diff checks. Exact command lists, logs and JUnit
+receipts are external at C:/Users/shoai/.codex/validation/PHX-072-resume3-20261008.
+
+Dependency delta: only pypdf>=6.19,<7 and python-docx>=1.2,<2 direct; locks pypdf 6.19.0,
+python-docx 1.2.0 and lxml 6.1.3; all 42 unrelated records exact. Wheel/sdist parser
+source bytes match; exact direct metadata, no direct lxml or binary parser fixtures/
+validation artifacts. All existing production sources unchanged; only four named
+historical guards evolve, with all other syntax/source preserved. New focused suite
+has no skips/xfails/retries/flaky markers.
+
+Fresh counts:
+- Focused PHX-072: 336 / 336 / 336.
+- Each four exact dependency guards: 1 / 1 / 1.
+- Browser: 653 / 653 / 653; screenshot: 397 / 397 / 397; injection: 604 / 604 / 604.
+- Ingestion 300; retrieval 367; vector 273; citations 173.
+- Registry 96; model router 213; ToolRegistry 204; PermissionEngine 926; audit 302;
+  secrets 402; Spotify 345; YouTube 358.
+- Startup 509; conversation 950; TTS 602; STT 414; VAD 403; wake 537.
+- Full Python: 15437 / 15437 / 15437 passed, each with exactly the baseline 16 skip
+  identities/reasons and one identical existing Starlette/httpx warning.
+- Ruff lint/format, mypy, build/package, foundation 126 and desktop 4/typecheck/build: PASS.
+
+Security: original ZIP admission precedes host normalization; backslashes/absolute/
+drive/traversal/NUL/control/aliases rejected; ZIP bounds and no external entities.
+No source path open, temp extraction, network/subprocess/hidden worker, formula/code
+execution, content-derived permission or automatic prompt/model/memory promotion.
+Safe diagnostics/repr privacy; mandatory PHX-032 admission preserved. EventType 32;
+five migrations/head 0005_audit_events. Complete intended-path credential scan clean.
+
+Individual invariant review:
+- INV-001 — PASS: PHOENIX core unchanged; UploadRouter returns subordinate source/parser evidence only.
+- INV-002 — PASS: AIZEN source unchanged; parser contains no planner or finalization calls.
+- INV-003 — PASS: No LLM/permission imports or calls; inert injection-looking CSV/code/Markdown fixtures pass.
+- INV-004 — PASS: No privileged capability; supplied bytes only; path/socket/process/worker guards pass. Future source reads remain existing ToolRegistry work.
+- INV-005 — PASS: P4 confirmation engine and tests unchanged; 926 PermissionEngine regressions passed.
+- INV-006 — PASS: P5 blocking unchanged; parser provides no permission grant or privileged effects.
+- INV-007 — PASS: AuditTrail source/schema unchanged; parser emits no audit/events and adds no P3/P4 action.
+- INV-008 — PASS: Required gates determine completion; prior failures reported BLOCKED; statuses deferred until every gate passes.
+- INV-009 — PASS: MAHORAGA budgets unchanged; no parser retries, recovery scheduler or background work.
+- INV-010 — PASS: KAIDO source unchanged; no degraded-mode policy or automatic fallback introduced.
+- INV-011 — PASS: Entire apps/ and API sources unchanged; no upload endpoint/UI/provider shortcut.
+- INV-012 — PASS: Agent definitions unchanged; native parser imports confined to document adapter, existing DocumentParser protocol consumed.
+- INV-013 — PASS: No tool/policy implementation; PHX-032 admission still controls persistence in accepted/rejected integration tests.
+- INV-014 — PASS: ROBIN/VEGAPUNK registry source unchanged; neutral document_analyst/knowledge_rag IDs asserted.
+- INV-015 — PASS: Text/core interfaces unchanged; no voice dependency added to upload parsing.
+- INV-016 — PASS: All Phase-6 production/tests unchanged, including PHX-071 wake guard; all six separate regression suites passed.
+- INV-017 — PASS: Parsed strings remain untrusted; no execution/rendering/model/prompt insertion. Raw ZIP path/control/alias and XML DTD/entity tests pass.
+- INV-018 — PASS: No memory/persistence/secret imports; bytes excluded from repr/dump; safe closed errors and pypdf diagnostic redaction tested.
+- INV-019 — PASS: Caller-owned async checkpoints before/after native calls and between pages/blocks/rows; cancellation propagates; PHX-032 active IDs unchanged. Native sync work cannot be preempted.
+- INV-020 — PASS: Five original versioned migrations unchanged; sole head 0005_audit_events.
+- INV-021 — PASS: Closed twelve categories; malformed/encrypted/unsupported/oversized inputs explicit; CancelledError propagates without success.
+- INV-022 — PASS: Missing image collaborator explicitly parser_unavailable; no signature/parser/encoding fallback or hidden OCR.
+- INV-023 — PASS: No model/generate/embed calls or hidden tasks/threads; BLAZE-6 generation policy unchanged.
+- INV-024 — PASS: Only explicitly authorized pypdf/python-docx direct and lxml transitive promotion; 42 unrelated lock records exact; no OCR/extras/reference runtime.
+
+LIVE DOCUMENT PARSER ACCEPTANCE: PENDING — deterministic in-memory fixtures passed; user-owned real documents have not been accepted as live production evidence.
+
+LIVE IMAGE OCR ACCEPTANCE: NOT IMPLEMENTED — PHX-072 only routes supported image signatures to an explicitly injected parser; no built-in OCR runtime is promoted.
+
+Limitations remain: synchronous native calls cannot be interrupted and pypdf cannot
+guarantee hard process-memory limits; text-layer only/no scanned-PDF OCR; top-level
+DOCX text/tables only; UTF-8 only for text/code/CSV; no legacy DOC/macros/spreadsheets/
+slides/RTF/email/archive parsing, upload UI/API or generation. Parsed evidence stays
+untrusted and PHX-032 admission decides persistence. Phase 7 INCOMPLETE; PHX-073 TODO,
+NOT STARTED. Maximum final scope 14 paths, one completion commit, feature-only push.
