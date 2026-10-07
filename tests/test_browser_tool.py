@@ -1716,45 +1716,35 @@ def test_previous_block_flag_cannot_override_wrong_session_failure(
 
 
 def test_only_authorized_playwright_dependency_promotion() -> None:
-    """Preserve PHX-050; PHX-051 separately verifies its exact Windows promotion."""
+    """Freeze PHX-050 history; later tickets own their dependency promotions."""
+    pre = "3c17b8a5291871c236cc3726b2b91097657d4ed4"
+    post = "762be6471085fa5ccf5e905c3cab0e79a3de7faa"
     before_project = tomllib.loads(
         subprocess.check_output(
-            ["git", "show", "origin/main:pyproject.toml"], cwd=ROOT
+            ["git", "show", pre + ":pyproject.toml"], cwd=ROOT
         ).decode()
     )
-    after_project = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    assert "playwright>=1,<2" in after_project["project"]["dependencies"]
-    for project in (before_project, after_project):
-        project["project"]["dependencies"] = [
-            item
-            for item in project["project"]["dependencies"]
-            if item
-            not in (
-                "playwright>=1,<2",
-                "pywinauto>=0.6.9,<0.7; sys_platform == 'win32'",
-            )
-        ]
+    after_project = tomllib.loads(
+        subprocess.check_output(
+            ["git", "show", post + ":pyproject.toml"], cwd=ROOT
+        ).decode()
+    )
+    assert "playwright>=1,<2" not in before_project["project"]["dependencies"]
+    assert after_project["project"]["dependencies"].count("playwright>=1,<2") == 1
+    after_project["project"]["dependencies"].remove("playwright>=1,<2")
     assert after_project == before_project
     before_lock = tomllib.loads(
-        subprocess.check_output(
-            ["git", "show", "origin/main:uv.lock"], cwd=ROOT
-        ).decode()
+        subprocess.check_output(["git", "show", pre + ":uv.lock"], cwd=ROOT).decode()
     )
-    after_lock = tomllib.loads((ROOT / "uv.lock").read_text())
+    after_lock = tomllib.loads(
+        subprocess.check_output(["git", "show", post + ":uv.lock"], cwd=ROOT).decode()
+    )
     old = {package["name"]: package for package in before_lock.pop("package")}
     new = {package["name"]: package for package in after_lock.pop("package")}
     assert after_lock == before_lock
     assert not set(old) - set(new)
-    assert set(new) - set(old) <= {
-        "playwright",
-        "greenlet",
-        "pyee",
-        "pywinauto",
-        "pywin32",
-        "comtypes",
-        "six",
-    }
-    assert {"playwright", "greenlet", "pyee"} <= set(new)
+    assert set(new) - set(old) == {"playwright", "greenlet", "pyee"}
+    assert new["playwright"]["version"] == "1.63.0"
     for name in old:
         if name == "phoenix":
             for package in (old[name], new[name]):
@@ -1763,12 +1753,20 @@ def test_only_authorized_playwright_dependency_promotion() -> None:
                     package["metadata"]["requires-dist"],
                 ):
                     entries[:] = [
-                        item
-                        for item in entries
-                        if item["name"] not in ("playwright", "pywinauto")
+                        item for item in entries if item["name"] != "playwright"
                     ]
         assert new[name] == old[name], name
     assert {item["name"] for item in new["playwright"]["dependencies"]} == {
         "greenlet",
         "pyee",
     }
+    current_project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert current_project["project"]["dependencies"].count("playwright>=1,<2") == 1
+    current_lock = tomllib.loads((ROOT / "uv.lock").read_text())
+    current = {package["name"]: package for package in current_lock["package"]}
+    assert current["playwright"]["version"] == "1.63.0"
+    assert {item["name"] for item in current["playwright"]["dependencies"]} == {
+        "greenlet",
+        "pyee",
+    }
+    assert {"greenlet", "pyee"} <= set(current)

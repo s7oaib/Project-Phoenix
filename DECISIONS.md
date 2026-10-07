@@ -2558,3 +2558,91 @@ which did not exist before PHX-060. Replace only the named test's broad successo
 with those exact historical comparisons, preserving EventType/Alembic and all other
 test syntax. This freezes original PHX-060 blobs without rejecting legitimate new tools.
 No skip/xfail/retry/flaky/bypass; 537 cases remain. No other historical repair authorized.
+
+
+## ADR-065 — Bounded upload-byte routing into the existing ingestion boundary
+Status: Accepted. Date: 2026-10-08. Ticket: PHX-072.
+
+PHOENIX remains supreme; ROBIN/document_analyst owns analysis/generation and
+VEGAPUNK/knowledge_rag owns indexing/RAG. These adapters create no new role/model
+process or permission authority. Exact frozen UploadDocument accepts trusted
+caller-supplied bytes and bounded display filename, optional compatible ASCII MIME
+and aware timestamp. No arbitrary metadata. Immutable runtime routes feed exact
+existing PHX-032 DocumentSource/DocumentParser contracts with opaque upload:<id>,
+canonical MIME, exact bytes/identity, UTC timestamp and code-owned filename/format.
+PHX-032 remains solely responsible for revalidation/correlation, mandatory admission,
+chunking/hash/dedup, persistence and active ingestion cancellation. No duplicated
+ToolRegistry/PermissionEngine, privileged path read, source dereference or DB access.
+
+V1 routes TXT, Markdown, CSV, exact ticketed source-code extensions, text-layer PDF,
+DOCX and PNG/JPEG/WebP to an explicit borrowed image parser only. Text/code/Markdown
+use strict UTF-8-SIG (BOM removal only), meaningful exact text and no NUL. Code,
+Markdown, HTML and formula-looking CSV remain inert. Strict stdlib CSV preserves
+logical row order, exact cells as compact Unicode JSON arrays, empty rows/cells and
+row provenance; native field bounds are restored synchronously. No sniffing, render,
+eval, imports, model/prompt automatic ingestion or instruction-derived permission.
+
+All twelve explicit strict positive integer parser limits are required: source bytes,
+retained text/segments, PDF pages/content-stream bytes, DOCX entries/member/total
+uncompressed bytes/ratio, CSV rows/columns/cell characters. Booleans rejected;
+member <= total. Input admitted before concrete parsing; no silent limit rewriting.
+Extension/MIME/signature must agree; no unsupported-content guessing or fallback.
+Closed twelve-code errors remove private/provider diagnostics; bytes are excluded
+from input/route repr and serialization. Parsed text remains untrusted under INV-017.
+
+Promote exactly pypdf>=6.19,<7 (6.19.0) and python-docx>=1.2,<2 (1.2.0).
+Only lxml 6.1.3 is newly transitive; typing-extensions was already compatible.
+All 42 unrelated lock records/versions/hashes remain unchanged, with Phoenix metadata
+limited to two direct references. lxml is not a Phoenix direct dependency. No extras,
+Pillow/Tesseract/OCR/runtime download or optional research promotion. Official
+extraction/Document API references are recorded in docs/25_DEPENDENCIES.md.
+
+PDF reads BytesIO with strict PdfReader, rejects encryption, retains exact meaningful
+page text in source order with original page numbers. Enforce source/page/content/
+text/segment bounds. Public native decompression bounds and disabled external JBIG2
+decoder reduce exposure during synchronous calls. A scoped current-thread LogRecord
+factory redacts pypdf diagnostics before handlers; original factory/native config
+restored in finally, without changing logging levels/handlers or unrelated records.
+No password, OCR, JS, attachment/image extraction or fetch. Native decompression and
+extraction can materialize substantial memory: no hard process-memory ceiling or
+preemption guarantee, and scanned PDFs with no meaningful text fail explicitly.
+
+DOCX reads BytesIO only after stdlib ZIP metadata and bounded XML/relationship
+preflight. Validate ZipInfo.orig_filename before normalized filename/required lookup;
+reject raw backslash, absolute, drive/colon, traversal, NUL/control or changed spelling.
+Unsafe normalized aliases cannot satisfy canonical package members or bypass unique
+names. Retain required Content_Types/document members, no encrypted flags, entry/
+member/total/ratio bounds. XML DTD/entities fail without external resolution. No
+archive extraction/write. Supported iter_inner_content yields top-level paragraphs
+and tables in source order; meaningful paragraphs and exact tab-separated rows retain
+deterministic sections. Headers/footers/notes/comments/text boxes/embedded objects and
+full Word/nested-table fidelity remain outside V1. No DOC/macros/archive/office extras.
+
+Raw backslash tests patch equal-length filename fields in both local and central ZIP
+headers only, proving original spelling before Phoenix and preserving offsets,
+lengths and payload bytes. Canonical required-member acceptance, unsafe normalized
+required-member/alias rejection and NUL/control cases are separately covered. The
+fixture uses explicit stdlib os.sep, preserving cross-platform assertions without
+zipfile.os access, ignores, xfails or skips.
+
+Images have no built-in OCR: exact extension/signature/MIME routes only to a configured
+borrowed existing DocumentParser; missing adapter explicitly parser_unavailable.
+Router does not close/own it; PHX-032 revalidates its evidence before persistence.
+Cancellation belongs to caller task with checkpoints around synchronous boundaries
+and between pages/blocks/rows; CancelledError propagates and cannot finalize success.
+Built-ins bind first loop; no hidden task/thread/process/scheduler or competing active
+registry. Already executing synchronous library calls cannot be interrupted.
+
+Four narrow dependency-guard changes are explicitly authorized: BrowserTool proves
+immutable PHX-050 pre/post promotion commits separately from current Playwright 1.63.0;
+screenshot and injection guards retain every protected source/schema/Event assertion
+while PHX-072 owns exact manifests; bootstrap exact current direct-name set adds only
+pypdf/python-docx with Requires-Python unchanged and lxml transitive only. Ruff changes
+layout only in the two specified historical files. No other historical syntax changes.
+Desktop runner cp1252 failure is external: direct npm commands validate unchanged
+desktop, and no repository workaround is introduced.
+
+No UI/API, schema/migration, EventType, tool/security, voice/media, memory/RAG production
+or generation/export change. EventType remains 32; five migrations, sole head
+0005_audit_events. PHX-073 stays TODO, Phase 7 incomplete. Deterministic in-memory
+fixtures do not claim live production acceptance of user-owned documents or OCR.

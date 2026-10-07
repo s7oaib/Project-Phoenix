@@ -1707,13 +1707,13 @@ def test_static_no_execution_or_concrete_dependency(path: str) -> None:
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
+    # PHX-072's dependency gate owns manifest/lock exactness.
     protected = [
         path
         for path in subprocess.check_output(
             ["git", "ls-tree", "-r", "--name-only", "origin/main"], cwd=ROOT, text=True
         ).splitlines()
         if path.startswith(("phoenix/", "alembic/", "apps/desktop/"))
-        or path in ("pyproject.toml", "uv.lock")
     ]
     for path in protected:
         actual = subprocess.check_output(

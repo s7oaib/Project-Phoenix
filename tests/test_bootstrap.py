@@ -38,6 +38,8 @@ def test_distribution_has_foundation_runtime_dependencies() -> None:
         "psutil",
         "pydantic",
         "pydantic-settings",
+        "pypdf",
+        "python-docx",
         "pywinauto",
         "sqlalchemy",
         "uvicorn",
