@@ -224,10 +224,195 @@ export function ChatWorkspace({ chatPort, chat }: { chatPort?: ChatPort; chat: C
   );
 }
 
-export function ViewPanel({ view, chatPort, chat }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft }) {
+// Frozen presentation reference; Python's canonical registry remains authoritative.
+const canonicalAgents = [
+  { internalId: 'phoenix', alias: 'PHOENIX', professionalRole: 'Supreme orchestrator' },
+  { internalId: 'strategist', alias: 'AIZEN', professionalRole: 'Chief strategist/master planner' },
+  { internalId: 'intelligence', alias: 'ARMIN', professionalRole: 'Intelligence/reporting' },
+  { internalId: 'automation', alias: 'LAW', professionalRole: 'Automation/workflows' },
+  { internalId: 'mission_coordinator', alias: 'ERWIN', professionalRole: 'Mission/task coordination' },
+  { internalId: 'project_manager', alias: 'NAMI', professionalRole: 'Project management' },
+  { internalId: 'build_engineer', alias: 'FRANKY', professionalRole: 'Build/engineering' },
+  { internalId: 'document_analyst', alias: 'ROBIN', professionalRole: 'Documents/knowledge extraction' },
+  { internalId: 'system_intelligence', alias: 'LELOUCH', professionalRole: 'Active system intelligence/monitoring' },
+  { internalId: 'diagnostics', alias: 'CHOPPER', professionalRole: 'Diagnostics' },
+  { internalId: 'perimeter_security', alias: 'GOJO', professionalRole: 'Security/perimeter' },
+  { internalId: 'health_biometrics', alias: 'MIGHT GUY', professionalRole: 'Health/biometrics' },
+  { internalId: 'ethics_compliance', alias: 'FUJITORA', professionalRole: 'Legal/ethics/compliance' },
+  { internalId: 'media', alias: 'BROOK', professionalRole: 'Spotify/YouTube/media' },
+  { internalId: 'failsafe', alias: 'KAIDO', professionalRole: 'Emergency degraded fail-safe' },
+  { internalId: 'infrastructure', alias: 'WHITEBEARD', professionalRole: 'Infrastructure/stability' },
+  { internalId: 'knowledge_rag', alias: 'VEGAPUNK', professionalRole: 'Knowledge indexing/RAG' },
+  { internalId: 'background_optimizer', alias: 'SHIKAMARU', professionalRole: 'Background optimization' },
+  { internalId: 'scenario_analysis', alias: 'LIGHT', professionalRole: 'Scenario/trade-off analysis' },
+  { internalId: 'heavy_compute', alias: 'GARP', professionalRole: 'Heavy compute/batch work' },
+  { internalId: 'threat_recon', alias: 'SASUKE', professionalRole: 'Threat reconnaissance' },
+  { internalId: 'priority_executor', alias: 'THORFINN', professionalRole: 'High-priority execution' },
+  { internalId: 'user_interaction', alias: 'NARUTO', professionalRole: 'User interaction support' },
+  { internalId: 'silent_monitor', alias: 'ITACHI', professionalRole: 'Logs/anomaly monitoring' },
+  { internalId: 'adaptive_recovery', alias: 'MAHORAGA', professionalRole: 'Adaptive recovery/self-healing' },
+  { internalId: 'memory', alias: 'PUDDING', professionalRole: 'Long-term memory' },
+  { internalId: 'web_research', alias: 'URAHARA', professionalRole: 'Real-time web research' },
+  { internalId: 'voice', alias: 'UTA', professionalRole: 'Voice/wake interface' },
+  { internalId: 'computer_control', alias: 'KAKASHI', professionalRole: 'Computer control' },
+  { internalId: 'verifier', alias: 'LEVI', professionalRole: 'Verification/QA' },
+] as const;
+export const agentRoster = Object.freeze(canonicalAgents.map((agent) => Object.freeze(agent)));
+export type AgentId = (typeof canonicalAgents)[number]['internalId'];
+export const AGENT_QUERY_LIMIT = 80;
+export type AgentState = 'idle' | 'working' | 'waiting_permission' | 'degraded';
+export type AgentStatus = {
+  readonly internalId: AgentId;
+  readonly state: AgentState;
+  readonly currentTask?: string;
+  readonly provider?: string;
+};
+export type AgentPort = {
+  readonly status: 'connected' | 'unavailable' | 'degraded';
+  readonly agents: readonly AgentStatus[];
+};
+
+export function findAgent(value: unknown) {
+  return typeof value === 'string' ? agentRoster.find((agent) => agent.internalId === value) : undefined;
+}
+
+export function boundedAgentQuery(value: unknown): string {
+  return typeof value === 'string' ? value.slice(0, AGENT_QUERY_LIMIT) : '';
+}
+
+export function filterAgents(value: unknown) {
+  const query = boundedAgentQuery(value).toLowerCase();
+  return agentRoster.filter((agent) => agent.alias.toLowerCase().includes(query) ||
+    agent.internalId.toLowerCase().includes(query) || agent.professionalRole.toLowerCase().includes(query));
+}
+
+// No property reads/coercion on caller objects. Reflective proxy traps are caught;
+// caller-owned same-realm objects are trusted infrastructure, not a JS sandbox.
+function agentDataFields(value: unknown, required: readonly string[], optional: readonly string[] = []) {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const keys = Reflect.ownKeys(value);
+  if (keys.length < required.length || keys.length > required.length + optional.length) return undefined;
+  const fields: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (typeof key !== 'string' || (!required.includes(key) && !optional.includes(key))) return undefined;
+    const field = Object.getOwnPropertyDescriptor(value, key);
+    if (!field || !('value' in field)) return undefined;
+    fields[key] = field.value;
+  }
+  return required.every((key) => keys.includes(key)) ? fields : undefined;
+}
+
+export function readAgentSnapshot(value: unknown): { status: AgentPort['status']; agents: AgentStatus[]; rejected: boolean } {
+  const unavailable = { status: 'unavailable' as const, agents: [], rejected: value !== undefined };
+  try {
+    const port = agentDataFields(value, ['status', 'agents']);
+    if (!port || (port.status !== 'connected' && port.status !== 'unavailable' && port.status !== 'degraded')) return unavailable;
+    const entries: unknown = port.agents;
+    if (!Array.isArray(entries)) return unavailable;
+    const length = dataValue(entries, 'length');
+    if (typeof length !== 'number' || !Number.isInteger(length) || length < 0 || length > agentRoster.length ||
+        Reflect.ownKeys(entries).length !== length + 1) return unavailable;
+    const agents: AgentStatus[] = [];
+    for (let index = 0; index < length; index += 1) {
+      const entry = agentDataFields(dataValue(entries, `${index}`), ['internalId', 'state'], ['currentTask', 'provider']);
+      const identity = findAgent(entry?.internalId);
+      const state = entry?.state;
+      if (!entry || !identity || (state !== 'idle' && state !== 'working' && state !== 'waiting_permission' && state !== 'degraded') ||
+          agents.some((agent) => agent.internalId === identity.internalId) ||
+          ('currentTask' in entry && (typeof entry.currentTask !== 'string' || entry.currentTask.length > 240)) ||
+          ('provider' in entry && (typeof entry.provider !== 'string' || entry.provider.length > 120))) return unavailable;
+      agents.push({ internalId: identity.internalId, state,
+        ...(typeof entry.currentTask === 'string' ? { currentTask: entry.currentTask } : {}),
+        ...(typeof entry.provider === 'string' ? { provider: entry.provider } : {}) });
+    }
+    // Disconnected/degraded input cannot advertise live activity, even if records exist.
+    return { status: port.status, agents: port.status === 'connected' ? agents : [], rejected: false };
+  } catch {
+    return unavailable;
+  }
+}
+
+function useAgentDirectory() {
+  const [query, setQuery] = useState('');
+  const [selectedId, setSelectedId] = useState<AgentId>('phoenix');
+  function search(value: unknown) { setQuery(boundedAgentQuery(value)); }
+  function select(value: unknown) {
+    const agent = findAgent(value);
+    if (agent) setSelectedId(agent.internalId);
+  }
+  return { query, selectedId, search, select };
+}
+type AgentDirectory = ReturnType<typeof useAgentDirectory>;
+
+export function AgentNetwork({ agentPort, directory }: { agentPort?: AgentPort; directory: AgentDirectory }) {
+  const matches = filterAgents(directory.query);
+  const selected = findAgent(directory.selectedId);
+  const snapshot = readAgentSnapshot(agentPort);
+  const evidence = snapshot.agents.find((agent) => agent.internalId === selected?.internalId);
+  const selectedInMatches = matches.some((agent) => agent.internalId === selected?.internalId);
+  return (
+    <section className="agent-network" aria-labelledby="agent-network-heading">
+      <header className="agent-network-header">
+        <p className="eyebrow">Defined roles</p>
+        <h3 id="agent-network-heading">Agent Network</h3>
+        <p>30 defined logical roles: PHOENIX and 29 specialists. Definitions do not mean agents are initialized or running.</p>
+        <p className="agent-availability">{snapshot.status === 'connected' ? 'Caller-supplied status evidence; live transport is not implemented.' :
+          snapshot.status === 'degraded' ? 'Live agent state not connected. Supplied status is degraded.' : 'Live agent state not connected.'}</p>
+        {snapshot.rejected && <p className="agent-notice">Supplied status snapshot was rejected because it is malformed or exceeds display limits.</p>}
+      </header>
+      <div className="agent-search">
+        <label htmlFor="agent-query">Search defined agents</label>
+        <p id="agent-search-help">Alias, internal ID or professional role. Local search, up to 80 characters.</p>
+        <div className="agent-search-controls">
+          <input id="agent-query" type="search" maxLength={AGENT_QUERY_LIMIT} value={directory.query}
+            aria-describedby="agent-search-help agent-match-count" onChange={(event) => directory.search(event.currentTarget.value)} />
+          <button type="button" onClick={() => directory.search('')}>Clear search</button>
+        </div>
+        <p id="agent-match-count" role="status" aria-live="polite" aria-atomic="true">{matches.length} of 30 defined roles match</p>
+      </div>
+      <div className="agent-directory-layout">
+        <section className="agent-results" aria-label="Matching defined agents">
+          {matches.length === 0 ? <p className="agent-empty">No defined agents match. Clear search to restore all 30 roles.</p> :
+            <ul className="agent-list">
+              {matches.map((agent) => (
+                <li key={agent.internalId}>
+                  <button className="agent-card" type="button" aria-pressed={selected?.internalId === agent.internalId}
+                    aria-controls="agent-detail" onClick={() => directory.select(agent.internalId)}>
+                    <span className="agent-alias">{agent.alias}</span>
+                    <span className="agent-role">{agent.professionalRole}</span>
+                    <span className="agent-id">{agent.internalId}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>}
+        </section>
+        <section className="agent-detail" id="agent-detail" aria-labelledby="agent-detail-heading">
+          <h4 id="agent-detail-heading">Selected agent details</h4>
+          {selected ? <>
+            <p className="agent-selection" role="status" aria-live="polite" aria-atomic="true">Selected: {selected.alias}{!selectedInMatches ? ' — outside the current search results. Clear search to show its selection button.' : ''}</p>
+            <dl>
+              <dt>Display alias</dt><dd>{selected.alias}</dd>
+              <dt>Canonical internal ID</dt><dd>{selected.internalId}</dd>
+              <dt>Professional role</dt><dd>{selected.professionalRole}</dd>
+            </dl>
+            <p>{selected.internalId === 'phoenix' ? 'PHOENIX is the sole supreme orchestrator.' : 'Specialist role subordinate to PHOENIX.'}</p>
+            <h5>Runtime evidence</h5>
+            <p>{evidence ? 'Supplied presentation state: ' : 'Status not reported'}{evidence?.state}</p>
+            {evidence?.currentTask !== undefined && <p className="agent-evidence">Supplied current task: {evidence.currentTask}</p>}
+            {evidence?.provider !== undefined && <p className="agent-evidence">Supplied model/provider: {evidence.provider}</p>}
+          </> : <p>No canonical agent selected. Choose a defined role from the directory.</p>}
+          <p className="agent-boundary">Aliases and status text confer no permission. This directory cannot launch, command or authorize agents.</p>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+export function ViewPanel({ view, chatPort, chat, agentPort, directory }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft; agentPort?: AgentPort; directory?: AgentDirectory }) {
   if (view.id === 'home') {
     return chat ? <ChatWorkspace chatPort={chatPort} chat={chat} /> : null;
   }
+  if (view.id === 'agents') return directory ? <AgentNetwork agentPort={agentPort} directory={directory} /> : null;
   return (
     <section className="placeholder-panel" aria-labelledby="workspace-heading">
       <p className="eyebrow">Workspace preview</p>
@@ -241,13 +426,14 @@ export function ViewPanel({ view, chatPort, chat }: { view: ViewDefinition; chat
   );
 }
 
-export default function App({ chatPort }: { chatPort?: ChatPort } = {}) {
+export default function App({ chatPort, agentPort }: { chatPort?: ChatPort; agentPort?: AgentPort } = {}) {
   const [selectedView, setSelectedView] = useState<ViewId>('home');
   const mainRef = useRef<HTMLElement>(null);
   const focusRequested = useRef(false);
   const currentView = resolveView(selectedView);
   // App owns the draft and in-flight guard so navigation cannot reset a pending send.
   const chat = useChatDraft(chatPort);
+  const directory = useAgentDirectory();
 
   useEffect(() => {
     if (focusRequested.current) {
@@ -302,7 +488,7 @@ export default function App({ chatPort }: { chatPort?: ChatPort } = {}) {
           <h2 id="page-title">{currentView.label}</h2>
           <p className="page-purpose">{currentView.purpose}</p>
         </header>
-        <div className="page-content"><ViewPanel view={currentView} chatPort={chatPort} chat={chat} /></div>
+        <div className="page-content"><ViewPanel view={currentView} chatPort={chatPort} chat={chat} agentPort={agentPort} directory={directory} /></div>
       </main>
     </div>
   );

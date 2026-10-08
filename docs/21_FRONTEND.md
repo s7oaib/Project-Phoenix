@@ -2,9 +2,9 @@
 
 ## Stack
 
-Implemented through PHX-081: Tauri 2, React 19, TypeScript 6, Vite 8 and CSS.
+Implemented through PHX-082: Tauri 2, React 19, TypeScript 6, Vite 8 and CSS.
 Tailwind CSS, shadcn/ui, Zustand, TanStack Query and React Flow/XYFlow remain
-architecture choices for separately justified later tickets; PHX-080/081 add no dependency.
+architecture choices for separately justified later tickets; PHX-080/081/082 add no dependency.
 
 ## PHX-080 app shell
 
@@ -22,14 +22,15 @@ support keyboard use without global keyboard hooks or a microphone. The cinder/a
 CSS uses system fonts, readable contrast, reachable scrolling navigation at the
 unchanged 800x600 window size, a stacked narrow layout and reduced-motion treatment.
 
-PHX-081 replaces only the Home preview with the conversation surface below. The
-other thirteen panels identify their purpose and explicitly remain unconnected.
+PHX-081 replaces only the Home preview with the conversation surface below.
+PHX-082 replaces Agent Network with the canonical directory below. The other twelve
+panels identify their purpose and explicitly remain unconnected.
 Backend integration is pending; no operational health, agent, task, permission,
 memory, model or voice success is fabricated.
 
-PHX-082 owns agent network, PHX-083 task graph, PHX-084 permission center, PHX-085
-memory/files, PHX-086 models/voice/settings and PHX-087 observability. All remain
-TODO; Phase 8 is INCOMPLETE.
+PHX-082 implements the agent directory; PHX-083 owns task graph, PHX-084 permission
+center, PHX-085 memory/files, PHX-086 models/voice/settings and PHX-087 observability.
+PHX-083 through PHX-087 remain TODO; Phase 8 is INCOMPLETE.
 
 ## PHX-081 chat / voice presentation
 
@@ -74,11 +75,68 @@ CSS bounds transcript scrolling, leaves the composer in document flow and stacks
 panels below 1000px, including the unchanged 800x600 Tauri window. System fonts,
 contrast and reduced motion remain intact.
 
+## PHX-082 Agent Network presentation
+
+Agent Network presents exactly 30 defined logical identities: PHOENIX, the sole
+supreme orchestrator, and 29 specialists. A frozen display-only TypeScript reference
+in App.tsx retains every internal ID, alias, professional role and source order from
+DEFAULT_AGENT_DEFINITIONS and docs/03_AGENT_ROSTER.md. Node tests compare all triples
+against both files. This is a directory of definitions, never initialized-agent or
+online-agent evidence. Aliases are display metadata, not authoritative lookup keys.
+
+App-owned local search and canonical-ID selection survive navigation independently
+of the unchanged chat draft/flight state. Native search input and helper admission
+limit input to 80 UTF-16 units; case-insensitive substring matching uses alias, ID
+and role in canonical order. Clear search restores all 30. Match counts and no-results
+copy are accessible. Default selection is phoenix; unknown/alias/object selection
+retains the last valid ID, never manufactures a PHOENIX identity. Details retain the
+selected role while filtering and explicitly label off-list selection with a reachable
+Clear search control. Native selection buttons expose aria-pressed and aria-controls;
+no global shortcuts, initial focus theft or permission/agent action controls.
+
+App accepts an optional caller-owned passive readonly AgentPort: status is exactly
+connected/unavailable/degraded and agents is a readonly array of records with only
+internalId, state and optional currentTask/provider strings. There are no operations.
+Default App supplies no port and displays Live agent state not connected. Absent
+individual evidence says Status not reported, never idle. Unavailable/degraded ports
+display no activity even if records are supplied. An explicitly connected valid port
+is labelled caller-supplied evidence, never proof of a live backend connection.
+
+Admission snapshots the entire array before any record is displayed: at most 30
+unique known canonical IDs, closed idle/working/waiting_permission/degraded states,
+exact own data fields, task <=240 and model/provider <=120 UTF-16 units. Reject sparse
+or extended arrays, accessors, extras, duplicate/unknown IDs, malformed or oversized
+records as a whole with generic safe notice. No partial task/provider clipping, raw
+objects or exception leakage. Only validated copied primitives reach React JSX text
+escaping; HTML/Markdown/permission-looking content remains inert.
+
+Descriptor reads avoid property getters, coercion and ordinary Proxy get traps;
+throwing or inconsistent reflective traps fail safely. Browser JavaScript cannot
+identify or sandbox arbitrary same-realm proxies: reflective traps may run, and a
+forwarding proxy is indistinguishable from data. Caller objects remain trusted
+infrastructure; these checks bound display data rather than authenticate evidence
+or grant permission. No data is written back to the borrowed port.
+
+Cinder/amber CSS uses readable native inputs/buttons, wrapped details/status text,
+a bounded scrolling result list, two columns at wide widths and stacking below
+1000px for the unchanged 800x600 native window. Narrow search controls stack below
+460px. Existing sidebar reachability, skip link, focus and reduced-motion rules stay
+intact. PHX-081 chat code remains byte-identical apart from view composition.
+
+No GET /agents, HTTP/WebSocket, Tauri IPC, provider probe, model assignment, execution,
+dispatch, permission action, storage, timer or polling is implemented. No dependency,
+backend, Rust, manifest, lock or CSP/capability change. Forty-five deterministic
+SSR/pure/AST/hook tests and static native builds pass; SSR is not native GUI evidence.
+
+LIVE AGENT STATUS ACCEPTANCE: NOT IMPLEMENTED — no live GET /agents transport is implemented.
+LIVE AGENT CONTROL ACCEPTANCE: NOT IMPLEMENTED — no agent execution, dispatch or permission actions are exposed.
+MANUAL NATIVE AGENT NETWORK ACCEPTANCE: PENDING — no real end-to-end WebView2 interaction has been independently verified.
+
 ## Boundaries
 
 Frontend may render state, send intents, request permission decisions, display tasks/events, and manage local UI preferences.
 
-Those are target boundaries. PHX-080/081 only select views, draft locally, display
+Those are target boundaries. PHX-080/081/082 only select views, draft/search locally, display
 supplied plain-text snapshots and optionally submit to a borrowed callback. There is
 no HTTP/WebSocket, backend client, provider, database, tool, permission decision or
 Tauri IPC/plugin invocation. Existing production/development CSP, empty permission
@@ -93,11 +151,11 @@ Frontend may not:
 
 ## State
 
-- Current PHX-080/081 UI selection and local drafts: React useState/useRef;
+- Current PHX-080/081/082 UI selection, search and local drafts: React useState/useRef;
   useEffect moves focus after a committed navigation change without stealing initial focus.
 - Planned server state: TanStack Query, under a later authorized transport ticket.
 - Planned broader UI state: Zustand; no router/history or browser-storage persistence
-  is introduced by PHX-080/081.
+  is introduced by PHX-080/081/082.
 - Planned live orchestration state: backend WebSocket events, not connected yet.
 
 ## Suggested later structure
@@ -132,7 +190,7 @@ Deterministic Node React SSR, pure resolver and TypeScript AST contracts cover
 navigation, focus wiring, draft admission, snapshot safety and security. Deterministic
 hook-handler tests verify pending/duplicate/ack/error/cancellation behavior, including
 navigation during an in-flight send; these are not native DOM event tests. Frontend
-passes 28 tests three consecutive times; the three PHX-003 workspace/CSP test bodies
+passes 45 tests three consecutive times; the three PHX-003 workspace/CSP test bodies
 remain unchanged. Historical PHX-055, PHX-052 and PHX-051 guards exclude only App.tsx
 and styles.css while retaining all other desktop/backend protection.
 Static Tauri builds pass; manual WebView2 mouse/keyboard acceptance remains pending.

@@ -2827,3 +2827,59 @@ No API/Python/Rust/Tauri/config/manifest/lock/dependency changes. Fake adapters 
 only deterministic UI contracts; live chat and live voice acceptance are NOT
 IMPLEMENTED. Manual desktop GUI/WebView2 end-to-end acceptance remains PENDING.
 Phase 8 remains INCOMPLETE; PHX-082 through PHX-087 remain TODO/not started.
+
+## ADR-069 — Canonical agent directory with passive borrowed status evidence
+
+Status: Accepted
+Date: 2026-10-08
+Ticket: PHX-082
+
+Replace only the agents placeholder in existing App.tsx/styles.css with a directory
+of 30 frozen logical identities: one PHOENIX supreme orchestrator and 29 specialists.
+Preserve exact internal IDs, display aliases, professional roles and source order
+from Python DEFAULT_AGENT_DEFINITIONS and docs/03_AGENT_ROSTER.md; deterministic
+Node tests compare every triple against both sources. This display reference never
+becomes a runtime registry, executes agents or implies initialization/online state.
+AIZEN plans, LEVI verifies, MAHORAGA recovery is bounded and KAIDO degraded-only.
+
+App-owned local search/selection survive navigation without changing chat's borrowed
+send boundary or frozen helpers. Search accepts strings up to 80 UTF-16 code units,
+matches alias/ID/role case-insensitively and preserves source order. Clear restores
+30. Default ID is phoenix; only exact canonical internal IDs select details. Unknown,
+alias or object input keeps the last valid selection. Off-list selection is explicitly
+labelled with Clear search guidance. Native named buttons expose aria-pressed and
+aria-controls; accessible match count/details, responsive scrolling/wrapping and
+unchanged shell focus/skip/reduced-motion behavior require no new framework.
+
+Optional readonly AgentPort has only connected/unavailable/degraded status and
+readonly records: internalId, state, optional currentTask/provider. No operations,
+transport or default instance. Connected validated snapshots are labelled supplied
+presentation evidence; absence says Live agent state not connected and Status not
+reported. Unavailable/degraded suppress activity. Admit the whole snapshot only
+after validating <=30 unique known IDs, closed idle/working/waiting_permission/degraded
+states, own data fields only, task <=240/provider <=120 UTF-16 units. Any malformed,
+duplicate, extra, accessor, sparse/extended or oversized input rejects all status
+with generic notice. Copy primitives, never clip task/provider text or expose errors.
+JSX escapes all untrusted text; aliases/status cannot authenticate or grant permission.
+
+Data descriptors avoid getters/coercion/ordinary Proxy get traps; reflective failures
+are caught. Browser JS does not sandbox hostile same-realm Proxy reflective traps
+or distinguish a forwarding proxy from data. The caller is trusted infrastructure,
+and admission is presentation validation rather than authenticity or code isolation.
+The port is never mutated and no arbitrary supplied method is invoked.
+
+Preserve all fourteen shell routes and PHX-081's entire chat helper/UI code block,
+draft limits, pending/ack/error/local cancellation, plaintext history and disabled
+voice/text fallback. Twelve other views stay honest placeholders. No GET /agents,
+backend/network/provider/native call, agent execution/dispatch/reconfiguration,
+permission action, persistence, timer, polling or dependency is added. Manifests,
+locks, Tauri restrictive CSP/empty capabilities, Rust and all Python remain unchanged.
+
+Node 45 tests pass x3; TypeScript/Vite/Tauri/Cargo pass (Cargo has zero Rust tests).
+Historical exact PHX-055/052/051 guards pass x3 with unchanged files; full suites
+604/397/493 and all 18 required individual regressions pass. Full Python passes
+15,721 x3 with the same 16 skip identities/reasons and one Starlette/httpx warning.
+Ruff, format, mypy, all 77 Python package source/dependency parity, unchanged health,
+credential scan and individual INV-001..024 review pass. All validation receipts
+are external. Live agent status/control are NOT IMPLEMENTED; manual WebView2
+end-to-end acceptance is PENDING. Phase 8 remains INCOMPLETE; PHX-083..087 TODO.
