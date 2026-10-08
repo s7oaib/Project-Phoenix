@@ -184,11 +184,34 @@ main:focus { outline-offset: -6px; }
 .agent-evidence { margin-top: 10px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .agent-boundary { padding-top: 12px; border-top: 1px solid var(--border); }
 
+.task-workspace { min-width: 0; }
+.task-header, .task-summary, .task-detail { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.task-header { border-top: 2px solid var(--accent); }
+.task-header h3 { margin-top: 6px; font-size: 1.25rem; }
+.task-header p:not(.eyebrow), .task-summary p, .task-empty, .task-detail > p { margin-top: 12px; color: var(--muted); font-size: 0.82rem; }
+.task-summary { margin-block: 16px; }
+.task-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.task-steps { min-width: 0; max-height: 520px; max-height: min(55dvh, 520px); overflow-y: auto; scrollbar-gutter: stable; padding: 6px; }
+.task-list { margin: 0; padding-left: 28px; display: grid; gap: 12px; }
+.task-list li::marker { color: var(--accent); }
+.task-step-button { display: grid; gap: 8px; width: 100%; min-width: 0; min-height: 42px; padding: 14px; border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 8px; color: var(--muted); background: var(--surface); font-size: 0.82rem; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.task-step-button:hover { background: var(--surface-hover); }
+.task-step-button[aria-pressed="true"] { border-left-color: var(--accent); background: var(--accent-surface); }
+.task-step-id { color: var(--accent); font-weight: 650; }
+.task-detail { overflow-wrap: anywhere; }
+.task-detail dl { margin-block: 16px; }
+.task-detail dt { margin-top: 12px; color: var(--muted); font-size: 0.78rem; }
+.task-detail dd { margin: 4px 0 0; }
+.task-detail ul { padding-left: 20px; }
+.task-text { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+
 @media (max-width: 1000px) {
   .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .conversation-layout { grid-template-columns: minmax(0, 1fr); }
   .agent-directory-layout { grid-template-columns: minmax(0, 1fr); }
   .agent-results { max-height: min(40dvh, 320px); }
+  .task-layout { grid-template-columns: minmax(0, 1fr); }
+  .task-steps { max-height: min(40dvh, 320px); }
 }
 @media (max-width: 680px) {
   .app-shell { grid-template-columns: minmax(0, 1fr); }

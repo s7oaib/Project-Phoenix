@@ -2,9 +2,9 @@
 
 ## Stack
 
-Implemented through PHX-082: Tauri 2, React 19, TypeScript 6, Vite 8 and CSS.
+Implemented through PHX-083: Tauri 2, React 19, TypeScript 6, Vite 8 and CSS.
 Tailwind CSS, shadcn/ui, Zustand, TanStack Query and React Flow/XYFlow remain
-architecture choices for separately justified later tickets; PHX-080/081/082 add no dependency.
+architecture choices for separately justified later tickets; PHX-080/081/082/083 add no dependency.
 
 ## PHX-080 app shell
 
@@ -23,14 +23,14 @@ CSS uses system fonts, readable contrast, reachable scrolling navigation at the
 unchanged 800x600 window size, a stacked narrow layout and reduced-motion treatment.
 
 PHX-081 replaces only the Home preview with the conversation surface below.
-PHX-082 replaces Agent Network with the canonical directory below. The other twelve
-panels identify their purpose and explicitly remain unconnected.
+PHX-082 replaces Agent Network with the canonical directory below; PHX-083 adds
+the read-only Task Graph. The other eleven panels remain explicitly unconnected.
 Backend integration is pending; no operational health, agent, task, permission,
 memory, model or voice success is fabricated.
 
-PHX-082 implements the agent directory; PHX-083 owns task graph, PHX-084 permission
-center, PHX-085 memory/files, PHX-086 models/voice/settings and PHX-087 observability.
-PHX-083 through PHX-087 remain TODO; Phase 8 is INCOMPLETE.
+PHX-082 implements the agent directory and PHX-083 the read-only task view.
+PHX-084 owns permissions, PHX-085 memory/files, PHX-086 models/voice/settings and
+PHX-087 observability. PHX-084 through PHX-087 remain TODO; Phase 8 is INCOMPLETE.
 
 ## PHX-081 chat / voice presentation
 
@@ -132,11 +132,78 @@ LIVE AGENT STATUS ACCEPTANCE: NOT IMPLEMENTED — no live GET /agents transport 
 LIVE AGENT CONTROL ACCEPTANCE: NOT IMPLEMENTED — no agent execution, dispatch or permission actions are exposed.
 MANUAL NATIVE AGENT NETWORK ACCEPTANCE: PENDING — no real end-to-end WebView2 interaction has been independently verified.
 
+## PHX-083 Task Graph presentation
+
+PHX-083 adds a read-only Task Graph workspace to the existing React/TypeScript/CSS
+shell. Default App supplies no TaskGraphPort and shows No task graph connected with
+no invented task rows/progress. Only an explicitly connected, validated borrowed
+snapshot provides task ID, optional task-level state, steps and metadata. Unavailable
+or degraded ports suppress all graph/state; malformed input shows a generic notice.
+
+TaskGraphPort is passive readonly data: status connected/unavailable/degraded and an
+optional graph containing taskId, optional taskState and ordered steps. Each step has
+only stepId, ownerAgentId, objective, dependsOn, inputRefs, expectedOutput,
+timeoutSeconds and completionRule. Canonical agent IDs alone establish owner identity;
+PHX-082 aliases are separate display metadata. There are no callbacks or action methods.
+
+Exactly eleven serialized task states match Python PHX-024: created, planning, ready,
+running, waiting_permission, verifying, completed, failed, recovering, degraded and
+cancelled. No per-step runtime status or automatic transition exists. The qualifier
+Caller-supplied task state; not live transport or verified completion stays visible.
+Completed is not execution/LEVI evidence; waiting_permission is not an approval request.
+
+Whole-graph admission requires own data fields, nonblank exact task/step IDs <=128
+UTF-16 units, 1..40 steps, exact known owner IDs, meaningful objective <=600,
+expectedOutput/completionRule <=400, finite numeric timeout >0 and <=86400, <=12
+dependencies per step and <=120 total edges, <=8 input refs each meaningful <=128.
+Reject wrong types, unsupported states, extras/symbols/accessors, sparse or extended
+arrays, duplicate step IDs/dependencies, unknown/self dependencies and cycles as a
+whole. No text truncation, dependency repair or partial private-data display.
+Input refs may repeat, matching PHX-024. Caller inputs are never mutated; only detached
+frozen primitive/array snapshots render after acyclicity proof.
+
+Pure Kahn traversal repeatedly picks the earliest original source position among all
+eligible nodes, including newly eligible earlier nodes. A bounded forty-node scan
+matches Python's heap semantics without a graph dependency. Roots retain source order;
+edge count derives only from admitted dependencies. Ordered native cards show inert
+Depends on text, root/downstream designation and structural dependency layers.
+Structure never establishes runtime readiness, completion, permission or verification.
+
+App-owned local selection starts at the first topological step, accepts only current
+graph step IDs, survives navigation and resets when task identity changes, the selected
+step disappears or the port disconnects. Guarded React render adjustment compares
+identity fields only; there is no background effect, timer or task state mutation.
+Details show canonical owner/alias, objective, expected output, completion rule,
+timeout definition with no running timer, dependencies and inert input references.
+
+Native named selection buttons use aria-pressed/aria-controls; labelled sections and
+polite selection feedback complement unchanged navigation focus/skip behavior. Wrapped
+plain text and bounded step scrolling stack below 1000px for the unchanged 800x600
+window. Existing contrast, narrow navigation and reduced-motion treatment remain.
+HTML/Markdown/command-looking IDs, objectives, rules and refs are JSX-escaped text.
+Descriptor checks avoid getters/coercion/ordinary Proxy get traps, catch reflective
+failures and reveal no exceptions. Reflective traps may run: same-realm JS is not a
+sandbox, and snapshot shape does not authenticate activity or hard-limit browser memory.
+
+PHX-080's fourteen destinations/default/fallback/branding/groups/focus remain intact.
+PHX-081's chat code and PHX-082's entire roster/search/status/UI block stay byte-equal
+to main, apart from task-view composition. Eleven remaining views stay placeholders.
+No GET/POST /tasks, WS/events, execution, cancel/retry, approval, verification action,
+provider/tool/native call, persistence or new dependency. Python/backend/Rust/Tauri
+configs/CSP/empty permissions/manifests/locks remain unchanged. PHOENIX stays supreme.
+
+LIVE TASK GRAPH ACCEPTANCE: NOT IMPLEMENTED — no live GET /tasks or /tasks/{id}
+backend transport or WS /events is connected.
+LIVE TASK EXECUTION/CANCELLATION ACCEPTANCE: NOT IMPLEMENTED — no execution,
+cancellation, transition, recovery, verification or permission-action controls.
+MANUAL NATIVE TASK GRAPH ACCEPTANCE: PENDING — no verified end-to-end WebView2
+mouse/keyboard interaction; SSR/hook/CSS/native build evidence is not GUI acceptance.
+
 ## Boundaries
 
 Frontend may render state, send intents, request permission decisions, display tasks/events, and manage local UI preferences.
 
-Those are target boundaries. PHX-080/081/082 only select views, draft/search locally, display
+Those are target boundaries. PHX-080/081/082/083 only select views, draft/search locally, display
 supplied plain-text snapshots and optionally submit to a borrowed callback. There is
 no HTTP/WebSocket, backend client, provider, database, tool, permission decision or
 Tauri IPC/plugin invocation. Existing production/development CSP, empty permission
@@ -151,11 +218,11 @@ Frontend may not:
 
 ## State
 
-- Current PHX-080/081/082 UI selection, search and local drafts: React useState/useRef;
+- Current PHX-080/081/082/083 UI selection, search and local drafts: React useState/useRef;
   useEffect moves focus after a committed navigation change without stealing initial focus.
 - Planned server state: TanStack Query, under a later authorized transport ticket.
 - Planned broader UI state: Zustand; no router/history or browser-storage persistence
-  is introduced by PHX-080/081/082.
+  is introduced by PHX-080/081/082/083.
 - Planned live orchestration state: backend WebSocket events, not connected yet.
 
 ## Suggested later structure
@@ -190,7 +257,7 @@ Deterministic Node React SSR, pure resolver and TypeScript AST contracts cover
 navigation, focus wiring, draft admission, snapshot safety and security. Deterministic
 hook-handler tests verify pending/duplicate/ack/error/cancellation behavior, including
 navigation during an in-flight send; these are not native DOM event tests. Frontend
-passes 45 tests three consecutive times; the three PHX-003 workspace/CSP test bodies
+passes 65 tests three consecutive times; the three PHX-003 workspace/CSP test bodies
 remain unchanged. Historical PHX-055, PHX-052 and PHX-051 guards exclude only App.tsx
 and styles.css while retaining all other desktop/backend protection.
 Static Tauri builds pass; manual WebView2 mouse/keyboard acceptance remains pending.

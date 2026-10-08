@@ -408,11 +408,200 @@ export function AgentNetwork({ agentPort, directory }: { agentPort?: AgentPort; 
   );
 }
 
-export function ViewPanel({ view, chatPort, chat, agentPort, directory }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft; agentPort?: AgentPort; directory?: AgentDirectory }) {
+export const taskStates = Object.freeze(['created', 'planning', 'ready', 'running', 'waiting_permission', 'verifying', 'completed', 'failed', 'recovering', 'degraded', 'cancelled'] as const);
+export type TaskState = (typeof taskStates)[number];
+export type TaskStep = {
+  readonly stepId: string;
+  readonly ownerAgentId: AgentId;
+  readonly objective: string;
+  readonly dependsOn: readonly string[];
+  readonly inputRefs: readonly string[];
+  readonly expectedOutput: string;
+  readonly timeoutSeconds: number;
+  readonly completionRule: string;
+};
+export type TaskGraphSnapshot = { readonly taskId: string; readonly taskState?: TaskState; readonly steps: readonly TaskStep[] };
+export type TaskGraphPort = { readonly status: 'connected' | 'unavailable' | 'degraded'; readonly graph?: TaskGraphSnapshot };
+
+function taskText(value: unknown, limit: number): value is string {
+  return typeof value === 'string' && value.length <= limit && value.trim().length > 0;
+}
+
+function taskArray(value: unknown, limit: number): unknown[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const length = dataValue(value, 'length');
+  if (typeof length !== 'number' || !Number.isInteger(length) || length < 0 || length > limit ||
+      Reflect.ownKeys(value).length !== length + 1) return undefined;
+  const result: unknown[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const field = Object.getOwnPropertyDescriptor(value, `${index}`);
+    if (!field || !('value' in field)) return undefined;
+    result.push(field.value);
+  }
+  return result;
+}
+
+// Kahn traversal: rescan original source positions after every newly eligible node.
+// At forty nodes this bounded scan preserves Python's heap tie-break without a library.
+export function taskTopology(steps: readonly TaskStep[]) {
+  if (steps.length === 0) return undefined;
+  const incoming = steps.map((step) => step.dependsOn.length);
+  const emitted = steps.map(() => false);
+  const ordered: TaskStep[] = [];
+  const layers: number[] = [];
+  const roots = steps.filter((step) => step.dependsOn.length === 0).map((step) => step.stepId);
+  let edgeCount = 0;
+  for (const step of steps) edgeCount += step.dependsOn.length;
+  while (ordered.length < steps.length) {
+    const position = steps.findIndex((_, index) => !emitted[index] && incoming[index] === 0);
+    const step = steps[position];
+    if (!step) return undefined;
+    const layer = step.dependsOn.length === 0 ? 0 : 1 + Math.max(...step.dependsOn.map((id) => layers[ordered.findIndex((item) => item.stepId === id)] ?? 0));
+    ordered.push(step);
+    layers.push(layer);
+    emitted[position] = true;
+    steps.forEach((item, index) => {
+      if (item.dependsOn.includes(step.stepId)) incoming[index] = (incoming[index] ?? 0) - 1;
+    });
+  }
+  return { ordered: Object.freeze(ordered), layers: Object.freeze(layers), roots: Object.freeze(roots), edgeCount };
+}
+
+export function readTaskGraphPort(value: unknown) {
+  const unavailable = { status: 'unavailable' as TaskGraphPort['status'], graph: undefined, rejected: value !== undefined };
+  try {
+    const port = agentDataFields(value, ['status'], ['graph']);
+    if (!port || (port.status !== 'connected' && port.status !== 'unavailable' && port.status !== 'degraded')) return unavailable;
+    if (port.status !== 'connected' || port.graph === undefined) return { status: port.status, graph: undefined, rejected: false };
+    const graph = agentDataFields(port.graph, ['taskId', 'steps'], ['taskState']);
+    const entries = taskArray(graph?.steps, 40);
+    const state = graph?.taskState;
+    if (!graph || !taskText(graph.taskId, 128) || !entries || entries.length === 0 ||
+        ('taskState' in graph && (typeof state !== 'string' || !taskStates.some((item) => item === state)))) return unavailable;
+    const steps: TaskStep[] = [];
+    let edges = 0;
+    for (const entry of entries) {
+      const fields = agentDataFields(entry, ['stepId', 'ownerAgentId', 'objective', 'dependsOn', 'inputRefs', 'expectedOutput', 'timeoutSeconds', 'completionRule']);
+      const owner = findAgent(fields?.ownerAgentId);
+      const dependencies = taskArray(fields?.dependsOn, 12);
+      const references = taskArray(fields?.inputRefs, 8);
+      if (!fields || !taskText(fields.stepId, 128) || !owner || !taskText(fields.objective, 600) ||
+          !taskText(fields.expectedOutput, 400) || !taskText(fields.completionRule, 400) ||
+          typeof fields.timeoutSeconds !== 'number' || !Number.isFinite(fields.timeoutSeconds) || fields.timeoutSeconds <= 0 || fields.timeoutSeconds > 86400 ||
+          !dependencies || !references || steps.some((step) => step.stepId === fields.stepId)) return unavailable;
+      const dependsOn: string[] = [];
+      const inputRefs: string[] = [];
+      for (const id of dependencies) {
+        if (!taskText(id, 128) || id === fields.stepId || dependsOn.includes(id)) return unavailable;
+        dependsOn.push(id);
+      }
+      for (const reference of references) {
+        if (!taskText(reference, 128)) return unavailable;
+        inputRefs.push(reference);
+      }
+      edges += dependsOn.length;
+      if (edges > 120) return unavailable;
+      steps.push(Object.freeze({ stepId: fields.stepId, ownerAgentId: owner.internalId, objective: fields.objective,
+        dependsOn: Object.freeze(dependsOn), inputRefs: Object.freeze(inputRefs), expectedOutput: fields.expectedOutput,
+        timeoutSeconds: fields.timeoutSeconds, completionRule: fields.completionRule }));
+    }
+    if (steps.some((step) => step.dependsOn.some((id) => !steps.some((item) => item.stepId === id)))) return unavailable;
+    const topology = taskTopology(steps);
+    if (!topology) return unavailable;
+    const taskState = taskStates.find((item) => item === state);
+    const admitted = Object.freeze({ taskId: graph.taskId, ...(taskState ? { taskState } : {}),
+      steps: Object.freeze(steps), ...topology });
+    return { status: port.status, graph: admitted, rejected: false };
+  } catch {
+    return unavailable;
+  }
+}
+
+function useTaskGraph(taskPort: TaskGraphPort | undefined) {
+  const snapshot = readTaskGraphPort(taskPort);
+  const graph = snapshot.graph;
+  const [selection, setTaskSelection] = useState<{ taskId: string; stepId: string } | undefined>(undefined);
+  const selected = (selection?.taskId === graph?.taskId ? graph?.ordered.find((step) => step.stepId === selection?.stepId) : undefined) ?? graph?.ordered[0];
+  // Adjust only changed identity fields, so replaced/disconnected graphs cannot leak
+  // a stale selection. This guarded render adjustment is local React state only.
+  if (selection?.taskId !== graph?.taskId || selection?.stepId !== selected?.stepId) {
+    setTaskSelection(graph && selected ? { taskId: graph.taskId, stepId: selected.stepId } : undefined);
+  }
+  function select(value: unknown) {
+    const step = graph?.ordered.find((item) => item.stepId === value);
+    if (graph && step) setTaskSelection({ taskId: graph.taskId, stepId: step.stepId });
+  }
+  return { snapshot, selected, select };
+}
+type TaskPresentation = ReturnType<typeof useTaskGraph>;
+
+export function TaskWorkspace({ task }: { task: TaskPresentation }) {
+  const { snapshot, selected } = task;
+  const graph = snapshot.graph;
+  const owner = findAgent(selected?.ownerAgentId);
+  return (
+    <section className="task-workspace" aria-labelledby="task-graph-heading">
+      <header className="task-header">
+        <p className="eyebrow">Read-only definition</p>
+        <h3 id="task-graph-heading">Task Graph</h3>
+        <p>Inspect supplied dependencies and step definitions. Structure does not establish runtime readiness or execution.</p>
+        <p>{snapshot.status === 'connected' ? 'Caller-supplied port; live task transport is not implemented.' :
+          snapshot.status === 'degraded' ? 'Task connection degraded. Supplied graph is hidden.' : 'No task graph connected.'}</p>
+        {snapshot.rejected && <p className="task-notice">Task graph snapshot rejected. Data is malformed or exceeds display limits.</p>}
+      </header>
+      {!graph ? <p className="task-empty">No task graph supplied for display. No tasks or progress are generated by this interface.</p> : <>
+        <section className="task-summary" aria-label="Supplied task evidence">
+          <p>Task ID: <span className="task-text">{graph.taskId}</span></p>
+          <p>Caller-supplied task state; not live transport or verified completion: {graph.taskState ?? 'Not reported'}</p>
+          <p>{graph.steps.length} defined steps · {graph.edgeCount} dependency edges</p>
+          <p>Structural root steps: {graph.roots.join(', ')}</p>
+          <p>A completed marker does not prove execution or LEVI verification. A waiting_permission marker is not an approval request.</p>
+        </section>
+        <div className="task-layout">
+          <section className="task-steps" aria-label="Steps in source-priority topological order">
+            <ol className="task-list">
+              {graph.ordered.map((step, index) => (
+                <li key={step.stepId}>
+                  <button type="button" className="task-step-button" aria-pressed={selected?.stepId === step.stepId}
+                    aria-controls="task-detail" onClick={() => task.select(step.stepId)}>
+                    <span className="task-step-id">{step.stepId}</span>
+                    <span>Dependency layer {graph.layers[index]} · {step.dependsOn.length === 0 ? 'Root step' : 'Downstream step'}</span>
+                    <span>Depends on: {step.dependsOn.length ? step.dependsOn.join(', ') : 'None'}</span>
+                    <span>Owner ID: {step.ownerAgentId}</span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </section>
+          <section className="task-detail" id="task-detail" aria-labelledby="task-detail-heading">
+            <h4 id="task-detail-heading">Selected step definition</h4>
+            {selected && <>
+              <p role="status" aria-live="polite" aria-atomic="true">Selected step: {selected.stepId}</p>
+              <dl>
+                <dt>Canonical owner ID</dt><dd>{selected.ownerAgentId}</dd>
+                <dt>Display alias</dt><dd>{owner?.alias}</dd>
+                <dt>Objective</dt><dd className="task-text">{selected.objective}</dd>
+                <dt>Expected output</dt><dd className="task-text">{selected.expectedOutput}</dd>
+                <dt>Completion rule</dt><dd className="task-text">{selected.completionRule}</dd>
+                <dt>Timeout definition</dt><dd>{selected.timeoutSeconds} seconds (no timer is running)</dd>
+                <dt>Dependencies</dt><dd>{selected.dependsOn.length ? selected.dependsOn.join(', ') : 'None — structural root'}</dd>
+                <dt>Input references (inert text)</dt><dd>{selected.inputRefs.length ? <ul>{selected.inputRefs.map((reference, index) => <li className="task-text" key={index}>{reference}</li>)}</ul> : 'None supplied'}</dd>
+              </dl>
+            </>}
+            <p>Definitions and state markers confer no permission or verified success. Step selection only changes this local detail view.</p>
+          </section>
+        </div>
+      </>}
+    </section>
+  );
+}
+
+export function ViewPanel({ view, chatPort, chat, agentPort, directory, task }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft; agentPort?: AgentPort; directory?: AgentDirectory; task?: TaskPresentation }) {
   if (view.id === 'home') {
     return chat ? <ChatWorkspace chatPort={chatPort} chat={chat} /> : null;
   }
   if (view.id === 'agents') return directory ? <AgentNetwork agentPort={agentPort} directory={directory} /> : null;
+  if (view.id === 'tasks') return task ? <TaskWorkspace task={task} /> : null;
   return (
     <section className="placeholder-panel" aria-labelledby="workspace-heading">
       <p className="eyebrow">Workspace preview</p>
@@ -426,7 +615,7 @@ export function ViewPanel({ view, chatPort, chat, agentPort, directory }: { view
   );
 }
 
-export default function App({ chatPort, agentPort }: { chatPort?: ChatPort; agentPort?: AgentPort } = {}) {
+export default function App({ chatPort, agentPort, taskPort }: { chatPort?: ChatPort; agentPort?: AgentPort; taskPort?: TaskGraphPort } = {}) {
   const [selectedView, setSelectedView] = useState<ViewId>('home');
   const mainRef = useRef<HTMLElement>(null);
   const focusRequested = useRef(false);
@@ -434,6 +623,7 @@ export default function App({ chatPort, agentPort }: { chatPort?: ChatPort; agen
   // App owns the draft and in-flight guard so navigation cannot reset a pending send.
   const chat = useChatDraft(chatPort);
   const directory = useAgentDirectory();
+  const task = useTaskGraph(taskPort);
 
   useEffect(() => {
     if (focusRequested.current) {
@@ -488,7 +678,7 @@ export default function App({ chatPort, agentPort }: { chatPort?: ChatPort; agen
           <h2 id="page-title">{currentView.label}</h2>
           <p className="page-purpose">{currentView.purpose}</p>
         </header>
-        <div className="page-content"><ViewPanel view={currentView} chatPort={chatPort} chat={chat} agentPort={agentPort} directory={directory} /></div>
+        <div className="page-content"><ViewPanel view={currentView} chatPort={chatPort} chat={chat} agentPort={agentPort} directory={directory} task={task} /></div>
       </main>
     </div>
   );

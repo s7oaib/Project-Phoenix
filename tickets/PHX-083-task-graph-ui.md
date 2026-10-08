@@ -1,6 +1,6 @@
 # PHX-083 — Task Graph UI
 
-Status: TODO
+Status: DONE
 Phase: 8 — Frontend
 Branch: feature/PHX-083-task-graph-ui
 Starting main/base SHA: 09c5b8dcab19b33289caba4c04e2f3b3dfa42752
@@ -548,3 +548,153 @@ These limitations do not block presentation-only PHX-083.
 61. KNOWN LIMITATIONS / NEXT PHX-084 NOT STARTED
 
 No PR, merge, main push or PHX-084.
+
+## Completion evidence — 2026-10-08
+
+Started clean on feature/PHX-083-task-graph-ui at preparation
+b03c5b3cdd795053504795ade840c00dbabbcfde; main 09c5b8dcab19b33289caba4c04e2f3b3dfa42752.
+Initial 0 behind / 1 ahead with only this ticket changed. All frozen ticket
+requirements remain intact. No reset/clean/rebase/amend/force/PR/merge/main push.
+
+PHX-083 adds a read-only Task Graph workspace to the existing React/TypeScript/CSS
+shell. Default App supplies no TaskGraphPort and shows No task graph connected with
+no invented task rows/progress. Only an explicitly connected, validated borrowed
+snapshot provides task ID, optional task-level state, steps and metadata. Unavailable
+or degraded ports suppress all graph/state; malformed input shows a generic notice.
+
+TaskGraphPort is passive readonly data: status connected/unavailable/degraded and an
+optional graph containing taskId, optional taskState and ordered steps. Each step has
+only stepId, ownerAgentId, objective, dependsOn, inputRefs, expectedOutput,
+timeoutSeconds and completionRule. Canonical agent IDs alone establish owner identity;
+PHX-082 aliases are separate display metadata. There are no callbacks or action methods.
+
+Exactly eleven serialized task states match Python PHX-024: created, planning, ready,
+running, waiting_permission, verifying, completed, failed, recovering, degraded and
+cancelled. No per-step runtime status or automatic transition exists. The qualifier
+Caller-supplied task state; not live transport or verified completion stays visible.
+Completed is not execution/LEVI evidence; waiting_permission is not an approval request.
+
+Whole-graph admission requires own data fields, nonblank exact task/step IDs <=128
+UTF-16 units, 1..40 steps, exact known owner IDs, meaningful objective <=600,
+expectedOutput/completionRule <=400, finite numeric timeout >0 and <=86400, <=12
+dependencies per step and <=120 total edges, <=8 input refs each meaningful <=128.
+Reject wrong types, unsupported states, extras/symbols/accessors, sparse or extended
+arrays, duplicate step IDs/dependencies, unknown/self dependencies and cycles as a
+whole. No text truncation, dependency repair or partial private-data display.
+Input refs may repeat, matching PHX-024. Caller inputs are never mutated; only detached
+frozen primitive/array snapshots render after acyclicity proof.
+
+Pure Kahn traversal repeatedly picks the earliest original source position among all
+eligible nodes, including newly eligible earlier nodes. A bounded forty-node scan
+matches Python's heap semantics without a graph dependency. Roots retain source order;
+edge count derives only from admitted dependencies. Ordered native cards show inert
+Depends on text, root/downstream designation and structural dependency layers.
+Structure never establishes runtime readiness, completion, permission or verification.
+
+App-owned local selection starts at the first topological step, accepts only current
+graph step IDs, survives navigation and resets when task identity changes, the selected
+step disappears or the port disconnects. Guarded React render adjustment compares
+identity fields only; there is no background effect, timer or task state mutation.
+Details show canonical owner/alias, objective, expected output, completion rule,
+timeout definition with no running timer, dependencies and inert input references.
+
+Native named selection buttons use aria-pressed/aria-controls; labelled sections and
+polite selection feedback complement unchanged navigation focus/skip behavior. Wrapped
+plain text and bounded step scrolling stack below 1000px for the unchanged 800x600
+window. Existing contrast, narrow navigation and reduced-motion treatment remain.
+HTML/Markdown/command-looking IDs, objectives, rules and refs are JSX-escaped text.
+Descriptor checks avoid getters/coercion/ordinary Proxy get traps, catch reflective
+failures and reveal no exceptions. Reflective traps may run: same-realm JS is not a
+sandbox, and snapshot shape does not authenticate activity or hard-limit browser memory.
+
+PHX-080's fourteen destinations/default/fallback/branding/groups/focus remain intact.
+PHX-081's chat code and PHX-082's entire roster/search/status/UI block stay byte-equal
+to main, apart from task-view composition. Eleven remaining views stay placeholders.
+No GET/POST /tasks, WS/events, execution, cancel/retry, approval, verification action,
+provider/tool/native call, persistence or new dependency. Python/backend/Rust/Tauri
+configs/CSP/empty permissions/manifests/locks remain unchanged. PHOENIX stays supreme.
+
+### Verification results
+
+- npm ci --ignore-scripts PASS; all manifests/locks unchanged, zero audit vulnerabilities.
+- npm test THREE final consecutive runs: 65 passed each, zero failures/skips.
+- TypeScript, Vite build, Tauri info, Cargo check/test and Tauri release build PASS;
+  Cargo defines zero Rust tests. No GUI or dev server was launched.
+- Exact PHX-055/052/051 guards 1 passed x3 each; historical files unchanged.
+  Whole prompt/screenshot/Windows suites 604/397/493 passed.
+- All 18 required individual regressions PASS: API 8, bootstrap 11, registry 96,
+  router 213, ToolRegistry 204, permissions 926, audit 302, secrets 402,
+  Spotify 345, YouTube 358, documents 284, upload 336, startup 509,
+  conversation 950, TTS 602, STT 414, VAD 403, wake 537.
+- Additional PHX-024 test_task_graph_state_machine.py: 348 passed unchanged.
+- Full uv run --locked pytest THREE consecutive runs: 15,721 passed each,
+  same 16 existing skip identities/reasons and one Starlette/httpx warning as main.
+  No new skip/xfail/retry/flaky workaround/filter or warning suppression.
+- uv sync --locked PASS: 49 packages; Ruff check PASS; format PASS: 133 files;
+  strict mypy PASS: 127 source files.
+- External wheel/sdist PASS: all 77 Python sources byte-equal to worktree and
+  Git-normalized main; direct dependency metadata and Requires-Python unchanged.
+  Exact GET /health regression and API source parity PASS; no private artifacts.
+- Credential signature/source/native boundary scan and individual INV-001..024 PASS.
+- Full unstaged/staged diff review, git diff --check and cached --check PASS.
+
+Twenty added Node tests cover the Task Graph, including independently enumerated
+legal source-priority orders for 1,536 four-node DAG/source-order cases. Existing
+45 tests remain active; only tasks is narrowly exempted from the placeholder test,
+with eleven placeholders retained and exact local helper names added to AST admission.
+Three original PHX-003 workspace/CSP test bodies and historical Python guards unchanged.
+The initial npm run passed 64/65: one new regex matched the explicit denial
+"no permission or verified success". Individually reproduced, classified as a local
+assertion defect, repaired by retaining action/status bans and asserting that denial.
+Focused retest and strict typecheck passed; all final three-run gates follow the repair.
+No implementation/security assertion, dependency or historical test was bypassed.
+
+Exactly seven final paths: App.tsx, styles.css, workspace.test.mjs,
+docs/21_FRONTEND.md, DECISIONS.md, FEATURE_TICKETS.md and this ticket.
+Receipts, logs, JUnit, package proofs and failure ledger remain outside the repo at
+C:/Users/shoai/.codex/validation/PHX-083-20261008. ADR-070 is the sole new accepted ADR.
+PHX-083 DONE; Phase 8 INCOMPLETE; PHX-084..087 TODO. One completion commit
+feat: complete PHX-083 task graph ui and normal feature-only push, matching remote SHA,
+clean 0-behind / 2-ahead topology and unchanged main are recorded in final delivery.
+
+### Individual invariant evidence
+
+| Invariant | Concrete evidence |
+|---|---|
+| INV-001 | Exact 30-entry frontend/document/Python ordered parity and sole phoenix Supreme orchestrator checked by npm; full orchestrator tests pass, production unchanged. |
+| INV-002 | strategist/AIZEN retains Chief strategist/master planner metadata and subordinate designation; no executable authority; registry 96/router 213 and full planner tests pass. |
+| INV-003 | No model/permission calls or decisions in App; PermissionEngine 926 passed. |
+| INV-004 | App has no tool/IPC imports; ToolRegistry 204 and PermissionEngine 926 passed. |
+| INV-005 | No approve/deny controls; sensitive user correlation protected by PermissionEngine 926. |
+| INV-006 | No privileged execution path; sensitive/blocked permission and P5 secret tests unchanged and passed. |
+| INV-007 | AuditTrail 302 passed; audit/persistence source unchanged; no UI privileged actions. |
+| INV-008 | All required gates have recorded zero exits before DONE; live tasks/agent status/control, chat/voice and manual acceptance explicitly remain unimplemented/pending. |
+| INV-009 | Recovery source unchanged; positive-budget and bounded-replan tests included in full pytest. |
+| INV-010 | No recovery mode controls; KAIDO degraded-only tests included in full pytest; source unchanged. |
+| INV-011 | Exact npm AST call allowlist permits React/local helpers and one supplied sendText call only inside sendDraft; provider/network/native/media/storage APIs banned; CSP connect-src none and empty capabilities unchanged. |
+| INV-012 | No provider or agent production edits; registry 96 and router 213 passed. |
+| INV-013 | No tool/policy production edits; ToolRegistry 204 passed, inert permission/audit metadata protected. |
+| INV-014 | Only exact canonical IDs select details/status; every alias lookup rejected by npm; Python alias-removal/collision registry tests pass; 14 routes unchanged. |
+| INV-015 | Native controlled local textarea remains editable while disconnected; named form Send and all 14 nav buttons work without a microphone; disabled voice explained. |
+| INV-016 | No voice initialization in shell; startup 509, conversation 950, TTS 602, STT 414, VAD 403, wake 537 passed. |
+| INV-017 | Snapshot roles limited to user/assistant, exact data fields, count 64, content 4000, ID 128, unique IDs; malformed/oversize entries omitted with notice, complete accepted text React-escaped; no parsing or external resources. Task whole-graph admission checks 1..40 steps, <=120 edges, exact known owners, 11 canonical task states, strict text/array/timeout bounds, no duplicate/unknown/self dependencies or cycles, source-priority traversal, inert JSX and generic errors. Agent snapshots admit at most 30 unique known IDs, 4 closed states, own data fields only, task<=240/provider<=120 UTF16; invalid whole snapshot rejected with generic notice; JSX escaping tested. Prompt 604, upload 336 passed. |
+| INV-018 | No storage or backend in App; SecretStore 402 passed; memory/security production unchanged. |
+| INV-019 | Caller-triggered one-flight send exposes pending state and Cancel waiting. Local cancellation retains draft even after late ack, explicitly cannot abort delivery, and duplicates remain blocked until adapter settles; no timer/polling/hidden worker. Hook/helper tests pass. |
+| INV-020 | No migration changes; historical guard preserves sole Alembic head 0005_audit_events and EventType 32, exact test x3 passed. |
+| INV-021 | Only connected supplied Promise<void> ack can clear matching draft; synchronous/thenable/malformed result and exceptions fail safely, retain draft, never append transcript; all provider/tool regressions pass. |
+| INV-022 | Unknown view falls back Home; unknown/alias agent selection retains last valid identity, no identity invention; missing evidence Status not reported, disconnected/degraded no active claims; off-list selection explicitly labelled; task selection resets across task IDs/missing steps/disconnect, default no graph; chat/voice fallback preserved. |
+| INV-023 | No model generation path; phoenix/models/lifecycle.py default capacity one remains unchanged; lifecycle tests in full pytest. |
+| INV-024 | All npm/Python manifests and locks unchanged; existing-dependency UI only; package dependency metadata equals main. |
+
+### Acceptance limitations
+
+LIVE TASK GRAPH ACCEPTANCE: NOT IMPLEMENTED — no live GET /tasks or /tasks/{id}
+backend transport or WS /events is connected.
+LIVE TASK EXECUTION/CANCELLATION ACCEPTANCE: NOT IMPLEMENTED — no execution,
+cancellation, transition, recovery, verification or permission-action controls.
+MANUAL NATIVE TASK GRAPH ACCEPTANCE: PENDING — no verified end-to-end WebView2
+mouse/keyboard interaction; SSR/hook/CSS/native build evidence is not GUI acceptance.
+
+Caller evidence is structural, not authenticated runtime truth or a JS/memory sandbox.
+No live task transport or execution; input refs/timeouts/rules are descriptive only.
+PHX-084 NOT STARTED. No PR, merge or main push.
