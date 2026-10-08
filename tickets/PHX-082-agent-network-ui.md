@@ -1,6 +1,6 @@
 # PHX-082 — Agent Network UI
 
-Status: TODO
+Status: DONE
 Phase: 8 — Frontend
 Branch: feature/PHX-082-agent-network-ui
 Starting main/base SHA: 4656d7f87421c5b9db1512e8b3376ce27ab61e89
@@ -429,3 +429,123 @@ Those are nonblocking for this presentation-only ticket.
 61. NEXT PHX-083 NOT STARTED.
 
 No PR, merge, main push or PHX-083.
+
+## Completion evidence — 2026-10-08
+
+Started clean on feature/PHX-082-agent-network-ui at preparation
+2047cca5aa87f949a0f74d3ca23a6c180246862e, main
+4656d7f87421c5b9db1512e8b3376ce27ab61e89. Initial topology 0 behind / 1 ahead,
+only this ticket beyond main. No reset/rebase/amend/force/main mutation/PR/merge.
+
+Implemented only the agents directory in App.tsx/styles.css: all 30 exact ordered
+ID/alias/role triples, sole PHOENIX supreme designation, local 80-UTF16-unit search,
+match/no-results/clear behavior, native aria-pressed canonical-ID selection and detail
+inspection. App-owned search/selection survives navigation; unknown/alias selection
+retains last valid identity. Off-list selection is explicitly labelled. Search and
+status are independent of unchanged PHX-081 draft/flight/chat helpers.
+
+Optional passive readonly AgentPort exposes status and agents only, no operations.
+Default has no port and displays Live agent state not connected / Status not reported.
+Only explicitly connected validated borrowed data can show supplied state/task/provider.
+At most 30 unique known IDs, four closed states, exact own data fields, task<=240 and
+provider<=120 UTF16; any malformed/duplicate/unknown/extra/accessor/sparse/oversize entry
+rejects the entire snapshot with generic notice. No writeback, raw errors or text clipping.
+React escapes text literally. Reflective proxy failures are safe; arbitrary same-realm
+Proxy reflective traps are not sandboxed and forwarding proxies are indistinguishable
+from ordinary data. Trusted caller infrastructure is required; status grants no authority.
+
+Native search/buttons/details and polite match/selection announcements, wrapped plain
+text and bounded result scrolling remain accessible. Responsive stacking below 1000px
+covers unchanged 800x600 shell; small search layout, focus and reduced motion retained.
+All 14 routes/labels/brand/groups/default/fallback/skip/focus remain unchanged; Home
+chat draft 4000, borrowed ChatPort, pending/duplicate/ack/error/local cancellation,
+escaped transcript and disabled microphone remain intact. Other 12 views unconnected.
+
+### Commands and results
+
+- npm ci --ignore-scripts PASS; manifests/lock unchanged; zero audit vulnerabilities.
+- npm test THREE consecutive final runs: 45 passed each, zero failures/skips.
+- npm run typecheck --workspace @phoenix/desktop: PASS.
+- npm run build --workspace @phoenix/desktop: PASS.
+- npm run tauri:info --workspace @phoenix/desktop: PASS.
+- cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml: PASS.
+- cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml: PASS; zero Rust tests.
+- npm run tauri:build --workspace @phoenix/desktop: PASS; static release executable.
+- Exact PHX-055/052/051 guards: 1 passed x3 each; files byte-identical to main.
+- Complete prompt/screenshot/Windows suites: 604/397/493 passed.
+- All 18 individual regressions PASS: API 8, bootstrap 11, registry 96, router 213,
+  ToolRegistry 204, permissions 926, audit 302, secrets 402, Spotify 345, YouTube 358,
+  document generation 284, upload routing 336, startup 509, conversation 950,
+  TTS 602, STT 414, VAD 403, wake 537.
+- Full uv run --locked pytest THREE consecutive final runs: 15,721 passed each,
+  identical 16 existing Windows skip identities/reasons and one Starlette/httpx warning
+  compared with PHX-081/main baseline. No new skip, xfail, filter, retry or workaround.
+- uv sync --locked PASS: 49 unchanged packages.
+- uv run --locked ruff check . PASS.
+- uv run --locked ruff format --check . PASS: 133 files already formatted.
+- uv run --locked mypy PASS: 127 source files.
+- uv build --out-dir <external-validation>/dist PASS: wheel and sdist.
+  All 77 Python source files byte-equal to worktree/Git-normalized main; direct
+  dependency metadata and Requires-Python >=3.11,<3.12 unchanged; no private artifacts.
+- GET /health exact regression PASS and API bytes unchanged.
+- Added-line credential signatures, exact source/CSP/empty permissions protection,
+  EventType 32/sole Alembic head 0005_audit_events and all 24 invariant reviews PASS.
+- git diff --check and complete source/test/documentation/staged review PASS.
+
+All ordinary implementation gates passed without a repair failure. Seventeen focused
+agent tests supplement every existing shell/chat/voice contract. Narrowly exclude
+agents from the obsolete all-nonhome-placeholder assertion; exact local helper calls
+extend the AST allowlist while network/native/provider/storage/code bans remain.
+Three original npm-workspace/Tauri security test bodies unchanged. Chat code block
+byte equality to main is tested. Hook handlers exercise actual local search/select/
+clear/navigation and prior composer behavior, not native DOM/WebView2 evidence.
+
+Receipts, JUnit, package proofs, gate ledger, failure ledger and invariant review live
+outside the repository at C:/Users/shoai/.codex/validation/PHX-082-20261008.
+Exactly seven final paths: apps/desktop/src/App.tsx, apps/desktop/src/styles.css,
+tests/workspace.test.mjs, docs/21_FRONTEND.md, DECISIONS.md, FEATURE_TICKETS.md and
+this ticket. No Python/historical test/backend/Rust/config/manifest/lock changes.
+ADR-069 is the sole new accepted decision. PHX-082 DONE; Phase 8 INCOMPLETE;
+PHX-083..087 TODO. One completion commit feat: complete PHX-082 agent network ui
+and normal feature-only push, remote equality, clean 0-behind / 2-ahead topology
+and unchanged main are verified in the final delivery report.
+
+### Individual invariant evidence
+
+| Invariant | Concrete evidence |
+|---|---|
+| INV-001 | Exact 30-entry frontend/document/Python ordered parity and sole phoenix Supreme orchestrator checked by npm; full orchestrator tests pass, production unchanged. |
+| INV-002 | strategist/AIZEN retains Chief strategist/master planner metadata and subordinate designation; no executable authority; registry 96/router 213 and full planner tests pass. |
+| INV-003 | No model/permission calls or decisions in App; PermissionEngine 926 passed. |
+| INV-004 | App has no tool/IPC imports; ToolRegistry 204 and PermissionEngine 926 passed. |
+| INV-005 | No approve/deny controls; sensitive user correlation protected by PermissionEngine 926. |
+| INV-006 | No privileged execution path; sensitive/blocked permission and P5 secret tests unchanged and passed. |
+| INV-007 | AuditTrail 302 passed; audit/persistence source unchanged; no UI privileged actions. |
+| INV-008 | All required gates have recorded zero exits before DONE; live agent status/control, chat/voice and manual acceptance explicitly remain unimplemented/pending. |
+| INV-009 | Recovery source unchanged; positive-budget and bounded-replan tests included in full pytest. |
+| INV-010 | No recovery mode controls; KAIDO degraded-only tests included in full pytest; source unchanged. |
+| INV-011 | Exact npm AST call allowlist permits React/local helpers and one supplied sendText call only inside sendDraft; provider/network/native/media/storage APIs banned; CSP connect-src none and empty capabilities unchanged. |
+| INV-012 | No provider or agent production edits; registry 96 and router 213 passed. |
+| INV-013 | No tool/policy production edits; ToolRegistry 204 passed, inert permission/audit metadata protected. |
+| INV-014 | Only exact canonical IDs select details/status; every alias lookup rejected by npm; Python alias-removal/collision registry tests pass; 14 routes unchanged. |
+| INV-015 | Native controlled local textarea remains editable while disconnected; named form Send and all 14 nav buttons work without a microphone; disabled voice explained. |
+| INV-016 | No voice initialization in shell; startup 509, conversation 950, TTS 602, STT 414, VAD 403, wake 537 passed. |
+| INV-017 | Snapshot roles limited to user/assistant, exact data fields, count 64, content 4000, ID 128, unique IDs; malformed/oversize entries omitted with notice, complete accepted text React-escaped; no parsing or external resources. Agent snapshots admit at most 30 unique known IDs, 4 closed states, own data fields only, task<=240/provider<=120 UTF16; invalid whole snapshot rejected with generic notice; JSX escaping tested. Prompt 604, upload 336 passed. |
+| INV-018 | No storage or backend in App; SecretStore 402 passed; memory/security production unchanged. |
+| INV-019 | Caller-triggered one-flight send exposes pending state and Cancel waiting. Local cancellation retains draft even after late ack, explicitly cannot abort delivery, and duplicates remain blocked until adapter settles; no timer/polling/hidden worker. Hook/helper tests pass. |
+| INV-020 | No migration changes; historical guard preserves sole Alembic head 0005_audit_events and EventType 32, exact test x3 passed. |
+| INV-021 | Only connected supplied Promise<void> ack can clear matching draft; synchronous/thenable/malformed result and exceptions fail safely, retain draft, never append transcript; all provider/tool regressions pass. |
+| INV-022 | Unknown view falls back Home; unknown/alias agent selection retains last valid identity, no identity invention; missing evidence Status not reported, disconnected/degraded no active claims; off-list selection explicitly labelled; chat/voice fallback preserved. |
+| INV-023 | No model generation path; phoenix/models/lifecycle.py default capacity one remains unchanged; lifecycle tests in full pytest. |
+| INV-024 | All npm/Python manifests and locks unchanged; existing-dependency UI only; package dependency metadata equals main. |
+
+### Acceptance limitations
+
+LIVE AGENT STATUS ACCEPTANCE: NOT IMPLEMENTED — no live GET /agents transport is implemented.
+LIVE AGENT CONTROL ACCEPTANCE: NOT IMPLEMENTED — no agent execution, dispatch or permission actions are exposed.
+MANUAL NATIVE AGENT NETWORK ACCEPTANCE: PENDING — no real end-to-end WebView2 interaction has been independently verified.
+
+Snapshots are structural display evidence, not authenticated activity or a JavaScript
+sandbox. No live backend/provider/model integration, polling, agent control or native
+GUI end-to-end acceptance. Existing live chat/voice remain unimplemented. PHX-083
+NOT STARTED. No PR, merge or main push.
