@@ -555,3 +555,109 @@ Return at minimum:
 55. NEXT TICKET PHX-081 NOT STARTED
 
 No PR, merge, main push or PHX-081 work.
+
+
+## Authoritative blocker resolution — historical PHX-052 / PHX-051 desktop guards — 2026-10-08
+
+PHX-080 implementation correctly stopped after full Python verification reported
+15,719 passed, 2 failed, 16 existing skips and the one existing warning.
+The two failures reproduce independently in historical source-protection guards
+because their Git diff commands protect the whole apps/ tree against current
+origin/main, including precisely the two desktop shell source files PHX-080
+is explicitly authorized to change.
+
+This section supersedes only the original eight-file limit and the original
+stop-on-first-fixable-test-failure workflow; all other ticket requirements remain.
+
+### Exact historical repair 1 — Screenshot / vision
+
+File: tests/test_screenshot_vision_loop.py
+
+Only test: test_no_action_persistence_or_dependency_change
+
+In that test's existing git diff origin/main -- [positive paths] invocation,
+retain ALL existing positive paths, including "apps". Append EXACTLY these two
+negative pathspecs, after all positive paths:
+- :(exclude)apps/desktop/src/App.tsx
+- :(exclude)apps/desktop/src/styles.css
+
+Preserve all AST prohibited-operation/import assertions, EventType exactly 32,
+sole Alembic head 0005_audit_events, and every other protected path and assertion.
+Do not exclude the apps directory as a whole. Do not alter screenshot/vision
+production or any other screenshot tests. Add one precise explanatory comment.
+
+### Exact historical repair 2 — Windows UI automation
+
+File: tests/test_windows_ui_automation.py
+
+Only test: test_source_architecture_and_immutability
+
+Retain EVERY entry of the existing "paths" positive-path list, including "apps".
+Append EXACTLY these two negative pathspecs, after the existing positive paths:
+- :(exclude)apps/desktop/src/App.tsx
+- :(exclude)apps/desktop/src/styles.css
+
+Preserve all AST, no-input, no-launch, no-background, EventType 32, migration-head,
+source-isolation, and other test assertions. Do not change the Windows UI production,
+its dependency promotion test or any other Windows UI tests. Add one precise comment.
+
+### Verify exceptions are exactly scoped
+
+Before changes, prove the real current diff under "apps" includes only the
+authorized two frontend source paths.
+
+After changes, check that both guarded git diff commands report no differences
+for every other protected path. Negative pathspecs must occur after '--' and must
+not mask unauthorized paths.
+
+Run each repaired exact test THREE consecutive times.
+
+Run the entire screenshot/vision and Windows UI automation test suites individually.
+Record exact pass/skip/warning counts and preserve existing skip identities.
+Also re-run PHX-055 exact guard x3 and its complete 604-test suite x3.
+An unchanged historical test outside these three authorized historical guard files
+that fails requires a new blocker authorization. No other historical test edits.
+
+The specifically authorized historical guard files are now:
+- tests/test_prompt_injection_defenses.py (previous authority)
+- tests/test_screenshot_vision_loop.py (this amendment)
+- tests/test_windows_ui_automation.py (this amendment).
+
+### Scoped autonomous repair and retry loop
+
+To honor PHX-080's end-to-end completion goal, do NOT stop at the first new
+PHX-080-local test, formatting, typecheck or source defect. Continue a local
+IMPLEMENT -> RUN TARGETED TEST -> DIAGNOSE -> REPAIR -> RE-RUN loop when the
+repair is demonstrably within the already-authorized final file set,
+architecture and security constraints.
+
+For each failure:
+1. capture the exact command, failure text and reproduction outside the repo;
+2. classify implementation/test-local defect vs historical guard vs genuine
+   host/dependency/security/out-of-scope failure;
+3. if an in-scope deterministic defect, make the smallest repair and re-run
+   the exact failing test/gate, then all affected tests, then the entire remaining
+   required matrix;
+4. do not count failed/partial runs as passing; a new change invalidates related
+   old gate receipts;
+5. no suppression of warnings, xfail, skips, test deletion, ignored errors,
+   broad exclusions, force pushes, altered privileges or reduced assertions.
+
+Retry transient command/tool execution problems only when safe/idempotent. After
+three consecutive identical failures with no new diagnostic evidence or no
+meaningful progress, STOP BLOCKED with full evidence rather than loop endlessly.
+Likewise STOP immediately if a fix needs an additional path or a changed authority,
+touches a protected subsystem, requires unsafe cleanup, changes security invariants,
+or cannot be completed without unavailable external prerequisites.
+Never silently broaden the scope.
+
+The scope maximum is now TEN final paths, consisting of the original eight plus:
+- tests/test_screenshot_vision_loop.py
+- tests/test_windows_ui_automation.py
+
+The authoritative preparation is now TWO commits ahead of main: original ticket
+and this clarification. On a full PASS, make exactly ONE completion commit after
+both preparations, and push the feature branch only. The resulting feature branch
+must be exactly THREE commits ahead of unchanged main and zero behind.
+
+No PR, merge, force push, main push, or PHX-081 work.
