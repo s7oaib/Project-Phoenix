@@ -20,7 +20,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; }
-button { font: inherit; }
+button, textarea { font: inherit; }
 h1, h2, h3, h4, p { margin: 0; }
 p { line-height: 1.65; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
@@ -128,8 +128,34 @@ main:focus { outline-offset: -6px; }
 .connection-note strong, .placeholder-note strong { font-weight: 600; }
 .connection-note p, .placeholder-note p { margin-top: 6px; color: var(--muted); }
 
+.conversation-layout { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: var(--space); align-items: start; }
+.chat-panel, .voice-panel { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.chat-panel { border-top: 2px solid var(--accent); }
+.chat-heading, .composer, .voice-panel { padding: 20px; }
+.chat-heading h3, .voice-panel h3 { margin-top: 6px; font-size: 1.25rem; }
+.chat-heading p:not(.eyebrow), .voice-panel p:not(.eyebrow), .composer p, .chat-notice { color: var(--muted); font-size: 0.82rem; }
+.chat-heading p:not(.eyebrow), .voice-panel p { margin-top: 10px; }
+.transcript { min-width: 0; min-height: 120px; max-height: 320px; max-height: min(40dvh, 320px); overflow-y: auto; scrollbar-gutter: stable; padding: 20px; border-block: 1px solid var(--border); }
+.empty-conversation { color: var(--muted); font-size: 0.9rem; }
+.message-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.message { min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--sidebar); }
+.message-user { border-left: 3px solid var(--accent); }
+.message h4 { color: var(--accent); font-size: 0.78rem; }
+.message-content { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.chat-notice { padding: 12px 20px; }
+.composer { display: grid; gap: 10px; }
+.composer label { font-size: 0.9rem; font-weight: 650; }
+.composer textarea { width: 100%; min-width: 0; min-height: 110px; resize: vertical; padding: 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--background); line-height: 1.5; overflow-wrap: anywhere; }
+.composer-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.composer button, .voice-panel button { min-height: 42px; padding: 10px 16px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--surface-hover); cursor: pointer; }
+.composer .send-button:not(:disabled) { color: var(--background); background: var(--accent); border-color: var(--accent); }
+.composer button:disabled, .voice-panel button:disabled { color: var(--muted); background: var(--sidebar); cursor: not-allowed; }
+.voice-panel button { width: 100%; margin-top: 18px; }
+.send-feedback:empty { display: none; }
+
 @media (max-width: 1000px) {
   .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .conversation-layout { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 680px) {
   .app-shell { grid-template-columns: minmax(0, 1fr); }

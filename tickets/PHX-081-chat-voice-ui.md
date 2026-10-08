@@ -1,6 +1,6 @@
 # PHX-081 — Chat / voice UI
 
-Status: TODO
+Status: DONE
 Phase: 8 — Frontend
 Branch: feature/PHX-081-chat-voice-ui
 Starting main/base SHA: 9d7b05ca676aa63caec9fc8acdc238da3b421bf5
@@ -525,3 +525,97 @@ Provide:
 59. NEXT PHX-082 NOT STARTED
 
 No PR, merge, main push or PHX-082.
+
+## Completion evidence — 2026-10-08
+
+Started clean at preparation 678eaf633a51cd21e1f38cd820b8ba80dcc71950 on the
+required feature/PHX-081-chat-voice-ui branch. Main remains
+9d7b05ca676aa63caec9fc8acdc238da3b421bf5. Initial topology was 0 behind / 1 ahead,
+with only this authoritative ticket differing. No reset/rebase/force/merge/main push.
+Read the complete ticket, global/subsystem/frontend/API/voice evidence and relevant
+historical contracts. Actual API remains GET /health only.
+
+Implemented the semantic Home conversation/transcript, native 4000-character local
+draft/counter/validation, disabled default Send and voice controls, typed optional
+borrowed ChatPort, explicit pending/ack/failure and local Cancel waiting behavior.
+App-owned state survives navigation. Only connected validated callback admission
+can send trimmed text; one flight, safe failures, no fabricated history/reply.
+Acknowledgement clears only the unchanged submitted draft. Cancel waiting preserves
+it after late ack, does not abort transport and blocks duplicate delivery until
+settlement. ADR-068 documents these decisions and deferred integration.
+
+Snapshot checks admit only exact id/role/content entries with unique IDs <=128,
+user/assistant roles, content <=4000, and at most the first 64 entries. Invalid,
+duplicate/oversize entries are completely omitted with a notice. Text is JSX escaped;
+no HTML/Markdown/code/link/image execution or frontend permission authority.
+Voice remains unavailable; text entry has no microphone prerequisite. Accessible
+native labels/buttons, explained disabled states, polite feedback, bounded scrolling,
+wrapping, responsive stacking and unchanged shell focus/navigation are verified.
+
+### Commands and results
+
+- npm ci: PASS; manifests/locks unchanged.
+- npm test THREE consecutive final runs: 28 passed each, zero skip/failure.
+- npm run typecheck --workspace @phoenix/desktop: PASS.
+- npm run build --workspace @phoenix/desktop: PASS.
+- npm run tauri:info --workspace @phoenix/desktop: PASS.
+- cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml: PASS.
+- cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml: PASS; zero Rust tests.
+- npm run tauri:build --workspace @phoenix/desktop: PASS; static release executable,
+  no GUI/dev server run claimed.
+- Exact PHX-055, PHX-052 and PHX-051 guard tests: 1 passed x3 each, byte-identical
+  historical files. Full prompt/screenshot/Windows UI suites: 604/397/493 passed.
+- All 18 individually run required regressions PASS: API 8, bootstrap 11,
+  registry 96, router 213, ToolRegistry 204, permissions 926, audit 302, secrets 402,
+  Spotify 345, YouTube 358, document generation 284, upload routing 336,
+  startup 509, voice conversation 950, TTS 602, STT 414, VAD 403, wake 537.
+- uv run --locked pytest THREE consecutive final full runs: 15,721 passed each,
+  exact same 16 skip identities/reasons and one Starlette/httpx warning as PHX-080.
+  No new skip/xfail/warning filters/retry workaround.
+- uv sync --locked: PASS; 49 existing packages, no dependency change.
+- uv run --locked ruff check .: PASS.
+- uv run --locked ruff format --check .: PASS; 133 files already formatted.
+- uv run --locked mypy: PASS; 127 source files.
+- uv build --out-dir <external-validation>/dist: wheel/sdist PASS. All 77 Python
+  sources byte-equal to worktree, Git-normalized equal to main; direct dependency
+  metadata equal to unchanged pyproject.toml. No generated/private artifacts.
+- GET /health exact regression and unchanged API bytes: PASS.
+- Added-line credential/signature scan, protected-source/CSP/empty-capability review,
+  EventType 32 / sole Alembic head 0005_audit_events, INV-001..024 review: PASS.
+- git diff --check and complete implementation/test/documentation review: PASS.
+
+The first focused npm attempt found two test assertion defects (temporary UTF-8
+em-dash decoding and React SSR attribute casing); exact focused reproduction passes
+3 after repair. TypeScript found one checked callback-function narrowing defect;
+strict typecheck passes after a narrow post-shape-check assertion. All changes remain
+inside the three authorized implementation/test paths; final three-run gates follow
+these repairs. No historical test or security rule was weakened.
+
+The three PHX-003 workspace/CSP test bodies are unchanged. PHX-080 route/focus/CSS
+security tests remain active, with only obsolete Home assertions and precise local
+helper-call names evolved. Real composer handlers are exercised through a deterministic
+React hook harness, not a claim of native GUI event delivery.
+
+Logs/JUnit/failure records/gate ledger/package proofs and individual invariant
+reviews are outside the repository at
+C:/Users/shoai/.codex/validation/PHX-081-20261008. No generated artifacts are staged.
+Exactly seven final paths: App.tsx, styles.css, workspace.test.mjs,
+docs/21_FRONTEND.md, DECISIONS.md, FEATURE_TICKETS.md and this ticket.
+PHX-081 DONE; Phase 8 INCOMPLETE; PHX-082..087 TODO. One completion commit with
+subject feat: complete PHX-081 chat voice ui, normal feature-only push and clean
+0-behind / 2-ahead remote verification are recorded in the final delivery report.
+
+### Acceptance limitations
+
+LIVE CHAT ACCEPTANCE: NOT IMPLEMENTED — backend POST /chat transport is not yet
+present. UI defaults disconnected; fake-port tests are not live integration.
+LIVE VOICE ACCEPTANCE: NOT IMPLEMENTED — microphone capture, wake, STT/TTS and
+backend voice binding are not provided in this frontend ticket.
+MANUAL DESKTOP CHAT/VOICE ACCEPTANCE: PENDING — no real GUI/WebView2 end-to-end
+interaction performed; deterministic SSR/AST/build evidence is not a substitute.
+
+Numeric display limits are presentation bounds, not authentication or a memory
+sandbox. Cross-realm promises/thenables are not acknowledged by the narrow native
+Promise boundary. No transport timeout/reconnect/cancel is implemented; local cancel
+does not prove delivery ceased. No transcript persistence or live microphone/audio
+binding. PHX-082 NOT STARTED. No PR, merge or main push.
