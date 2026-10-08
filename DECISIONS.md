@@ -2767,3 +2767,63 @@ Vite and static Tauri/Cargo gates. Full Python passes 15,721 x3 with identical
 Required regressions, lint, formatting, mypy, package parity and all 24 individual
 invariant reviews pass. Manual WebView2 mouse/keyboard acceptance remains pending;
 backend-connected frontend acceptance is not implemented. Phase 8 remains incomplete.
+
+## ADR-068 — Honest chat / voice presentation with a borrowed send boundary
+
+Status: Accepted
+Date: 2026-10-08
+Ticket: PHX-081
+
+Replace only Home's preview using the existing App.tsx/styles.css and dependencies.
+Keep PHX-080's fourteen route IDs/labels, brand/groups, default/fallback, native
+navigation, skip link, committed-navigation focus and thirteen honest placeholders.
+PHOENIX remains supreme; display roles/text never authenticate intent or permissions.
+GET /health is the only implemented API; POST /chat and WS /events remain future.
+
+Default App has no ChatPort, shows backend unavailable and disables Send. A native
+controlled textarea accepts local React-memory drafts independently of voice. Raw
+input is bounded at 4000 UTF-16 code units; empty/whitespace/oversize sends reject,
+and admitted text is trimmed. App owns draft/flight state across navigation. No
+browser storage, logs, DB, network, timers, polling or background workers are added.
+
+The optional caller-owned ChatPort exposes only connected/unavailable/degraded,
+readonly id/role/content snapshots and sendText(text): Promise<void>. Runtime data
+checks reject malformed fields/methods without executing accessors; supplied callback
+code remains trusted caller code, not a sandbox. There is no concrete transport.
+Only connected admission calls the callback, once per in-flight request. A native
+Promise resolving undefined is explicit acknowledgement; synchronous values,
+arbitrary thenables, other resolved values and exceptions cannot clear a draft.
+Only the unchanged submitted draft clears after acknowledgement; no local user or
+assistant transcript entry is manufactured. Errors reveal only safe retry guidance.
+
+Cancel waiting cancels the UI wait only, preserves the draft even after late ack and
+states that delivery is unknown. Actual transport cancellation is unavailable. The
+one-flight guard remains until settlement to prevent duplicate delivery. A forever
+pending adapter remains pending; no speculative timeout or cancellation API is added.
+
+Transcript rendering consumes only supplied snapshots: first 64 entries at most,
+exact id/role/content fields, unique nonblank opaque IDs up to 128 code units,
+user/assistant roles only and nonblank content up to 4000 code units. Reject malformed,
+extra-field, duplicate or oversized entries, show an omission notice and never
+partially clip security-critical text. Accepted text is JSX escaped with whitespace
+and long-string wrapping; no HTML/Markdown/code/link/image interpretation or privileges.
+
+Voice is explicitly unavailable, with an explained disabled microphone and text-first
+fallback. No capture, wake/STT/TTS, playback or native audio bridge is introduced.
+The top-level Voice placeholder remains PHX-086's responsibility. Native accessible
+controls/statuses, bounded transcript scrolling, cinder/amber contrast, responsive
+stacking at the existing 800x600 window and reduced motion remain in force.
+
+Keep the three PHX-003 test bodies unchanged; evolve only obsolete Home assertions
+and exact local helper calls, retaining provider/network/native/media/storage bans.
+All three historical guards are byte-identical to main. Frontend passes 28 x3;
+TypeScript/Vite/Tauri/Cargo gates pass (Cargo contains zero Rust tests). Historical
+exact guards pass x3 each; full suites pass 604/397/493. All 18 required regressions
+pass. Full Python passes 15,721 x3 with identical 16 existing skip identities/reasons
+and the one existing Starlette/httpx warning. Ruff, formatting, mypy, wheel/sdist
+source/dependency parity, health/security and all 24 invariant reviews pass.
+
+No API/Python/Rust/Tauri/config/manifest/lock/dependency changes. Fake adapters prove
+only deterministic UI contracts; live chat and live voice acceptance are NOT
+IMPLEMENTED. Manual desktop GUI/WebView2 end-to-end acceptance remains PENDING.
+Phase 8 remains INCOMPLETE; PHX-082 through PHX-087 remain TODO/not started.
