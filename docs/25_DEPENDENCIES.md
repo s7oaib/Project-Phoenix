@@ -63,6 +63,24 @@ semantic fidelity. Images require an explicit borrowed adapter; none is instanti
 See https://pypdf.readthedocs.io/en/stable/user/extract-text.html and
 https://python-docx.readthedocs.io/en/latest/api/document.html.
 
+### Document generation (Phase 7)
+
+ADR-066 promotes exactly `reportlab>=5.0.1,<6`, locked **5.0.1**, for PHX-073
+in-memory Platypus PDF rendering. **Pillow 12.3.0** and **charset-normalizer 3.5.2**
+are the only new transitive package identities; neither is a Phoenix direct
+requirement. All 45 previous non-Phoenix records/versions/hashes remain exact.
+Python remains >=3.11,<3.12. No extras, types-reportlab or fourth package.
+
+Reuse python-docx **1.2.0** and pypdf **6.19.0** for DOCX generation and structural
+verification. Markdown uses stdlib only. Base-14 PDF fonts require exact cp1252
+rendered text; no font/template/image file lookup, download, OCR or native program.
+DOCX uses an in-memory code-owned OOXML seed and ordinary BytesIO serialization;
+post-save output limits bound accepted artifacts, not streaming process memory.
+Native rendering/ZIP/extraction remain synchronous and cannot be hard-preempted.
+Pillow is installed for ReportLab's declared dependency, not promoted to an OCR,
+vision or image-generation feature. Strict mypy has only a narrowly scoped external
+`reportlab`/`reportlab.*` ignore_missing_imports override; no local typing bypass.
+
 ## Optional V1 runtime
 
 ### Colibri

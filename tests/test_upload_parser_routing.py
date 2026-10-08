@@ -1354,12 +1354,17 @@ def test_architecture_inert_source_exact_vocabulary_schema_and_dependencies() ->
 
 def test_exact_authorized_dependency_delta_and_unchanged_existing_records() -> None:
     main = "f6162fd3f231725ccef8006484d9c67208b37efb"
+    post = "6603c9d308361ae9559d72044196df88567bf8a2"
     before_project = tomllib.loads(
         subprocess.check_output(
             ["git", "show", main + ":pyproject.toml"], cwd=ROOT
         ).decode()
     )
-    current = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    current = tomllib.loads(
+        subprocess.check_output(
+            ["git", "show", post + ":pyproject.toml"], cwd=ROOT
+        ).decode()
+    )
     additions = {"pypdf>=6.19,<7", "python-docx>=1.2,<2"}
     assert (
         set(current["project"]["dependencies"])
@@ -1373,7 +1378,9 @@ def test_exact_authorized_dependency_delta_and_unchanged_existing_records() -> N
     old = tomllib.loads(
         subprocess.check_output(["git", "show", main + ":uv.lock"], cwd=ROOT).decode()
     )
-    new = tomllib.loads((ROOT / "uv.lock").read_text())
+    new = tomllib.loads(
+        subprocess.check_output(["git", "show", post + ":uv.lock"], cwd=ROOT).decode()
+    )
     old_records = {p["name"]: p for p in old.pop("package")}
     new_records = {p["name"]: p for p in new.pop("package")}
     assert old == new
@@ -1392,6 +1399,16 @@ def test_exact_authorized_dependency_delta_and_unchanged_existing_records() -> N
                     x for x in entries if x["name"] not in ("pypdf", "python-docx")
                 ]
         assert after == record, name
+
+    retained = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert additions <= set(retained["project"]["dependencies"])
+    locked = {
+        package["name"]: package
+        for package in tomllib.loads((ROOT / "uv.lock").read_text())["package"]
+    }
+    assert {
+        name: locked[name]["version"] for name in ("pypdf", "python-docx", "lxml")
+    } == {"pypdf": "6.19.0", "python-docx": "1.2.0", "lxml": "6.1.3"}
 
 
 def test_docx_total_uncompressed_bound_independent_of_member_limit() -> None:

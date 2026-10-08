@@ -71,9 +71,9 @@ Phase 6 status: COMPLETE.
 - PHX-070 Spotify integration — DONE
 - PHX-071 YouTube integration — DONE
 - PHX-072 Upload/parser routing — DONE
-- PHX-073 PDF/DOCX/Markdown generation — TODO
+- PHX-073 PDF/DOCX/Markdown generation — DONE
 
-Phase 7 status: INCOMPLETE.
+Phase 7 status: COMPLETE.
 
 ## Phase 8 — Frontend
 - PHX-080 App shell/navigation — TODO

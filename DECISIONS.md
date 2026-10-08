@@ -2646,3 +2646,78 @@ No UI/API, schema/migration, EventType, tool/security, voice/media, memory/RAG p
 or generation/export change. EventType remains 32; five migrations, sole head
 0005_audit_events. PHX-073 stays TODO, Phase 7 incomplete. Deterministic in-memory
 fixtures do not claim live production acceptance of user-owned documents or OCR.
+
+
+## ADR-066 — Strict reports produce verified in-memory artifacts before export
+Status: Accepted. Date: 2026-10-08. Ticket: PHX-073.
+
+PHOENIX remains supreme; ROBIN/document_analyst owns document analysis/generation,
+VEGAPUNK/knowledge_rag owns indexing/RAG. DocumentGenerator is a caller-owned local
+renderer, with no tool/permission/model/agent, memory/RAG or persistence authority.
+The unchanged PHX-043 FilesystemTool remains text-only. Future binary persistence
+must cross a separate permission-gated integration and verify disk readability.
+PHX-073 returns bytes and verified metadata only, never a saved-path assertion.
+
+Frozen, strict, extra-forbidden contracts define exactly PDF/DOCX/Markdown and a
+neutral ordered paragraph/bullet_list/table AST, sections and plain provenance.
+Revalidate exact models, including copied/constructed/nested instances; reject
+subclasses/extras/coercion and unsafe display filenames. All ten caller-supplied
+positive non-boolean limits are required. Count every user-controlled text field
+once, admit before rendering, enforce cumulative counts, never truncate. Artifact
+bytes remain excluded from repr/ordinary serialization; exact hash/size/MIME,
+correlated IDs, verified flag and format-specific page count are checked again.
+
+Promote only reportlab>=5.0.1,<6, locked 5.0.1; Pillow 12.3.0 and charset-normalizer
+3.5.2 are its only new transitive identities. Existing lock records remain exact;
+no extras, types-reportlab, OCR or research runtime promotion. Reuse python-docx
+1.2.0 and pypdf 6.19.0. Strict mypy remains enabled: only external untyped reportlab
+and reportlab.* receive ignore_missing_imports; Phoenix-local typing is checked.
+
+PDF uses ReportLab Platypus and built-in Helvetica/Helvetica-Bold, with code-owned
+styles, margins, wrapping, bullet/table layout and numbered footers. All rendered
+user text must encode exactly as cp1252; unsupported Unicode fails explicitly.
+Escape every Paragraph input before inserting safe code-owned line breaks. Never
+load images, fonts, templates, URLs or executable markup. A private ordinary
+Exception sentinel with constant safe text crosses the native page callback;
+catch its type outside build and map only it to limit_exceeded. Public domain
+errors never enter native callbacks; classification never parses
+native messages. Other native rendering failures remain safe generation_failed.
+
+DOCX starts from a minimal code-owned empty OOXML package in BytesIO, avoiding
+python-docx's default disk template. User content enters plain text APIs only;
+styles, bullet numbering, grid tables and Sources are code-owned. Native save
+uses ordinary BytesIO through completed ZIP serialization/cleanup. Reject excess
+bytes after save and before structural verification/artifact success. Canonical
+ZIP member order/timestamps make exact bytes deterministic, using an ordinary
+buffer and checking its final size too. No mid-ZIP throwing writer/stream close,
+warning suppression or zipfile monkeypatch. This is an artifact-acceptance bound,
+not a hard streaming-memory ceiling.
+
+Markdown uses stdlib UTF-8 with LF/final newline, deterministic punctuation and
+backslash escaping, and literal backslash-n for user line breaks. Structure comes
+only from the AST. Escaped HTML-looking literals remain inert: tests count preceding
+backslash parity to distinguish escaped <img/<link from active openers, retaining
+all injection cases without changing correct renderer behavior. Sources retain
+caller order and plain references; no fetch, link, authority inference or ingestion.
+
+Verification reopens exact bytes in memory: strict unencrypted bounded PDF pages
+and extracted title evidence; unique unencrypted DOCX ZIP members, exact title and
+paragraph/table traversal; Markdown strict UTF-8/title/newline/round-trip evidence.
+Safe nine-code failures never return a normal artifact. Native PDF diagnostics are
+redacted before handlers and the prior log-record factory restored. No disk/temp,
+network, subprocess, hidden worker, API/frontend, EventType or migration changes.
+
+One loop, one active ID and the caller task own generation. Busy/closed/wrong-loop
+fail explicitly; same-loop aclose is idempotent. Check cancellation/closure around
+native calls and between controlled iterations, through verification and immediately
+before success; clear active state in finally. Synchronous native rendering/save/
+extraction/compression cannot be hard-preempted or promise process-memory ceilings.
+No format/font/model/OCR fallback, task scheduler or BLAZE-6 generation lease.
+
+The two authorized historical repairs preserve exact PHX-072 pre/post dependency
+history independently of later promotions, and add ReportLab alone to bootstrap's
+exact current dependency names. No other protected source or tests are rewritten.
+Deterministic focused coverage passes 284 x3; complete Python passes 15,721 x3 with
+the same 16 pre-existing skips and one pre-existing warning. All required subsystem,
+quality, package, desktop and 24 individual invariant reviews pass. Phase 7 is
+complete; PHX-080 remains TODO/not started. No user-owned live export is claimed.

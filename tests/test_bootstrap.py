@@ -41,6 +41,7 @@ def test_distribution_has_foundation_runtime_dependencies() -> None:
         "pypdf",
         "python-docx",
         "pywinauto",
+        "reportlab",
         "sqlalchemy",
         "uvicorn",
     }
