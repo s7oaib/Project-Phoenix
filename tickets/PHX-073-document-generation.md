@@ -1,6 +1,6 @@
 # PHX-073 — PDF / DOCX / Markdown generation
 
-Status: TODO
+Status: DONE
 Phase: 7 — Media & Documents
 Branch: feature/PHX-073-document-generation
 Starting main/base SHA: 6603c9d308361ae9559d72044196df88567bf8a2
@@ -1396,3 +1396,86 @@ Expected maximum final path scope remains 11 paths because the clarification mod
 the already-authorized PHX-073 ticket and `pyproject.toml` was already authorized.
 
 No PR, merge, main push, force push or PHX-080 work.
+
+## Completion evidence — 2026-10-08
+
+Implemented the frozen contracts and caller-owned PDF/DOCX/Markdown runtime in
+generation.py with 284 deterministic focused tests. No disk export or later ticket.
+The three resume blockers were reproduced before surgical repair:
+
+- Markdown: two unsafe substring assertions rejected correct escaped literals.
+  Test-only backslash-parity checks preserve all attack cases and code-owned
+  structure; production escaping is unchanged. Exact selection: 8 passed.
+- PDF: ReportLab reconstructs callback exception types from annotated strings,
+  which cannot construct the closed-code public domain error. A private ordinary
+  constant-message Exception is caught by type outside build and mapped to
+  limit_exceeded. Exact original test: 1 passed x3; original plus dedicated
+  below/equal/max+1 boundaries: 2 passed x3, with safe failure and footer evidence.
+- DOCX: a throwing bounded ZIP writer interrupted serialization and cleanup.
+  Ordinary BytesIO remains alive through native save/cleanup; check bytes only
+  after return, rejecting oversized data before verification/success. Canonical
+  ZIP output also uses ordinary BytesIO. Artifact acceptance is bounded, not hard
+  streaming memory. Exact original -W error selection: 1 passed x3; original plus
+  exact/under/oversize lifecycle regression: 2 passed x3 with no warnings.
+
+Fresh required validation receipts:
+
+- uv lock and uv sync --locked: PASS; exact ReportLab-only direct delta and three
+  new locked identities, all existing records retained; no typing package.
+- Focused PHX-073: 284 / 284 / 284 passed, no warnings/skips/xfails/retries.
+- Exact bootstrap and PHX-072 historical guards: each 1 passed x3.
+- Foundation: 126 passed, existing Starlette/httpx warning only; health unchanged.
+- Upload parser: 336 / 336 / 336 passed.
+- Ingestion 300; retrieval 367; vector 273; provenance 173 passed.
+- Filesystem 649 passed, same 16 existing Windows skips; unchanged text-only tool.
+- AgentRegistry 96; model router 213; ToolRegistry 204; PermissionEngine 926;
+  AuditTrail 302; secrets boundary 402 passed.
+- Spotify 345; YouTube 358 passed.
+- Startup 509; conversation 950; TTS 602; STT 414; VAD 403; wake-word 537 passed.
+- Complete Python: 15,721 / 15,721 / 15,721 passed. JUnit identities/reasons match
+  baseline's 16 existing skips; the same one existing Starlette/httpx warning only.
+  No new warning/skip/xfail/retry/flaky marker. A prior externally terminated
+  partial full run is preserved separately and does not count as a completed gate.
+- Ruff lint PASS; format PASS (133 files); strict mypy PASS (127 source files).
+- External wheel/sdist build and inspection PASS: generation source byte-identical,
+  expected direct metadata, no generated samples/receipts/DBs or extra promotion.
+- Desktop: 4 tests passed; typecheck/build PASS with output outside repository.
+- Security PASS: 146 protected paths unchanged, exact two historical-test scope,
+  credentials/signature scan clean. No filesystem/temp/network/hidden/model/tool/
+  permission/memory/RAG/DB/API/frontend/schema/voice/media changes. EventType 32;
+  five unchanged migrations, sole head 0005_audit_events.
+
+All 24 individual invariant checks:
+
+- INV-001 — PHOENIX core unchanged; generator returns in-memory data only.
+- INV-002 — AIZEN unchanged; no planning/finalization invocation.
+- INV-003 — No LLM or permission calls; injection-shaped content is inert AST text.
+- INV-004 — No privileged I/O, tools or disk output; guarded actual PDF/DOCX/Markdown tests pass.
+- INV-005 — P4 engine unchanged; PermissionEngine regression validates approvals.
+- INV-006 — P5 blocking unchanged; generator cannot grant or execute permissions.
+- INV-007 — No P3/P4 actions or audit invocation; audit production/schema unchanged.
+- INV-008 — Failures previously reported BLOCKED; completion/status require every gate.
+- INV-009 — MAHORAGA unchanged; no retries, recovery worker or scheduler.
+- INV-010 — KAIDO unchanged; no degraded-mode/fallback policy.
+- INV-011 — All frontend/API files unchanged; no download/save/provider shortcut.
+- INV-012 — Agents unchanged; native library imports confined to document implementation.
+- INV-013 — No tool implementation/policy change; future persistence requires separate permission-gated integration.
+- INV-014 — document_analyst/knowledge_rag IDs unchanged and asserted in focused tests.
+- INV-015 — No voice dependency; text report generation works independently.
+- INV-016 — Voice production/tests unchanged; startup 509, conversation 950, TTS 602, STT 414, VAD 403 and wake-word 537 regressions passed.
+- INV-017 — Strict closed AST; PDF escapes before markup, Markdown escape parity tested, DOCX plain text APIs, provenance never dereferenced.
+- INV-018 — No secret/memory/DB calls; artifact bytes excluded from repr/dump; closed errors and native diagnostic redaction tested.
+- INV-019 — Observable active_generation_id, one caller task/loop, busy/close/wrong-loop and suppressed/late cancellation tested; sync work not hard-preemptible.
+- INV-020 — Five migrations unchanged; head 0005_audit_events verified in focused test.
+- INV-021 — Nine closed error categories; private PDF sentinel maps by type; oversized DOCX rejected before verification/success without warning.
+- INV-022 — No automatic format/font/OCR/model fallback; unsupported PDF characters fail explicitly.
+- INV-023 — No model generation, lease or hidden work; BLAZE-6 policy unchanged.
+- INV-024 — Only ReportLab direct plus Pillow/charset-normalizer transitive; existing records exact and ReportLab-only mypy override tested.
+
+ADR-066 records contracts, dependency promotion, native boundaries and limitations.
+docs/19_DOCUMENT_SYSTEM.md and docs/25_DEPENDENCIES.md updated. PHX-073 DONE;
+Phase 7 COMPLETE. PHX-080 remains TODO / NOT STARTED.
+
+LIVE DOCUMENT GENERATION ACCEPTANCE: PENDING — deterministic in-memory PDF/DOCX/Markdown generation and structural verification passed; no user-owned production document has been exported.
+
+LIVE DISK EXPORT ACCEPTANCE: NOT IMPLEMENTED — PHX-073 does not write artifact bytes to disk; binary persistence remains a separate permission-gated integration.
