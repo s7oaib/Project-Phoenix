@@ -1826,6 +1826,7 @@ def test_no_action_persistence_or_dependency_change() -> None:
         Config(str(ROOT / "alembic.ini"))
     ).get_heads() == ["0005_audit_events"]
     # PHX-072 separately owns the exact parser manifest/lock promotion.
+    # PHX-080 owns only App.tsx/styles.css; every other apps path stays protected.
     assert not subprocess.check_output(
         [
             "git",
@@ -1848,6 +1849,8 @@ def test_no_action_persistence_or_dependency_change() -> None:
             "phoenix/tools/browser.py",
             "phoenix/tools/filesystem.py",
             "phoenix/tools/terminal.py",
+            ":(exclude)apps/desktop/src/App.tsx",
+            ":(exclude)apps/desktop/src/styles.css",
         ],
         cwd=ROOT,
     )

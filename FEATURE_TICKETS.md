@@ -76,7 +76,7 @@ Phase 6 status: COMPLETE.
 Phase 7 status: COMPLETE.
 
 ## Phase 8 — Frontend
-- PHX-080 App shell/navigation — TODO
+- PHX-080 App shell/navigation — DONE
 - PHX-081 Chat/voice UI — TODO
 - PHX-082 Agent network — TODO
 - PHX-083 Task graph — TODO
@@ -84,6 +84,8 @@ Phase 7 status: COMPLETE.
 - PHX-085 Memory/files workspace — TODO
 - PHX-086 Models/voice/settings — TODO
 - PHX-087 Observability/developer view — TODO
+
+Phase 8 status: INCOMPLETE — PHX-081 through PHX-087 remain TODO.
 
 ## Phase 9 — Validation & Release
 - PHX-090 Automated test matrix — TODO

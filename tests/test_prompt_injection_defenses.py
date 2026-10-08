@@ -1714,6 +1714,8 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
             ["git", "ls-tree", "-r", "--name-only", "origin/main"], cwd=ROOT, text=True
         ).splitlines()
         if path.startswith(("phoenix/", "alembic/", "apps/desktop/"))
+        # PHX-080 owns these shell paths; workspace tests verify their UI/security.
+        and path not in {"apps/desktop/src/App.tsx", "apps/desktop/src/styles.css"}
     ]
     for path in protected:
         actual = subprocess.check_output(
