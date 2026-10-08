@@ -1463,6 +1463,7 @@ def test_source_architecture_and_immutability() -> None:
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
     ).get_heads() == ["0005_audit_events"]
+    # PHX-080 owns only App.tsx/styles.css; every other apps path stays protected.
     paths = [
         "phoenix/security",
         "phoenix/memory",
@@ -1476,6 +1477,8 @@ def test_source_architecture_and_immutability() -> None:
         "phoenix/tools/filesystem.py",
         "phoenix/tools/terminal.py",
         "phoenix/tools/registry.py",
+        ":(exclude)apps/desktop/src/App.tsx",
+        ":(exclude)apps/desktop/src/styles.css",
     ]
     assert not subprocess.check_output(
         ["git", "diff", "origin/main", "--", *paths], cwd=ROOT

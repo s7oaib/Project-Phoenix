@@ -2721,3 +2721,49 @@ Deterministic focused coverage passes 284 x3; complete Python passes 15,721 x3 w
 the same 16 pre-existing skips and one pre-existing warning. All required subsystem,
 quality, package, desktop and 24 individual invariant reviews pass. Phase 7 is
 complete; PHX-080 remains TODO/not started. No user-owned live export is claimed.
+
+## ADR-067 — Local app-shell navigation preserves frontend privilege boundaries
+
+Status: Accepted
+Date: 2026-10-08
+Ticket: PHX-080
+
+Use the existing React/TypeScript/Vite/CSS stack in App.tsx and styles.css for
+exactly fourteen stable views: onboarding, home, agents, tasks, memory, files,
+computer, research, media, permissions, models, voice, settings and observability.
+Local React state selects home initially; an unknown input resolves to home without
+coercion, dynamic execution, router/history or browser-storage persistence.
+PHOENIX is the single identity and remains the supreme orchestrator. Group labels
+are presentation only and instantiate no agent or authority.
+
+Native named buttons, aria-current, semantic landmarks/headings, a skip-to-main
+link and visible focus support keyboard use. An effect moves focus to main only
+after requested navigation commits; initial focus is undisturbed. Cinder/amber
+CSS, system fonts, contrast checks, reachable sidebar scrolling, narrow stacking
+and reduced-motion treatment adapt to the existing 800x600 native window.
+
+The shell distinguishes local selection from future backend functionality. Home
+previews future areas; thirteen other panels identify their purpose and explicitly
+remain unconnected. No real or simulated chat, voice, health, task, permission,
+model or memory success is offered. No HTTP/WebSocket, backend/provider/database,
+tool, native IPC/plugin or permission execution is introduced. CSP, capability
+grants, Rust, all manifests and lockfiles remain unchanged; no new dependency.
+PHX-081 through PHX-087 own later feature composition and transport/action binding.
+
+Evolve only the obsolete PHX-003 static-screen test into React SSR/pure/AST shell
+contracts; retain its other three workspace/CSP tests unchanged. The authorized
+PHX-055 guard excludes only the two owned shell files. PHX-052 and PHX-051 retain
+every positive protected path, including apps, and append those same two exact Git
+negative pathspecs. All prohibited-operation/import, EventType 32, migration head
+and historical dependency assertions remain active. Normalize the four mixed LF
+endings in the PHX-055 guard to its existing CRLF style; normalized bytes and Python
+AST prove no unintended transformation. An external Git fixture proves other
+desktop/protected paths and similar filenames still trigger the guards.
+
+Exact historical tests pass 1 x3 each; prompt-injection passes 604 x3; screenshot
+and Windows UI suites pass 397 and 493. Frontend passes 14 x3, strict TypeScript,
+Vite and static Tauri/Cargo gates. Full Python passes 15,721 x3 with identical
+16 existing skip identities/reasons and one existing Starlette/httpx warning.
+Required regressions, lint, formatting, mypy, package parity and all 24 individual
+invariant reviews pass. Manual WebView2 mouse/keyboard acceptance remains pending;
+backend-connected frontend acceptance is not implemented. Phase 8 remains incomplete.

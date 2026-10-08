@@ -1,6 +1,6 @@
 # PHX-080 — App shell / navigation
 
-Status: TODO
+Status: DONE
 Phase: 8 — Frontend
 Branch: feature/PHX-080-app-shell-navigation
 Starting main/base SHA: 4a70867203a70d3a85e2c141ef0dbb92bdff42e2
@@ -661,3 +661,107 @@ both preparations, and push the feature branch only. The resulting feature branc
 must be exactly THREE commits ahead of unchanged main and zero behind.
 
 No PR, merge, force push, main push, or PHX-081 work.
+
+## PHX-080 completion receipt — 2026-10-08
+
+Completed after authoritative preparation 574459e5e2b5d6a0a5a2eb1f26e421409e6b63c3,
+following the original 7770b0a0aa40de49594662c6279371aab0cc11e2 preparation.
+Main remains 4a70867203a70d3a85e2c141ef0dbb92bdff42e2. The ticket-only fast-forward
+preserved all four original implementation hashes. All frozen requirements and the
+historical-guard amendment above are retained; the final authorized scope is ten paths.
+
+Implemented local React shell/navigation for the exact fourteen IDs/labels in this
+ticket, with default/fallback home, native named buttons, selected page evidence,
+heading/panel updates, post-render main focus, skip link, responsive cinder/amber
+CSS and honest unconnected panels. No chat/voice or PHX-081..087 feature is started.
+No backend/client/HTTP/WebSocket, privileged tool/provider/database/native IPC,
+permission operation or fabricated backend state. CSP, empty permission grants,
+Rust, entry point, manifests, dependencies, schema and migration history are unchanged.
+
+### Repair evidence
+
+- PHX-055: only the two-path exclusion and explanatory comment. Ruff repaired
+  four LF endings to match existing CRLF; normalized bytes and Python AST are
+  equivalent before/after formatting. No repository-wide formatter or configuration change.
+- PHX-052 screenshot and PHX-051 Windows UI: each exact historical guard alone
+  adds a comment and the two exact negative pathspecs after all positive paths.
+  Every other source line/assertion, positive apps protection, prohibited operation,
+  EventType 32, sole Alembic head 0005_audit_events and dependency proof is preserved.
+- Actual apps diff contains only App.tsx/styles.css; excluding exactly those paths
+  leaves an empty protected diff. An external Git index/worktree fixture confirms
+  all other protected probes, native configuration, entry point and similar names
+  remain detected. No other test in these historical files changed.
+
+### Completed verification
+
+| Command / gate | Result |
+|---|---|
+| npm ci --ignore-scripts | PASS; approved lock unchanged; zero reported vulnerabilities |
+| npm test, three consecutive runs | 14 passed / 14 passed / 14 passed; no skips or failures |
+| npm run typecheck --workspace @phoenix/desktop | PASS |
+| npm run build --workspace @phoenix/desktop | PASS |
+| npm run tauri:info --workspace @phoenix/desktop | PASS; existing MSVC/WebView2 toolchain |
+| cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml | PASS |
+| cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml | PASS; zero native unit tests, zero failures |
+| npm run tauri:build --workspace @phoenix/desktop | PASS; existing no-bundle workflow; no GUI launched |
+| Exact PHX-055, PHX-052 and PHX-051 repaired guards | Each 1 passed x3 consecutively |
+| Complete prompt-injection suite | 604 passed x3 consecutively |
+| Complete screenshot / Windows UI suites | 397 / 493 passed; zero skips or warnings |
+| API / bootstrap | 8 / 11 passed; API retains existing warning and exact /health |
+| AgentRegistry / model router / ToolRegistry | 96 / 213 / 204 passed |
+| PermissionEngine / AuditTrail / SecretStore | 926 / 302 / 402 passed |
+| Spotify / YouTube / document generation / upload parser | 345 / 358 / 284 / 336 passed |
+| Startup / conversation / TTS / STT / VAD / wake | 509 / 950 / 602 / 414 / 403 / 537 passed |
+| uv run --locked pytest, three consecutive runs | 15,721 passed each; identical 16 existing skips and one existing warning |
+| uv sync --locked | PASS; 49 existing packages; no dependency changes |
+| uv run --locked ruff check . | PASS |
+| uv run --locked ruff format --check . | PASS; 133 files already formatted |
+| uv run --locked mypy | PASS; 127 source files |
+| uv build, outside repository | PASS; wheel and sdist contain the same 77 Python sources and dependency metadata |
+| Package source / health parity | Working-source bytes equal packaged bytes; all Python Git blobs match main after EOL normalization; exact /health unchanged |
+| Credential/signature and artifact review | No added credential signatures detected; no generated build/validation artifacts staged |
+| Three preserved workspace/CSP tests | Bodies unchanged; Node SSR/pure/AST evidence does not claim native GUI clicks |
+
+The validation ledger, command logs, JUnit receipts, package and guard proofs remain
+outside the repository in C:/Users/shoai/.codex/validation/PHX-080-loop-20261008.
+The prior 15,719-pass/two-failure run is recorded as failed, individually reproduced,
+then repaired only under the amendment; it is not counted toward the three passes.
+
+### Individual invariant review
+
+| Invariant | Concrete evidence |
+|---|---|
+| INV-001 | One PHOENIX identity; orchestration source unchanged; orchestrator tests pass in full suite |
+| INV-002 | No AIZEN authority/import; registry 96/router 213 pass; planner source unchanged |
+| INV-003 | No model-derived permission decision; deterministic permission suite 926 passes |
+| INV-004 | No tool/IPC path in App AST; ToolRegistry 204 and permissions 926 pass |
+| INV-005 | No approve/deny controls; explicit-user correlation and sensitive-action checks remain passing |
+| INV-006 | No privileged UI execution; blocked/P5 permission and secret checks remain passing |
+| INV-007 | AuditTrail 302 passes; audit/persistence source unchanged |
+| INV-008 | Failures preserved in ledger; completion only after three full passes and every required gate |
+| INV-009 | Recovery source unchanged; positive-budget/bounded-replan tests pass in full suite |
+| INV-010 | KAIDO degraded-only test passes in full suite; no UI recovery authority |
+| INV-011 | App AST permits only React/local state/navigation/focus; unchanged CSP and empty capabilities |
+| INV-012 | No provider/agent implementation changes; registry/router regressions pass |
+| INV-013 | No tool-policy change; registry inert metadata assertions pass |
+| INV-014 | Stable view IDs/product labels; registry alias-removal and collision assertions pass |
+| INV-015 | Fourteen native text-named navigation buttons; no microphone required |
+| INV-016 | No voice initialization; all six Phase-6 suites pass at frozen counts |
+| INV-017 | No unsafe HTML/remote document input; prompt-injection 604 x3 and upload 336 pass |
+| INV-018 | No frontend storage; SecretStore 402 passes; memory/security source unchanged |
+| INV-019 | Selection introduces no long/background work; existing cancellation/state tests pass |
+| INV-020 | Migration source unchanged; exact historical guards retain sole head 0005_audit_events |
+| INV-021 | Explicit pending panels, no simulated success; provider/tool failure tests pass |
+| INV-022 | Unknown ID resolves visibly to home heading/current marker; integration status remains pending |
+| INV-023 | No generation path; unchanged lifecycle default capacity one and lifecycle tests pass |
+| INV-024 | No manifest/lock/dependency changes; package dependency metadata matches main |
+
+ADR-067 records the local UI/security/accessibility and exact historical evolution.
+PHX-080 is DONE; Phase 8 is INCOMPLETE; PHX-081 through PHX-087 stay TODO.
+
+LIVE DESKTOP NAVIGATION ACCEPTANCE: PENDING — deterministic React render/navigation
+contract tests and static Tauri build passed; manual end-to-end WebView2 mouse/keyboard
+smoke has not been performed.
+
+BACKEND-CONNECTED FRONTEND ACCEPTANCE: NOT IMPLEMENTED — PHX-080 is a local UI-only
+app shell. Later Phase 8 tickets own transport, real state and action binding.
