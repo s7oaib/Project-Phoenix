@@ -1,6 +1,6 @@
 # PHX-084 — Permission Center
 
-Status: TODO  
+Status: DONE
 Phase: 8 — Frontend  
 Branch: feature/PHX-084-permission-center  
 Starting main/base SHA: 05db77c30256e12045d16aa2b00568075a7df354  
@@ -460,3 +460,174 @@ MANUAL NATIVE PERMISSION CENTER ACCEPTANCE: PENDING — no verified end-to-end W
 These are explicit boundaries of this presentation ticket, not claims of successful integration.
 
 PHX-084 remains TODO until every required gate passes. Phase 8 remains INCOMPLETE. PHX-085 is NOT STARTED.
+
+## Completion evidence — 2026-10-09
+
+Acceptance: DONE after all required deterministic gates passed; live/manual limitations
+remain explicit below. Official repository D:/Project-Phoenix, feature branch
+feature/PHX-084-permission-center; preparation 0fd7ee0653c81a4c8e560633482a013fc24a04bf,
+main 05db77c30256e12045d16aa2b00568075a7df354. Exactly seven authorized paths:
+App.tsx, styles.css, tests/workspace.test.mjs, docs/21_FRONTEND.md, DECISIONS.md,
+FEATURE_TICKETS.md and this ticket. No backend/native/manifests/locks changes.
+
+Implementation and accepted ADR-071: strict exact own-data request/evaluation
+admission, 0..64 unique IDs, exact field bounds/correlation/UTC and all ten PHX-041
+consistency rules; detached frozen primitives, inert JSX, safe generic errors,
+source-order bounded search/selection, conservative reset and supplied evidence labels.
+Only explicit eligible native P1-P4 clicks deliver approved/denied request ID intent.
+P5 has no controls. Global pending guard and native Promise<void> delivery ACK never
+mutate evaluation or create authorization, grant, decision ID/time, audit or execution.
+Repeated ID remains blocked until valid evidence changes away or disappears; failure
+retains request for deliberate retry. Reflection can run Proxy traps; no JS sandbox
+or authentication claim. PHX-080/081/082/083 core blocks and behavior preserved.
+
+| Required command / gate | Observed result |
+| --- | --- |
+| npm ci --ignore-scripts | PASS; manifests/locks unchanged |
+| uv run --locked pytest tests/test_screenshot_vision_loop.py::test_no_action_persistence_or_dependency_change -q --junitxml=[external validation directory]\historical-screenshot_vision_loop-exact-1.xml | exit 0 |
+| uv run --locked pytest tests/test_screenshot_vision_loop.py::test_no_action_persistence_or_dependency_change -q --junitxml=[external validation directory]\historical-screenshot_vision_loop-exact-2.xml | exit 0 |
+| uv run --locked pytest tests/test_screenshot_vision_loop.py::test_no_action_persistence_or_dependency_change -q --junitxml=[external validation directory]\historical-screenshot_vision_loop-exact-3.xml | exit 0 |
+| uv run --locked pytest tests/test_windows_ui_automation.py::test_source_architecture_and_immutability -q --junitxml=[external validation directory]\historical-windows_ui_automation-exact-1.xml | exit 0 |
+| uv run --locked pytest tests/test_windows_ui_automation.py::test_source_architecture_and_immutability -q --junitxml=[external validation directory]\historical-windows_ui_automation-exact-2.xml | exit 0 |
+| uv run --locked pytest tests/test_windows_ui_automation.py::test_source_architecture_and_immutability -q --junitxml=[external validation directory]\historical-windows_ui_automation-exact-3.xml | exit 0 |
+| uv run --locked pytest tests/test_screenshot_vision_loop.py -q --junitxml=[external validation directory]\historical-screenshot_vision_loop.xml | exit 0 |
+| uv run --locked pytest tests/test_windows_ui_automation.py -q --junitxml=[external validation directory]\historical-windows_ui_automation.xml | exit 0 |
+| uv run --locked pytest tests/test_prompt_injection_defenses.py::test_protected_existing_sources_dependencies_schema_and_event_vocabulary -q --junitxml=[external validation directory]\guards-exact-1.xml | exit 0 |
+| uv run --locked pytest tests/test_prompt_injection_defenses.py::test_protected_existing_sources_dependencies_schema_and_event_vocabulary -q --junitxml=[external validation directory]\guards-exact-2.xml | exit 0 |
+| uv run --locked pytest tests/test_prompt_injection_defenses.py::test_protected_existing_sources_dependencies_schema_and_event_vocabulary -q --junitxml=[external validation directory]\guards-exact-3.xml | exit 0 |
+| uv run --locked pytest tests/test_prompt_injection_defenses.py -q --junitxml=[external validation directory]\guards-suite-1.xml | exit 0 |
+| uv run --locked pytest tests/test_api.py -q --junitxml=[external validation directory]\regressions-api.xml | exit 0 |
+| uv run --locked pytest tests/test_bootstrap.py -q --junitxml=[external validation directory]\regressions-bootstrap.xml | exit 0 |
+| uv run --locked pytest tests/test_agent_registry.py -q --junitxml=[external validation directory]\regressions-agent_registry.xml | exit 0 |
+| uv run --locked pytest tests/test_agent_model_router.py -q --junitxml=[external validation directory]\regressions-agent_model_router.xml | exit 0 |
+| uv run --locked pytest tests/test_tool_registry.py -q --junitxml=[external validation directory]\regressions-tool_registry.xml | exit 0 |
+| uv run --locked pytest tests/test_permission_engine.py -q --junitxml=[external validation directory]\regressions-permission_engine.xml | exit 0 |
+| uv run --locked pytest tests/test_audit_trail.py -q --junitxml=[external validation directory]\regressions-audit_trail.xml | exit 0 |
+| uv run --locked pytest tests/test_secrets_boundary.py -q --junitxml=[external validation directory]\regressions-secrets_boundary.xml | exit 0 |
+| uv run --locked pytest tests/test_spotify_integration.py -q --junitxml=[external validation directory]\regressions-spotify_integration.xml | exit 0 |
+| uv run --locked pytest tests/test_youtube_integration.py -q --junitxml=[external validation directory]\regressions-youtube_integration.xml | exit 0 |
+| uv run --locked pytest tests/test_document_generation.py -q --junitxml=[external validation directory]\regressions-document_generation.xml | exit 0 |
+| uv run --locked pytest tests/test_upload_parser_routing.py -q --junitxml=[external validation directory]\regressions-upload_parser_routing.xml | exit 0 |
+| uv run --locked pytest tests/test_rise_phoenix_startup.py -q --junitxml=[external validation directory]\regressions-rise_phoenix_startup.xml | exit 0 |
+| uv run --locked pytest tests/test_voice_conversation.py -q --junitxml=[external validation directory]\regressions-voice_conversation.xml | exit 0 |
+| uv run --locked pytest tests/test_tts_provider.py -q --junitxml=[external validation directory]\regressions-tts_provider.xml | exit 0 |
+| uv run --locked pytest tests/test_stt_provider.py -q --junitxml=[external validation directory]\regressions-stt_provider.xml | exit 0 |
+| uv run --locked pytest tests/test_vad.py -q --junitxml=[external validation directory]\regressions-vad.xml | exit 0 |
+| uv run --locked pytest tests/test_wake_word_provider.py -q --junitxml=[external validation directory]\regressions-wake_word_provider.xml | exit 0 |
+| uv run --locked pytest tests/test_task_graph_state_machine.py -q --junitxml=[external validation directory]\regressions-task_graph_state_machine.xml | exit 0 |
+| uv run --locked pytest --junitxml=[external validation directory]\full-run-1.xml | exit 0 |
+| uv run --locked pytest --junitxml=[external validation directory]\full-run-2.xml | exit 0 |
+| uv run --locked pytest --junitxml=[external validation directory]\full-run-3.xml | exit 0 |
+| uv sync --locked | exit 0 |
+| uv run --locked ruff check . | exit 0 |
+| uv run --locked ruff format --check . | exit 0 |
+| uv run --locked mypy | exit 0 |
+| uv build --out-dir [external validation directory]\dist | exit 0 |
+| npm.cmd test | exit 0 |
+| npm.cmd test | exit 0 |
+| npm.cmd test | exit 0 |
+| npm.cmd run typecheck --workspace @phoenix/desktop | exit 0 |
+| npm.cmd run build --workspace @phoenix/desktop | exit 0 |
+| npm.cmd run tauri:info --workspace @phoenix/desktop | exit 0 |
+| cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml | exit 0 |
+| cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml | exit 0 |
+| npm.cmd run tauri:build --workspace @phoenix/desktop | exit 0 |
+
+
+Three final npm runs: 87 passed, 0 failed/skipped each. TypeScript, Vite, Tauri info,
+Cargo check/test and Tauri build passed. All three historical exact guards passed
+three times each; full prompt/screenshot/Windows suites: 604/397/493. Individually
+run API 8, bootstrap 11, registry 96, router 213, ToolRegistry 204, PermissionEngine
+926, audit 302, secrets 402, Spotify 345, YouTube 358, documents 284, upload 336,
+startup 509, conversation 950, TTS 602, STT 414, VAD 403, wake 537, task graph 348.
+Full Python runs 1/2/3: 15,721 passed and the identical 16 existing Windows skip
+identities/reasons plus the identical existing Starlette/httpx warning; no new
+skip/xfail/marker/retry/filter/warning suppression. Ruff check/format and mypy pass.
+Wheel and sdist built outside repo: all 77 Python source bytes equal worktree and
+Git-normalized main, identical direct dependencies and Requires-Python <3.12,>=3.11.
+API eight tests prove repeated exact GET /health 200/application-json,
+status ok/service phoenix-api/installed package version; unknown route 404;
+factory isolation and source hash to main unchanged. No permission API routes.
+
+Bounded repairs: initial node --test tests/workspace.test.mjs exited 1, reproduced
+with --test-name-pattern='permission data rejects' (exit 1): the new assertion
+mistakenly required optional evaluation. A minimal test-only fix excluded that
+optional key from missing-required-key cases; missing-evaluation/no-controls coverage
+remained. Focused retest passed.
+
+A focused unavailable/degraded-source test then reproduced an implementation gap
+(exit 1 twice): suppression occurred before nested request/evaluation correlation
+validation. Moving suppression after whole-snapshot admission fixed it; focused
+retest passed. All frontend gates and the three-run full Python sequence restarted
+after this last product/test repair. The earlier passed full run and intentionally
+interrupted second run are preserved under external pre-repair and excluded.
+
+An external-only documentation helper encoding error (py_compile exit 1) was
+reproduced and repaired with explicit UTF8 output; py_compile then passed. No
+project file or product/test gate had changed for that support-script repair.
+
+Later verification sequences ended with Windows process status 1073807364 at 46%
+and 18%, without pytest failure reports or completed JUnit results. The last active
+memory suite passed in isolation (167 tests). An observed code-mode-host restart
+coincided with the second termination. These sequences are preserved under external
+process-termination and host-restart and excluded from acceptance. The identical
+one-shot verifier ran hidden via the Windows process service with original PATH,
+independently of the tool-host lifecycle; no OS settings, permissions, product/test
+code or final test filtering changed. Its three fresh complete runs passed and
+matched the exact existing skips/warning. No out-of-scope project change or gate
+bypass. The standalone preliminary TypeScript check also passed.
+
+Documentation-only diff check failed (exit 1) and reproduced with new Date/Status
+hard-break trailing spaces and extra EOF blanks. New prose also had doubled line
+breaks from Windows helper newline translation. Narrow formatting repair kept
+prior content and frozen ticket body intact except Status; isolated diff check
+then passed. Product/tests and final npm/Python sequences were unchanged.
+
+Security review: exact seven-path maximum, no untracked/private artifacts, added-line
+credential signature scan found none (not a comprehensive secret-detection guarantee).
+Protected backend/native/manifests/locks/historical guards and prior tickets unchanged;
+three original PHX-003 test bodies byte-equal. No network/IPC/provider/storage/timer/
+polling/worker, policy/risk derivation, grant/audit persistence or tool execution.
+
+| Invariant | Individual evidence |
+| --- | --- |
+| INV-001 | Exact 30-entry frontend/document/Python ordered parity and sole phoenix Supreme orchestrator checked by npm; full orchestrator tests pass, production unchanged. |
+| INV-002 | strategist/AIZEN retains Chief strategist/master planner metadata and subordinate designation; no executable authority; registry 96/router 213 and full planner tests pass. |
+| INV-003 | No LLM output, request reason or display status grants authority; no direct PermissionEngine call or locally created decision. Explicit native button callback delivers intent only; PermissionEngine 926 unchanged and passed. |
+| INV-004 | App has no tool/IPC imports; ToolRegistry 204 and PermissionEngine 926 passed. |
+| INV-005 | P4 review requires an admitted exact P4/p4_explicit_approval_required evaluation and explicit native click. Callback sends only a request ID and human intent; trusted identity correlation and authorization remain PermissionEngine 926, unchanged. |
+| INV-006 | P5/p5_blocked is the only admitted P5 evaluation; no Approve/Deny controls or callback eligibility. Exhaustive 1,920 combination tests and unchanged PermissionEngine 926/SecretStore 402 pass. |
+| INV-007 | AuditTrail 302 passed; audit/persistence source unchanged; no UI privileged actions. |
+| INV-008 | All 48 required commands and npm ci have zero final exits before DONE; optional-evaluation assertion and unavailable/degraded admission-order repairs documented; final npm/full Python sequences restarted; live permission transport/authentication, grants/audit/execution and manual native acceptance explicitly remain unimplemented/pending. |
+| INV-009 | Recovery source unchanged; test_mahoraga_recovery.py::test_explicit_positive_budgets and ::test_bounded_replan_membership_failed_step_and_order are included in all three full pytest runs. |
+| INV-010 | No recovery mode controls; test_kaido_failsafe.py::test_decision_is_degraded_only is included in all three full pytest runs; source unchanged. |
+| INV-011 | Exact npm AST call allowlist permits React/local helpers and one supplied sendText call only inside sendDraft and one supplied submitDecision call only inside deliverPermissionIntent; provider/network/native/media/storage APIs banned; CSP connect-src none and empty capabilities unchanged. |
+| INV-012 | No provider or agent production edits; registry 96 and router 213 passed. |
+| INV-013 | No tool/policy production edits; ToolRegistry 204 passed, inert permission/audit metadata protected. |
+| INV-014 | Only exact canonical IDs select agent details/status; permission IDs remain opaque exact request IDs, never grant authority; every alias lookup rejected by npm; Python alias-removal/collision registry tests pass; 14 routes unchanged. |
+| INV-015 | Native controlled local textarea remains editable while disconnected; named form Send and all 14 nav buttons work without a microphone; disabled voice explained. |
+| INV-016 | No voice initialization in shell; startup 509, conversation 950, TTS 602, STT 414, VAD 403, wake 537 passed. |
+| INV-017 | Snapshot roles limited to user/assistant, exact data fields, count 64, content 4000, ID 128, unique IDs; malformed/oversize entries omitted with notice, complete accepted text React-escaped; no parsing or external resources. Task whole-graph admission checks 1..40 steps, <=120 edges, exact known owners, 11 canonical task states, strict text/array/timeout bounds, no duplicate/unknown/self dependencies or cycles, source-priority traversal, inert JSX and generic errors. Agent snapshots admit at most 30 unique known IDs, 4 closed states, own data fields only, task<=240/provider<=120 UTF16; invalid whole snapshot rejected with generic notice; JSX escaping tested. Permission snapshots enforce <=64 unique requests, exact own data fields/correlation, UTF16 bounds/strict UTC, ten exact evidence combinations, generic reflection failure, detached frozen primitives and inert JSX; model-like approval text never changes eligibility. Prompt 604, upload 336 passed. |
+| INV-018 | No storage or backend in App; SecretStore 402 passed; memory/security production unchanged. |
+| INV-019 | Caller-triggered one-flight send exposes pending state and Cancel waiting. Local cancellation retains draft even after late ack, explicitly cannot abort delivery, and duplicates remain blocked until adapter settles; no timer/polling/hidden worker. Permission intents expose global pending state, prevent all duplicates until settlement, retain pending across navigation/source loss and explain that UI cannot cancel adapter delivery; no cancellation feature promised. Hook/helper tests pass. |
+| INV-020 | No migration changes; historical guard preserves sole Alembic head 0005_audit_events and EventType 32, exact test x3 passed. |
+| INV-021 | Only connected supplied Promise<void> ack can clear matching draft; synchronous/thenable/malformed result and exceptions fail safely, retain draft, never append transcript; Permission intent requires native Promise resolving undefined; sync/thenables/malformed acknowledgements/throws/rejections fail safely with deliberate retry and unchanged evaluation. ACK blocks repeat ID until valid evidence changes away or ID disappears; never reports authorization. All provider/tool regressions pass. |
+| INV-022 | Unknown view falls back Home; unknown/alias agent selection retains last valid identity, no identity invention; missing evidence Status not reported, disconnected/degraded no active claims; off-list selection explicitly labelled; task selection resets across task IDs/missing steps/disconnect, default no graph; Permission default source disconnected; unavailable/degraded/malformed evidence suppresses stale details, missing evaluation never infers risk/status/actions, removed selection resets to first/none and off-filter notice explicit. Chat/voice fallback preserved. |
+| INV-023 | No model generation path; phoenix/models/lifecycle.py default capacity one remains unchanged; test_model_lifecycle.py::test_global_capacity_blocks_different_providers_and_models and invalid/positive capacity cases pass in all three full suites. |
+| INV-024 | All npm/Python manifests and locks unchanged; existing-dependency UI only; package dependency metadata equals main. |
+
+
+External logs/JSON/XML/package artifacts only:
+C:/Users/shoai/.codex/validation/PHX-084-20261009. Gate acceptance, exact skip/warning
+comparison, package parity and security review receipts precede this status change.
+Full staged-diff/scope and normal feature-only delivery receipts are captured there;
+completion SHA is reported after commit rather than embedded in itself. Frozen
+authoritative ticket body preserved except its Status line and this appended receipt.
+
+LIVE PERMISSION TRANSPORT: NOT IMPLEMENTED — no GET /permissions or POST approve/deny.
+TRUSTED DECISION AUTHENTICATION: NOT IMPLEMENTED — callback delivers UI intent;
+trusted host/backend must authenticate/correlate and create authoritative evidence.
+GRANT / AUDIT / TOOL EXECUTION: NOT IMPLEMENTED by this ticket.
+MANUAL NATIVE PERMISSION CENTER ACCEPTANCE: PENDING — no verified native WebView2
+end-to-end mouse/keyboard test; deterministic SSR/AST/hooks/builds are not GUI proof.
+Phase 8 INCOMPLETE; PHX-085 through PHX-087 TODO. PHX-085 NOT STARTED.

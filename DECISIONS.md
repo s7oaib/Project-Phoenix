@@ -2978,3 +2978,40 @@ MANUAL NATIVE TASK GRAPH ACCEPTANCE: PENDING — no verified end-to-end WebView2
 mouse/keyboard interaction; SSR/hook/CSS/native build evidence is not GUI acceptance.
 
 Phase 8 INCOMPLETE; PHX-084..087 TODO/not started.
+
+## ADR-071 — Permission evidence presentation and request-specific human intent
+
+Date: 2026-10-09
+Status: Accepted
+
+Decision: PHX-084 owns only the existing Permissions workspace. A caller-owned
+optional readonly PermissionPort supplies status, requests and an optional
+submitDecision(requestId, approved|denied): Promise<void> intent callback.
+Default App remains disconnected. Whole-snapshot admission checks exact PHX-041
+request/evaluation fields, bounded primitives, own descriptors, unique IDs,
+request/actor/tool correlation, real UTC timestamps and all ten structural evidence
+combinations before status-based suppression. These are output-shape checks;
+PermissionEngine alone remains the P0-P5 authorization authority.
+
+Only explicit native clicks on valid connected approval_required P1-P4 evidence
+can deliver intent; P0/P5 and all other statuses have no decision controls. P5 is
+unconditionally blocked. One global pending guard survives navigation/source loss.
+Only native Promise resolving undefined acknowledges delivery, without changing
+supplied evaluation or proving authorization/audit/execution. That ID stays blocked
+until valid evidence changes away from approval_required or the request disappears.
+Failure is generic and permits deliberate retry after settlement; no automatic
+retry, timeout, polling or cancellation. No decision ID/time, grants, policies,
+audit records, tool execution, API/network/native/storage capability or dependency.
+
+Rationale: only GET /health currently exists. Labelled caller evidence and explicit
+human intent satisfy the frontend boundary without inventing live transport or
+trusted authentication. JSX escaping, detached frozen primitives, strict admission
+and a bounded source-order search/selection keep external text inert. Reflective
+Proxy traps may run; this UI is not a JavaScript sandbox or authentication boundary.
+
+Consequences: trusted adapter/backend must authenticate/correlate human intent,
+create authoritative evidence and enforce unchanged PermissionEngine, ToolRegistry
+and AuditTrail. All prior workspaces, CSP/capabilities, native/backend code and locks
+are preserved. Live permission transport, trusted decision authentication, grants,
+audit and execution remain NOT IMPLEMENTED; native WebView2 acceptance is PENDING.
+Phase 8 remains INCOMPLETE; PHX-085 through PHX-087 stay TODO and PHX-085 is not started.

@@ -2,9 +2,9 @@
 
 ## Stack
 
-Implemented through PHX-083: Tauri 2, React 19, TypeScript 6, Vite 8 and CSS.
+Implemented through PHX-084: Tauri 2, React 19, TypeScript 6, Vite 8 and CSS.
 Tailwind CSS, shadcn/ui, Zustand, TanStack Query and React Flow/XYFlow remain
-architecture choices for separately justified later tickets; PHX-080/081/082/083 add no dependency.
+architecture choices for separately justified later tickets; PHX-080/081/082/083/084 add no dependency.
 
 ## PHX-080 app shell
 
@@ -24,13 +24,15 @@ unchanged 800x600 window size, a stacked narrow layout and reduced-motion treatm
 
 PHX-081 replaces only the Home preview with the conversation surface below.
 PHX-082 replaces Agent Network with the canonical directory below; PHX-083 adds
-the read-only Task Graph. The other eleven panels remain explicitly unconnected.
+the read-only Task Graph. PHX-084 adds the Permission Center. The other ten
+panels remain explicitly unconnected.
 Backend integration is pending; no operational health, agent, task, permission,
 memory, model or voice success is fabricated.
 
 PHX-082 implements the agent directory and PHX-083 the read-only task view.
-PHX-084 owns permissions, PHX-085 memory/files, PHX-086 models/voice/settings and
-PHX-087 observability. PHX-084 through PHX-087 remain TODO; Phase 8 is INCOMPLETE.
+PHX-084 implements permission evidence/human intent, PHX-085 owns memory/files,
+PHX-086 models/voice/settings and PHX-087 observability. PHX-085 through PHX-087
+remain TODO; Phase 8 is INCOMPLETE.
 
 ## PHX-081 chat / voice presentation
 
@@ -187,7 +189,8 @@ sandbox, and snapshot shape does not authenticate activity or hard-limit browser
 
 PHX-080's fourteen destinations/default/fallback/branding/groups/focus remain intact.
 PHX-081's chat code and PHX-082's entire roster/search/status/UI block stay byte-equal
-to main, apart from task-view composition. Eleven remaining views stay placeholders.
+to main, apart from task-view composition. At PHX-083 completion eleven views stayed
+placeholders; PHX-084 leaves ten.
 No GET/POST /tasks, WS/events, execution, cancel/retry, approval, verification action,
 provider/tool/native call, persistence or new dependency. Python/backend/Rust/Tauri
 configs/CSP/empty permissions/manifests/locks remain unchanged. PHOENIX stays supreme.
@@ -199,12 +202,102 @@ cancellation, transition, recovery, verification or permission-action controls.
 MANUAL NATIVE TASK GRAPH ACCEPTANCE: PENDING — no verified end-to-end WebView2
 mouse/keyboard interaction; SSR/hook/CSS/native build evidence is not GUI acceptance.
 
+## PHX-084 Permission Center
+
+PHX-084 replaces only Permissions with a Permission Center for caller-supplied
+request/evaluation evidence and explicit human intent. PermissionEngine (PHX-041)
+remains the sole authorization authority. Default App has no PermissionPort and says
+No permission source connected, with no invented requests, grants or timestamps.
+Connected means caller-supplied evidence, not live backend connectivity; unavailable
+or degraded ports hide requests and stale details. Malformed evidence fails closed.
+
+Optional readonly PermissionPort has only status (connected/unavailable/degraded),
+requests and optional submitDecision(requestId, approved|denied): Promise<void>.
+Each entry contains request and optional evaluation. Request fields are exactly
+requestId, actorId, toolId, action, resource, reason, requestedAt and optional
+taskId/sessionId. Evaluation fields are exactly requestId, actorId, toolId, riskLevel,
+permissionRequirement, status, reasonCode and optional matchedGrantId,
+matchedPolicyRuleId/userDecisionId. Missing evaluation says Evaluation not reported;
+no risk/status is inferred from request text or identifiers.
+
+Closed evaluation statuses are allowed, approval_required, denied, blocked; risks
+are P0 through P5. Display admission mirrors PHX-041 consistent_evidence exactly:
+p0_internal: allowed/P0/no evidence; explicit_user_approval: allowed/P1-P4/only
+userDecisionId; explicit_user_denial: denied/P0-P4/only userDecisionId; matching_grant:
+allowed/P1-P3/only matchedGrantId; matching_policy: allowed/P2-P3/only
+matchedPolicyRuleId; p1_scope_required, p2_approval_required, p3_approval_required and
+p4_explicit_approval_required: approval_required/respective P1-P4/no evidence;
+p5_blocked: blocked/P5/no evidence. These checks validate supplied output shape,
+never derive risk or evaluate policy, grants, evidence precedence or authorization.
+
+Whole-snapshot admission requires 0..64 unique request IDs, exact own data descriptors,
+no missing/extra fields, symbols, accessors, sparse/extended arrays or bad primitives.
+IDs (request, actor, tool, task, session and optional evidence) are nonblank already
+outer-trimmed strings <=128 UTF16 units. Meaningful action/permissionRequirement are
+<=256, resource <=512 and non-whitespace reason <=2000, with formatting preserved.
+requestedAt is <=64 units and a real Gregorian ISO UTC date/time with Z or +00:00;
+no fabricated local time, clock, date sorting or generated decision timestamp exists.
+Every evaluation must correlate requestId/actorId/toolId exactly. Invalid or oversized
+entries reject the whole snapshot; no truncation, repair or partial display. Admitted
+primitives/records/arrays are detached and frozen; caller-owned data never changes.
+Reflection failures become generic notices; getters/coercion are avoided. Reflective
+Proxy traps may run: validation is not a same-realm JavaScript sandbox or authentication.
+
+Local case-insensitive search covers admitted request/evaluation strings and is capped
+at 80 UTF16 units, preserving source order with match counts, empty/no-match notices
+and Clear search. App owns selection: first admitted ID by default, only admitted IDs
+can be selected, selection survives navigation, removed IDs reset to first/none and
+source loss/degradation clears details. Off-filter selected details are labelled.
+All supplied text is inert JSX, with no HTML, Markdown, links, images or code execution.
+
+Native Approve/Deny buttons deliver only a request-specific human intent. Eligibility
+requires a valid connected complete snapshot, exact correlated approval_required
+P1/P2/P3/P4 reason pair and a validated callback. Missing callback disables controls
+with an explanation. P0, P5, allowed, denied, blocked and unevaluated requests never
+offer decision controls. P5 is unconditionally blocked. There is no bulk action,
+remember choice, grant duration, policy editing, cancellation or tool execution.
+
+The callback is invoked only from explicit native click handlers, never render,
+mount, validation, search, selection, navigation, effects, timers or background work.
+It receives only the exact request ID and approved or denied. One global intent may
+be pending; the guard survives navigation/source loss and blocks duplicates until
+settlement. A native Promise resolving undefined acknowledges delivery only, leaves
+the evaluation unchanged and blocks that request ID until valid supplied evidence
+changes away from approval_required or the request disappears. Source disconnection,
+malformed evidence and temporarily absent evaluation conservatively retain that guard.
+Synchronous/thenable/malformed results, throws and rejections fail generically, retain
+evidence and allow deliberate retry after settlement. No automatic retry, timeout,
+polling or local cancellation is claimed; a never-settled callback remains pending.
+No UserPermissionDecision, decision IDs/timestamps, grants, policy results, audit writes
+or authorization are created. Trusted host/backend must authenticate and correlate
+human intent and independently supply authoritative evidence.
+
+Named native inputs/buttons, semantic headings, aria-pressed/controls, disabled-state
+explanations and polite feedback preserve skip/navigation focus. Long text wraps,
+list scrolling remains reachable and list/detail stack below 1000px for the unchanged
+800x600 Tauri window. Existing contrast, narrow layout and reduced motion remain.
+All fourteen routes and PHX-080 shell/081 chat/082 agent/083 task behavior remain;
+their core implementation blocks are byte-equal to prior main. Ten views still show
+honest placeholders. Production CSP, empty capabilities, Rust, backend, manifests,
+locks and dependencies are unchanged. PHOENIX remains supreme; LEVI/recovery/modes
+and ToolRegistry/PermissionEngine/AuditTrail boundaries remain intact.
+
+LIVE PERMISSION TRANSPORT: NOT IMPLEMENTED — no GET /permissions, POST approve/deny,
+HTTP/WebSocket or backend permission client is connected; API still only GET /health.
+TRUSTED DECISION AUTHENTICATION: NOT IMPLEMENTED — callback delivers UI intent only;
+trusted adapter/backend must authenticate/correlate it and create authoritative evidence.
+GRANT / AUDIT / TOOL EXECUTION: NOT IMPLEMENTED — no grant creation, audit persistence,
+policy evaluation, native execution, tools or permission bypass in this ticket.
+MANUAL NATIVE PERMISSION CENTER ACCEPTANCE: PENDING — no WebView2 end-to-end
+mouse/keyboard acceptance; SSR/AST/hook/CSS/build evidence is not native GUI proof.
+
 ## Boundaries
 
 Frontend may render state, send intents, request permission decisions, display tasks/events, and manage local UI preferences.
 
-Those are target boundaries. PHX-080/081/082/083 only select views, draft/search locally, display
-supplied plain-text snapshots and optionally submit to a borrowed callback. There is
+Those are target boundaries. PHX-080/081/082/083/084 only select views, draft/search locally, display
+supplied plain-text snapshots and optionally submit chat or permission human intent
+to a borrowed callback. There is
 no HTTP/WebSocket, backend client, provider, database, tool, permission decision or
 Tauri IPC/plugin invocation. Existing production/development CSP, empty permission
 grants, entry point, native Rust and dependency manifests remain unchanged.
@@ -218,11 +311,11 @@ Frontend may not:
 
 ## State
 
-- Current PHX-080/081/082/083 UI selection, search and local drafts: React useState/useRef;
+- Current PHX-080/081/082/083/084 UI selection, search and local drafts: React useState/useRef;
   useEffect moves focus after a committed navigation change without stealing initial focus.
 - Planned server state: TanStack Query, under a later authorized transport ticket.
 - Planned broader UI state: Zustand; no router/history or browser-storage persistence
-  is introduced by PHX-080/081/082/083.
+  is introduced by PHX-080/081/082/083/084.
 - Planned live orchestration state: backend WebSocket events, not connected yet.
 
 ## Suggested later structure
@@ -257,7 +350,7 @@ Deterministic Node React SSR, pure resolver and TypeScript AST contracts cover
 navigation, focus wiring, draft admission, snapshot safety and security. Deterministic
 hook-handler tests verify pending/duplicate/ack/error/cancellation behavior, including
 navigation during an in-flight send; these are not native DOM event tests. Frontend
-passes 65 tests three consecutive times; the three PHX-003 workspace/CSP test bodies
+passes 87 tests three consecutive times; the three PHX-003 workspace/CSP test bodies
 remain unchanged. Historical PHX-055, PHX-052 and PHX-051 guards exclude only App.tsx
 and styles.css while retaining all other desktop/backend protection.
 Static Tauri builds pass; manual WebView2 mouse/keyboard acceptance remains pending.
