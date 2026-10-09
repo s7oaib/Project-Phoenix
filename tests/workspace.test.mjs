@@ -98,7 +98,7 @@ test('React SSR renders the semantic branded shell and selected home navigation'
 });
 
 test('every future workspace renders its own purpose and an honest placeholder', () => {
-  for (const [id, label] of expectedViews.filter(([id]) => id !== 'home' && id !== 'agents' && id !== 'tasks')) {
+  for (const [id, label] of expectedViews.filter(([id]) => id !== 'home' && id !== 'agents' && id !== 'tasks' && id !== 'permissions')) {
     const view = app.resolveView(id);
     const markup = renderToStaticMarkup(createElement(app.ViewPanel, { view }));
     assert.ok(markup.includes(`${label} workspace`));
@@ -162,6 +162,7 @@ test('shell has no backend, native bridge, storage or unsafe content execution',
   const allowedCalls = new Set(['useState', 'useRef', 'useEffect', 'resolveView', 'setSelectedView', 'navigate', 'views.find', 'groups.map', 'views.filter', 'mainRef.current?.focus', 'Object.getOwnPropertyDescriptor', 'Reflect.ownKeys', 'Array.isArray', 'Math.min', 'dataValue', 'readChatPort', 'validateDraft', 'boundedMessages', 'sendDraft', 'cancelWait', 'acknowledgedDraft', 'useChatDraft', 'setDraft', 'setPending', 'setFeedback', 'event.preventDefault', 'chat.setDraft', 'snapshot.messages.map', 'messages.some', 'messages.push', 'port.sendText', 'value.trim', 'id.trim', 'content.trim']);
   for (const name of ['Object.freeze', 'canonicalAgents.map', 'agentRoster.find', 'agentRoster.filter', 'boundedAgentQuery', 'value.slice', 'boundedAgentQuery(value).toLowerCase', 'agent.alias.toLowerCase', 'agent.alias.toLowerCase().includes', 'agent.internalId.toLowerCase', 'agent.internalId.toLowerCase().includes', 'agent.professionalRole.toLowerCase', 'agent.professionalRole.toLowerCase().includes', 'required.includes', 'optional.includes', 'required.every', 'keys.includes', 'agentDataFields', 'Number.isInteger', 'findAgent', 'agents.some', 'agents.push', 'setQuery', 'setSelectedId', 'filterAgents', 'readAgentSnapshot', 'snapshot.agents.find', 'matches.some', 'directory.search', 'matches.map', 'directory.select', 'useAgentDirectory']) allowedCalls.add(name);
   for (const name of ['taskText', 'taskArray', 'taskTopology', 'readTaskGraphPort', 'useTaskGraph', 'result.push', 'steps.map', 'steps.filter', 'steps.filter((step) => step.dependsOn.length === 0).map', 'steps.findIndex', 'Math.max', 'step.dependsOn.map', 'ordered.findIndex', 'ordered.push', 'layers.push', 'steps.forEach', 'item.dependsOn.includes', 'taskStates.some', 'steps.some', 'Number.isFinite', 'dependsOn.includes', 'dependsOn.push', 'inputRefs.push', 'steps.push', 'step.dependsOn.some', 'taskStates.find', 'graph?.ordered.find', 'setTaskSelection', 'graph.roots.join', 'graph.ordered.map', 'task.select', 'step.dependsOn.join', 'selected.dependsOn.join', 'selected.inputRefs.map']) allowedCalls.add(name);
+  for (const name of ['permissionId', 'permissionUtc', 'value.match', 'Number', 'readPermissionRequest', 'readPermissionEvaluation', 'permissionEvidenceRules.find', 'rule.risks.some', 'readPermissionPort', 'requests.some', 'requests.push', 'permissionNeedsIntent', 'prunePermissionIntents', 'flight.submittedIds.filter', 'snapshot.requests.find', 'port.requests.find', 'flight.submittedIds.includes', 'port.submitDecision', 'flight.submittedIds.push', 'filterPermissionRequests', 'entries.filter', 'text.some', 'field.toLowerCase', 'field.toLowerCase().includes', 'usePermissionCenter', 'setPermissionQuery', 'setSelectedPermissionId', 'deliverPermissionIntent', 'setPermissionFeedbackId', 'setPermissionPending', 'setPermissionFeedback', 'flight.current.submittedIds.includes', 'permissions.search', 'permissions.select', 'permissions.submit']) allowedCalls.add(name);
   for (const call of nodes(ts.isCallExpression)) {
     const name = call.expression.getText(appTree);
     assert.ok(allowedCalls.has(name) || name === 'views.filter((view) => view.group === group).map', name);
@@ -398,7 +399,7 @@ test('failure, cancellation and malformed acknowledgements retain the draft', as
 });
 
 // This deterministic hook harness tests state/handlers, not native DOM event delivery.
-function hookHarness(port, agentPort, taskPort) {
+function hookHarness(port, agentPort, taskPort, permissionPort) {
   const state = [];
   const refs = [];
   let stateIndex = 0;
@@ -415,11 +416,11 @@ function hookHarness(port, agentPort, taskPort) {
   return () => {
     stateIndex = 0;
     refIndex = 0;
-    const shell = module.default({ chatPort: port, agentPort, taskPort });
+    const shell = module.default({ chatPort: port, agentPort, taskPort, permissionPort });
     const chat = shell.props.children[2].props.children[1].props.children.props.chat;
     const panel = shell.props.children[2].props.children[1].props.children;
     const buttons = shell.props.children[1].props.children[1].props.children.flatMap((group) => group.props.children[1].props.children.map((item) => item.props.children));
-    return { ...chat, directory: panel.props.directory, task: panel.props.task, panel, updateTaskPort(value) { taskPort = value; }, navigate(label) { buttons.find((button) => button.props.children === label).props.onClick(); } };
+    return { ...chat, directory: panel.props.directory, task: panel.props.task, permissions: panel.props.permissions, panel, updateTaskPort(value) { taskPort = value; }, updatePermissionPort(value) { permissionPort = value; }, navigate(label) { buttons.find((button) => button.props.children === label).props.onClick(); } };
   };
 }
 
@@ -1055,4 +1056,317 @@ test('task CSS bounds scrolling and literal text while stacking at the unchanged
   assert.match(css, /\.task-step-button\[aria-pressed="true"\]/);
   assert.match(css, /\.task-text\s*\{[^}]*white-space:\s*pre-wrap;[^}]*overflow-wrap:\s*anywhere/);
   assert.doesNotMatch(css, /\.task-[^}]*position:\s*(?:fixed|absolute)|text-overflow:\s*ellipsis|line-clamp/);
+});
+
+function permissionRequest(requestId = 'request-one', overrides = {}) {
+  return { requestId, actorId: 'researcher', toolId: 'tool-one', action: 'Read selected document', resource: 'document-one', reason: 'User requested a review', requestedAt: '2026-10-09T12:30:45.123Z', ...overrides };
+}
+function permissionEvaluation(overrides = {}) {
+  return { requestId: 'request-one', actorId: 'researcher', toolId: 'tool-one', riskLevel: 'P2', permissionRequirement: 'Explicit approval', status: 'approval_required', reasonCode: 'p2_approval_required', ...overrides };
+}
+function permissionEntry(requestId = 'request-one', request = {}, evaluation = {}) {
+  return { request: permissionRequest(requestId, request), evaluation: permissionEvaluation({ requestId, ...evaluation }) };
+}
+function permissionPort(requests = [permissionEntry()], submitDecision) {
+  return { status: 'connected', requests, ...(submitDecision ? { submitDecision } : {}) };
+}
+function permissionMarkup(port, overrides = {}) {
+  const snapshot = app.readPermissionPort(port);
+  return renderToStaticMarkup(createElement(app.PermissionCenter, { permissions: { snapshot, selected: snapshot.requests[0], query: '', pending: false, submitted: false, feedback: '', search() {}, select() {}, submit() {}, ...overrides } }));
+}
+function elementButtons(element) {
+  if (Array.isArray(element)) return element.flatMap(elementButtons);
+  if (!element || typeof element !== 'object') return [];
+  return [...(element.type === 'button' ? [element] : []), ...elementButtons(element.props?.children)];
+}
+function intentButton(read, label = 'Approve this request') {
+  return elementButtons(app.PermissionCenter({ permissions: read().permissions })).find((button) => button.props.children === label);
+}
+
+test('Permission Center is a disconnected, empty, honest default in only the permissions view', () => {
+  const read = hookHarness(); read().navigate('Permissions');
+  const markup = renderToStaticMarkup(read().panel);
+  assert.match(markup, /Permission Center/); assert.match(markup, /No permission source connected\./);
+  assert.match(markup, /No permission requests supplied\./); assert.match(markup, /0 of 0 supplied requests match/);
+  assert.match(markup, /PermissionEngine is the sole authorization authority/);
+  assert.doesNotMatch(markup, /Approve this request|Deny this request|Selected request:|<time|<progress/);
+  assert.equal(expectedViews.filter(([id]) => !['home', 'agents', 'tasks', 'permissions'].includes(id)).length, 10);
+});
+
+test('connected permission evidence displays exact request/evaluation metadata and optional scopes', () => {
+  const entry = permissionEntry('request-one', { taskId: 'task-one', sessionId: 'session-one' }, { riskLevel: 'P3', reasonCode: 'matching_policy', status: 'allowed', matchedPolicyRuleId: 'rule-one' });
+  const markup = permissionMarkup(permissionPort([entry]));
+  for (const value of Object.values(entry.request).concat(Object.values(entry.evaluation))) assert.ok(markup.includes(value), value);
+  assert.match(markup, /Caller-supplied evidence\. Live permission transport is not implemented/);
+  assert.match(markup, /not proof of live transport, audit persistence, tool execution or success/);
+  assert.doesNotMatch(markup, /Approve this request|Deny this request/);
+  const missing = permissionMarkup(permissionPort([{ request: permissionRequest() }]));
+  assert.match(missing, /Evaluation not reported/); assert.doesNotMatch(missing, /Approve this request|Deny this request|<dt>Risk level/);
+});
+
+test('unavailable, degraded and malformed sources hide every request and stale selected detail', () => {
+  for (const status of ['unavailable', 'degraded', 'invalid']) {
+    const markup = permissionMarkup({ ...permissionPort(), status });
+    assert.doesNotMatch(markup, /request-one|Read selected document|Approve this request|Deny this request/);
+    assert.match(markup, status === 'degraded' ? /Permission source degraded/ : /No permission source connected/);
+  }
+  assert.match(permissionMarkup({ status: 'connected', requests: [], extra: 1 }), /snapshot rejected/);
+  for (const status of ['unavailable', 'degraded']) {
+    assert.equal(app.readPermissionPort({ ...permissionPort([permissionEntry('request-one', {}, { toolId: 'mismatch' })]), status }).rejected, true);
+  }
+});
+
+test('permission types expose exactly PHX-041 camelCase request, decision and port fields', () => {
+  const fields = (name) => nodes(ts.isTypeAliasDeclaration).find((node) => node.name.text === name).type.members.map((member) => member.name.text);
+  assert.deepEqual(fields('PermissionRequest'), ['requestId', 'actorId', 'toolId', 'action', 'resource', 'reason', 'requestedAt', 'taskId', 'sessionId']);
+  assert.deepEqual(fields('PermissionEvaluation'), ['requestId', 'actorId', 'toolId', 'riskLevel', 'permissionRequirement', 'status', 'reasonCode', 'matchedGrantId', 'matchedPolicyRuleId', 'userDecisionId']);
+  assert.deepEqual(fields('PermissionPort'), ['status', 'requests', 'submitDecision']);
+  assert.deepEqual(Array.from(app.permissionRisks), ['P0', 'P1', 'P2', 'P3', 'P4', 'P5']);
+  assert.deepEqual(Array.from(app.permissionStatuses), ['allowed', 'approval_required', 'denied', 'blocked']);
+  const backend = readFileSync(new URL('../phoenix/security/permissions.py', import.meta.url), 'utf8');
+  for (const code of app.permissionEvidenceRules.map((rule) => rule.reasonCode)) assert.ok(backend.includes(`"${code}"`), code);
+  assert.equal(app.permissionEvidenceRules.length, 10);
+});
+
+test('every status/risk/reason/evidence combination admits only PHX-041 structural evidence', () => {
+  const matrix = [
+    ['p0_internal', 'allowed', ['P0'], undefined],
+    ['explicit_user_approval', 'allowed', ['P1', 'P2', 'P3', 'P4'], 'userDecisionId'],
+    ['explicit_user_denial', 'denied', ['P0', 'P1', 'P2', 'P3', 'P4'], 'userDecisionId'],
+    ['matching_grant', 'allowed', ['P1', 'P2', 'P3'], 'matchedGrantId'],
+    ['matching_policy', 'allowed', ['P2', 'P3'], 'matchedPolicyRuleId'],
+    ['p1_scope_required', 'approval_required', ['P1'], undefined],
+    ['p2_approval_required', 'approval_required', ['P2'], undefined],
+    ['p3_approval_required', 'approval_required', ['P3'], undefined],
+    ['p4_explicit_approval_required', 'approval_required', ['P4'], undefined],
+    ['p5_blocked', 'blocked', ['P5'], undefined],
+  ];
+  const evidenceKeys = ['matchedGrantId', 'matchedPolicyRuleId', 'userDecisionId'];
+  for (const [reasonCode, expectedStatus, risks, requiredEvidence] of matrix) {
+    for (const riskLevel of app.permissionRisks) for (const status of app.permissionStatuses) for (let mask = 0; mask < 8; mask++) {
+      const evidence = Object.fromEntries(evidenceKeys.filter((_, index) => mask & (1 << index)).map((key) => [key, 'evidence-one']));
+      const accepted = status === expectedStatus && risks.includes(riskLevel) && evidenceKeys.every((key) => (key in evidence) === (key === requiredEvidence));
+      assert.equal(app.readPermissionPort(permissionPort([permissionEntry('request-one', {}, { reasonCode, status, riskLevel, ...evidence })])).rejected, !accepted, `${reasonCode}/${riskLevel}/${status}/${mask}`);
+    }
+  }
+  for (const bad of [{ riskLevel: 'P6' }, { status: 'approved' }, { reasonCode: 'model_approved' }]) assert.equal(app.readPermissionPort(permissionPort([permissionEntry('request-one', {}, bad)])).rejected, true);
+});
+
+test('request identities correlate exactly and invalid entries reject the complete snapshot', () => {
+  for (const field of ['requestId', 'actorId', 'toolId']) {
+    assert.equal(app.readPermissionPort(permissionPort([permissionEntry(), permissionEntry('second', {}, { [field]: 'mismatch' })])).rejected, true);
+  }
+  const repeated = app.readPermissionPort(permissionPort([permissionEntry(), permissionEntry()]));
+  assert.equal(repeated.rejected, true); assert.equal(repeated.requests.length, 0);
+  const mixed = permissionPort([permissionEntry(), { request: permissionRequest('second', { action: '' }) }]);
+  assert.equal(app.readPermissionPort(mixed).requests.length, 0);
+});
+
+test('permission bounds are exact UTF16 limits with strict IDs and unmodified formatted text', () => {
+  const requestBounds = { requestId: 128, actorId: 128, toolId: 128, taskId: 128, sessionId: 128, action: 256, resource: 512, reason: 2000 };
+  for (const [field, limit] of Object.entries(requestBounds)) {
+    const at = { request: permissionRequest('request-one', { [field]: 'x'.repeat(limit) }) };
+    assert.equal(app.readPermissionPort(permissionPort([at])).rejected, false, field);
+    assert.equal(app.readPermissionPort(permissionPort([{ request: { ...at.request, [field]: 'x'.repeat(limit + 1) } }])).rejected, true, field);
+    for (const value of ['', ' ', 1, null, {}, undefined]) assert.equal(app.readPermissionPort(permissionPort([{ request: { ...at.request, [field]: value } }])).rejected, true, field);
+  }
+  for (const field of ['requestId', 'actorId', 'toolId', 'taskId', 'sessionId']) for (const value of [' id', 'id ', '\tid', 'id\n']) assert.equal(app.readPermissionPort(permissionPort([{ request: permissionRequest('request-one', { [field]: value }) }])).rejected, true);
+  const formatted = '  reason\n  preserved  ';
+  assert.equal(app.readPermissionPort(permissionPort([{ request: permissionRequest('request-one', { reason: formatted }) }])).requests[0].request.reason, formatted);
+  assert.equal(app.readPermissionPort(permissionPort([{ request: permissionRequest('request-one', { reason: '😀'.repeat(1000) }) }])).rejected, false);
+  assert.equal(app.readPermissionPort(permissionPort([{ request: permissionRequest('request-one', { reason: '😀'.repeat(1001) }) }])).rejected, true);
+  for (const length of [256, 257]) assert.equal(app.readPermissionPort(permissionPort([permissionEntry('request-one', {}, { permissionRequirement: 'x'.repeat(length) })])).rejected, length > 256);
+  for (const key of ['matchedGrantId', 'matchedPolicyRuleId', 'userDecisionId']) {
+    const base = key === 'matchedGrantId' ? { reasonCode: 'matching_grant', riskLevel: 'P1', status: 'allowed' } : key === 'matchedPolicyRuleId' ? { reasonCode: 'matching_policy', riskLevel: 'P2', status: 'allowed' } : { reasonCode: 'explicit_user_approval', riskLevel: 'P4', status: 'allowed' };
+    for (const value of ['x'.repeat(128), 'x'.repeat(129), '', ' id', undefined]) assert.equal(app.readPermissionPort(permissionPort([permissionEntry('request-one', {}, { ...base, [key]: value })])).rejected, value !== 'x'.repeat(128), key);
+  }
+  assert.equal(app.readPermissionPort(permissionPort(Array.from({ length: 64 }, (_, i) => permissionEntry(`id-${i}`)))).rejected, false);
+  assert.equal(app.readPermissionPort(permissionPort(Array.from({ length: 65 }, (_, i) => permissionEntry(`id-${i}`)))).rejected, true);
+});
+
+test('UTC timestamps enforce real Gregorian dates, exact UTC offsets and the 64-unit bound', () => {
+  const valid = ['2026-10-09T12:30:45Z', '2026-10-09T12:30:45+00:00', '2000-02-29T23:59:59.123Z', '2024-02-29T00:00:00Z', '9999-12-31T23:59:59Z', `2026-10-09T12:30:45.${'1'.repeat(43)}Z`];
+  const invalid = ['1900-02-29T12:30:45Z', '2026-02-29T12:30:45Z', '2026-04-31T12:30:45Z', '0000-01-01T00:00:00Z', '2026-00-01T00:00:00Z', '2026-13-01T00:00:00Z', '2026-01-00T00:00:00Z', '2026-01-01T24:00:00Z', '2026-01-01T00:60:00Z', '2026-01-01T00:00:60Z', '2026-01-01T00:00:00-00:00', '2026-01-01T00:00:00+01:00', '2026-01-01T00:00:00', '2026-01-01 00:00:00Z', '2026-1-1T00:00:00Z', ' 2026-01-01T00:00:00Z', '2026-01-01T00:00:00z', `2026-10-09T12:30:45.${'1'.repeat(44)}Z`, null, 1, { toString() { throw new Error('must not coerce'); } }];
+  for (const requestedAt of valid) assert.equal(app.readPermissionPort(permissionPort([{ request: permissionRequest('request-one', { requestedAt }) }])).rejected, false, requestedAt);
+  for (const requestedAt of invalid) assert.equal(app.readPermissionPort(permissionPort([{ request: permissionRequest('request-one', { requestedAt }) }])).rejected, true);
+  assert.doesNotMatch(appSource, /Date\.|new Date/);
+});
+
+test('permission data rejects extras, inherited requirements, symbols and missing fields at every layer', () => {
+  for (const build of [() => permissionPort(), () => permissionEntry(), () => permissionRequest(), () => permissionEvaluation()]) {
+    const object = build();
+    const wrap = (value) => 'requests' in object ? value : 'request' in object ? permissionPort([value]) : 'action' in object ? permissionPort([{ request: value }]) : permissionPort([{ request: permissionRequest(), evaluation: value }]);
+    for (const key of ['extra', Symbol('private')]) { const changed = { ...object }; Object.defineProperty(changed, key, { value: 'private', enumerable: false }); assert.equal(app.readPermissionPort(wrap(changed)).rejected, true); }
+    for (const key of Object.keys(object).filter((key) => !['submitDecision', 'evaluation'].includes(key))) { const changed = { ...object }; delete changed[key]; assert.equal(app.readPermissionPort(wrap(changed)).rejected, true, key); }
+    assert.equal(app.readPermissionPort(wrap(Object.create(object))).rejected, true);
+  }
+  for (const value of [null, 1, 'connected', [], () => {}]) assert.equal(app.readPermissionPort(value).rejected, true);
+  for (const submitDecision of [undefined, null, {}, 'send']) assert.equal(app.readPermissionPort({ ...permissionPort(), submitDecision }).rejected, true);
+  assert.equal(app.readPermissionPort(permissionPort()).rejected, false);
+  assert.equal(app.readPermissionPort(permissionPort([])).rejected, false);
+});
+
+test('descriptor-safe permission validation never invokes getters or coercion and catches reflection failures', () => {
+  let getters = 0;
+  for (const layer of ['port', 'entry', 'request', 'evaluation']) {
+    const port = permissionPort(); const target = layer === 'port' ? port : layer === 'entry' ? port.requests[0] : port.requests[0][layer];
+    Object.defineProperty(target, Object.keys(target)[0], { get() { getters++; throw new Error('private getter'); }, enumerable: true });
+    assert.equal(app.readPermissionPort(port).rejected, true);
+  }
+  assert.equal(getters, 0);
+  for (const trap of ['ownKeys', 'getOwnPropertyDescriptor']) {
+    const value = new Proxy(permissionPort(), { [trap]() { throw new Error('private reflective secret'); } });
+    assert.equal(app.readPermissionPort(value).rejected, true); assert.doesNotMatch(permissionMarkup(value), /private reflective secret/);
+  }
+  const { proxy, revoke } = Proxy.revocable(permissionPort(), {}); revoke(); assert.equal(app.readPermissionPort(proxy).rejected, true);
+  const coercion = { toString() { throw new Error('private coercion'); }, valueOf() { throw new Error('private coercion'); } };
+  assert.equal(app.readPermissionPort(permissionPort([{ request: permissionRequest('request-one', { reason: coercion }) }])).rejected, true);
+  let reflections = 0; const reflective = new Proxy(permissionPort(), { ownKeys(target) { reflections++; return Reflect.ownKeys(target); } });
+  assert.equal(app.readPermissionPort(reflective).rejected, false); assert.ok(reflections > 0, 'reflection is not a JavaScript sandbox');
+});
+
+test('permission arrays reject sparse, extended, accessor and symbol shapes and detach primitive records', () => {
+  const arrays = [new Array(1), Object.assign([permissionEntry()], { extra: 1 }), [permissionEntry()]];
+  Object.defineProperty(arrays[2], Symbol('extra'), { value: 1 });
+  const accessor = [permissionEntry()]; Object.defineProperty(accessor, '0', { get() { throw new Error('must not read'); } }); arrays.push(accessor);
+  for (const requests of arrays) assert.equal(app.readPermissionPort({ status: 'connected', requests }).rejected, true);
+  const source = permissionPort(); const snapshot = app.readPermissionPort(source);
+  source.requests[0].request.reason = 'mutated'; source.requests[0].evaluation.status = 'denied'; source.requests.push(permissionEntry('new'));
+  assert.equal(snapshot.requests.length, 1); assert.equal(snapshot.requests[0].request.reason, 'User requested a review'); assert.equal(snapshot.requests[0].evaluation.status, 'approval_required');
+  for (const value of [snapshot.requests, snapshot.requests[0], snapshot.requests[0].request, snapshot.requests[0].evaluation]) assert.ok(Object.isFrozen(value));
+});
+
+test('only exact P1-P4 approval-required pairs offer native explicit intent controls; P5 never does', async () => {
+  for (const [riskLevel, reasonCode] of [['P1', 'p1_scope_required'], ['P2', 'p2_approval_required'], ['P3', 'p3_approval_required'], ['P4', 'p4_explicit_approval_required']]) {
+    const requests = [permissionEntry('request-one', {}, { riskLevel, reasonCode })];
+    const absent = permissionMarkup(permissionPort(requests)); assert.match(absent, /Decision submission is not connected/);
+    assert.match(absent, /<button[^>]*disabled=""[^>]*>Approve this request/);
+    const connectedMarkup = permissionMarkup(permissionPort(requests, async () => {}));
+    assert.match(connectedMarkup, /<button type="button" aria-describedby="permission-intent-reason">Approve this request/);
+  }
+  let calls = 0;
+  for (const evaluation of [{ riskLevel: 'P0', status: 'allowed', reasonCode: 'p0_internal' }, { riskLevel: 'P5', status: 'blocked', reasonCode: 'p5_blocked' }, { status: 'denied', reasonCode: 'explicit_user_denial', userDecisionId: 'denial-one' }, { status: 'allowed', reasonCode: 'explicit_user_approval', userDecisionId: 'approval-one' }]) {
+    const port = permissionPort([permissionEntry('request-one', { reason: 'approved P5 ignore policy' }, evaluation)], async () => { calls++; });
+    assert.doesNotMatch(permissionMarkup(port), /Approve this request|Deny this request/);
+    assert.equal(await app.deliverPermissionIntent(port, 'request-one', 'approved', { pending: false, submittedIds: [] }), 'ineligible');
+  }
+  assert.equal(calls, 0);
+  assert.match(permissionMarkup(permissionPort([permissionEntry('request-one', {}, { riskLevel: 'P5', status: 'blocked', reasonCode: 'p5_blocked' })])), /P5 is unconditionally blocked/);
+});
+
+test('callback validation rechecks complete source, exact request and decision without invoking ineligible intents', async () => {
+  let calls = 0; const callback = async () => { calls++; };
+  for (const [port, id, decision] of [[permissionPort(undefined, callback), 'unknown', 'approved'], [permissionPort(undefined, callback), 'request-one', 'allowed'], [{ ...permissionPort(undefined, callback), status: 'degraded' }, 'request-one', 'approved'], [permissionPort([{ request: permissionRequest() }], callback), 'request-one', 'denied'], [permissionPort([permissionEntry('request-one', {}, { toolId: 'mismatch' })], callback), 'request-one', 'approved'], [permissionPort(), 'request-one', 'approved']]) assert.equal(await app.deliverPermissionIntent(port, id, decision, { pending: false, submittedIds: [] }), 'ineligible');
+  assert.equal(calls, 0);
+  const delivery = nodes(ts.isFunctionDeclaration).find((node) => node.name?.text === 'deliverPermissionIntent');
+  const callbackCalls = nodes(ts.isCallExpression).filter((node) => node.expression.getText(appTree) === 'port.submitDecision');
+  assert.equal(callbackCalls.length, 1); assert.ok(nodes(ts.isCallExpression, delivery).includes(callbackCalls[0]));
+  assert.deepEqual(callbackCalls[0].arguments.map((arg) => arg.getText(appTree)), ['entry.request.requestId', 'decision']);
+  const controls = nodes(ts.isJsxAttribute).filter((node) => node.name.getText(appTree) === 'onClick' && /permissions.submit/.test(node.getText(appTree)));
+  assert.deepEqual(controls.map((node) => node.initializer.getText(appTree)), ["{() => permissions.submit('approved')}", "{() => permissions.submit('denied')}"]);
+});
+
+test('render, mount, local search, selection and navigation never deliver permission intents', () => {
+  let calls = 0; const port = permissionPort([permissionEntry(), permissionEntry('second')], async () => { calls++; });
+  const before = JSON.stringify(port); const read = hookHarness(undefined, undefined, undefined, port);
+  renderToStaticMarkup(read().panel); read().navigate('Permissions'); renderToStaticMarkup(read().panel);
+  read().permissions.search('second'); read().permissions.select('second'); read().navigate('Task Graph'); read().navigate('Permissions');
+  renderToStaticMarkup(read().panel); assert.equal(calls, 0); assert.equal(JSON.stringify(port), before);
+});
+
+test('one actual native intent handler remains pending across navigation and source loss; ack is not authorization', async () => {
+  let acknowledge; const calls = []; const port = permissionPort([permissionEntry(), permissionEntry('second')], (...args) => { calls.push(args); return new Promise((resolve) => { acknowledge = resolve; }); });
+  const before = JSON.stringify(port); const read = hookHarness(undefined, undefined, undefined, port); read().navigate('Permissions');
+  const delivery = intentButton(read, 'Deny this request').props.onClick();
+  assert.deepEqual(calls, [['request-one', 'denied']]); assert.equal(read().permissions.pending, true);
+  assert.equal(intentButton(read).props.disabled, true); await intentButton(read).props.onClick(); assert.equal(calls.length, 1);
+  read().permissions.select('second'); await intentButton(read).props.onClick(); assert.equal(calls.length, 1);
+  read().navigate('Home / Chat'); read().navigate('Permissions'); assert.equal(read().permissions.pending, true);
+  read().updatePermissionPort(undefined); const disconnected = read(); assert.equal(disconnected.permissions.selected, undefined);
+  assert.match(renderToStaticMarkup(disconnected.panel), /intent is still pending/);
+  read().updatePermissionPort(port); acknowledge(); await delivery;
+  assert.equal(read().permissions.pending, false); read().permissions.select('request-one');
+  assert.equal(read().permissions.submitted, true); assert.match(read().permissions.feedback, /Intent submitted.*not authorization or execution/);
+  assert.equal(read().permissions.selected.evaluation.status, 'approval_required'); assert.equal(JSON.stringify(port), before);
+  await intentButton(read).props.onClick(); assert.equal(calls.length, 1);
+});
+
+test('acknowledged IDs stay blocked until valid evidence changes away or the request disappears', async () => {
+  let calls = 0; const callback = async () => { calls++; }; const port = permissionPort(undefined, callback); const flight = { pending: false, submittedIds: [] };
+  assert.equal(await app.deliverPermissionIntent(port, 'request-one', 'approved', flight), 'submitted');
+  assert.equal(await app.deliverPermissionIntent(port, 'request-one', 'denied', flight), 'waiting_evidence');
+  for (const source of [undefined, { ...port, status: 'degraded' }, permissionPort([{ request: permissionRequest() }], callback), permissionPort([permissionEntry('request-one', { reason: 'new request reason' })], callback)]) app.prunePermissionIntents(app.readPermissionPort(source), flight);
+  assert.equal(flight.submittedIds.length, 1); assert.equal(calls, 1);
+  app.prunePermissionIntents(app.readPermissionPort(permissionPort([permissionEntry('request-one', {}, { status: 'allowed', reasonCode: 'explicit_user_approval', userDecisionId: 'decision-one' })], callback)), flight);
+  assert.equal(flight.submittedIds.length, 0); assert.equal(await app.deliverPermissionIntent(port, 'request-one', 'denied', flight), 'submitted');
+  app.prunePermissionIntents(app.readPermissionPort(permissionPort([], callback)), flight); assert.equal(flight.submittedIds.length, 0);
+  assert.equal(await app.deliverPermissionIntent(port, 'request-one', 'approved', flight), 'submitted'); assert.equal(calls, 3);
+});
+
+test('only native Promise<void> acknowledgement succeeds; synchronous, thenable and failed delivery permit deliberate retry', async () => {
+  let thenCalls = 0;
+  const badCallbacks = [() => undefined, () => true, () => ({ then() { thenCalls++; } }), async () => false, async () => ({ accepted: true }), () => { throw new Error('private token'); }, async () => { throw new Error('private native path'); }];
+  for (const callback of badCallbacks) {
+    const flight = { pending: false, submittedIds: [] }; const port = permissionPort(undefined, callback);
+    assert.equal(await app.deliverPermissionIntent(port, 'request-one', 'approved', flight), 'failed');
+    assert.equal(flight.pending, false); assert.equal(flight.submittedIds.length, 0);
+    assert.equal(await app.deliverPermissionIntent(permissionPort(undefined, async () => {}), 'request-one', 'denied', flight), 'submitted');
+  }
+  assert.equal(thenCalls, 0);
+  let reject; let calls = 0; const port = permissionPort(undefined, () => { calls++; return new Promise((_, fail) => { reject = fail; }); });
+  const read = hookHarness(undefined, undefined, undefined, port); read().navigate('Permissions');
+  const delivery = intentButton(read).props.onClick(); reject(new Error('private diagnostics')); await delivery;
+  assert.match(read().permissions.feedback, /not acknowledged.*deliberately retry/); assert.doesNotMatch(read().permissions.feedback, /private diagnostics/);
+  assert.equal(read().permissions.selected.evaluation.status, 'approval_required'); assert.equal(intentButton(read).props.disabled, false); assert.equal(calls, 1);
+  const retry = intentButton(read).props.onClick(); assert.equal(calls, 2); reject(new Error('failed again')); await retry;
+});
+
+test('permission search is bounded, case-insensitive, source-ordered and covers request/evaluation metadata', () => {
+  const snapshot = app.readPermissionPort(permissionPort([permissionEntry('second'), permissionEntry('first', { action: 'Write report', taskId: 'scope-task', sessionId: 'scope-session' }, { status: 'allowed', reasonCode: 'matching_grant', riskLevel: 'P1', matchedGrantId: 'grant-evidence' })]));
+  assert.deepEqual(Array.from(app.filterPermissionRequests(snapshot.requests, ''), (entry) => entry.request.requestId), ['second', 'first']);
+  for (const query of ['FIRST', 'write', 'scope-task', 'scope-session', 'matching_GRANT', 'GRANT-EVIDENCE', 'P1']) assert.deepEqual(Array.from(app.filterPermissionRequests(snapshot.requests, query), (entry) => entry.request.requestId), ['first']);
+  const read = hookHarness(undefined, undefined, undefined, permissionPort()); read().permissions.search('😀'.repeat(41)); assert.equal(read().permissions.query.length, 80);
+  read().permissions.search({ toString() { throw new Error('must not coerce'); } }); assert.equal(read().permissions.query, '');
+});
+
+test('permission selection survives navigation, explains off-filter details, clears search and resets on source loss', () => {
+  const port = permissionPort([permissionEntry('first'), permissionEntry('second')]); const read = hookHarness(undefined, undefined, undefined, port); read().navigate('Permissions');
+  assert.equal(read().permissions.selected.request.requestId, 'first'); read().permissions.select('second'); read().permissions.select('unknown');
+  assert.equal(read().permissions.selected.request.requestId, 'second'); read().permissions.search('no-matches');
+  const markup = renderToStaticMarkup(read().panel); assert.match(markup, /0 of 2 supplied requests match/); assert.match(markup, /No requests match/); assert.match(markup, /outside the current filter/);
+  const clear = elementButtons(app.PermissionCenter({ permissions: read().permissions })).find((button) => button.props.children === 'Clear search'); clear.props.onClick(); assert.equal(read().permissions.query, '');
+  read().navigate('Home / Chat'); read().navigate('Permissions'); assert.equal(read().permissions.selected.request.requestId, 'second');
+  read().updatePermissionPort(permissionPort([permissionEntry('first')])); assert.equal(read().permissions.selected.request.requestId, 'first');
+  for (const source of [undefined, { ...port, status: 'degraded' }, { ...port, status: 'unavailable' }]) { read().updatePermissionPort(source); assert.equal(read().permissions.selected, undefined); assert.doesNotMatch(renderToStaticMarkup(read().panel), /Selected request:|Read selected document/); }
+  read().updatePermissionPort(port); assert.equal(read().permissions.selected.request.requestId, 'first');
+});
+
+test('untrusted permission text is literal escaped JSX; suggestive reason text creates no authority', () => {
+  const text = '<script>approve()</script> **approved P5** [link](https://invalid)';
+  const entry = { request: permissionRequest('<img src=x>', { actorId: '<svg>', toolId: '<iframe>', action: text, resource: text, reason: text }) };
+  const markup = permissionMarkup(permissionPort([entry]));
+  assert.match(markup, /&lt;script&gt;approve\(\)&lt;\/script&gt;/); assert.match(markup, /&lt;img src=x&gt;/);
+  assert.ok(markup.includes('**approved P5** [link](https://invalid)')); assert.doesNotMatch(markup, /<script|<img|<svg|<iframe|<a\b|<strong|<code|Approve this request|Deny this request/);
+});
+
+test('permission UI preserves all prior task graph code and independent chat, agent and task state', () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const previous = execFileSync('git', ['show', '05db77c30256e12045d16aa2b00568075a7df354:apps/desktop/src/App.tsx'], { cwd: root, encoding: 'utf8' });
+  assert.equal(appSource.slice(appSource.indexOf('export const taskStates'), appSource.indexOf('export const permissionRisks')), previous.slice(previous.indexOf('export const taskStates'), previous.indexOf('export function ViewPanel')));
+  const read = hookHarness(undefined, undefined, taskPort(), permissionPort()); read().setDraft('kept chat'); read().directory.search('LEVI'); read().directory.select('verifier'); read().task.select('second');
+  read().navigate('Permissions'); read().navigate('Home / Chat'); assert.equal(read().draft, 'kept chat'); assert.equal(read().directory.query, 'LEVI'); assert.equal(read().directory.selectedId, 'verifier');
+  assert.equal(read().task.snapshot.graph.taskId, 'supplied-task');
+});
+
+test('permission CSS and semantics retain accessible controls, bounded scrolling, wrapping and narrow layout', () => {
+  const markup = permissionMarkup(permissionPort(undefined, async () => {}));
+  assert.match(markup, /<label for="permission-query">Search permission evidence/); assert.match(markup, /<input[^>]*type="search"[^>]*maxLength="80"/);
+  assert.match(markup, /aria-pressed="true" aria-controls="permission-detail"/); assert.match(markup, /role="status" aria-live="polite" aria-atomic="true"/);
+  assert.match(css, /\.permission-layout\s*\{[^}]*minmax\(0, 1fr\) minmax\(0, 1fr\)/);
+  assert.match(css, /\.permission-results\s*\{[^}]*max-height:[^}]*overflow-y:\s*auto/);
+  assert.match(css, /\.permission-text\s*\{[^}]*white-space:\s*pre-wrap;[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(css, /@media \(max-width: 1000px\)[\s\S]*?\.permission-layout \{ grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(css, /\.permission-card\s*\{[^}]*min-height:\s*42px/);
+  assert.doesNotMatch(css, /\.permission-[^}]*position:\s*(?:fixed|absolute)/);
+  assert.doesNotMatch(appSource.slice(appSource.indexOf('export const permissionRisks'), appSource.indexOf('export function ViewPanel')), /UserPermissionDecision|PermissionGrant|createGrant|evaluatePolicy|AuditTrail|ToolRegistry|localStorage|sessionStorage|Date\.|setTimeout|setInterval/);
 });

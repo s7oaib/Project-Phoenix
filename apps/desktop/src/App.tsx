@@ -596,12 +596,272 @@ export function TaskWorkspace({ task }: { task: TaskPresentation }) {
   );
 }
 
-export function ViewPanel({ view, chatPort, chat, agentPort, directory, task }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft; agentPort?: AgentPort; directory?: AgentDirectory; task?: TaskPresentation }) {
+export const permissionRisks = Object.freeze(['P0', 'P1', 'P2', 'P3', 'P4', 'P5'] as const);
+export const permissionStatuses = Object.freeze(['allowed', 'approval_required', 'denied', 'blocked'] as const);
+export const permissionEvidenceRules = Object.freeze([
+  { reasonCode: 'p0_internal', status: 'allowed', risks: ['P0'], evidence: undefined },
+  { reasonCode: 'explicit_user_approval', status: 'allowed', risks: ['P1', 'P2', 'P3', 'P4'], evidence: 'userDecisionId' },
+  { reasonCode: 'explicit_user_denial', status: 'denied', risks: ['P0', 'P1', 'P2', 'P3', 'P4'], evidence: 'userDecisionId' },
+  { reasonCode: 'matching_grant', status: 'allowed', risks: ['P1', 'P2', 'P3'], evidence: 'matchedGrantId' },
+  { reasonCode: 'matching_policy', status: 'allowed', risks: ['P2', 'P3'], evidence: 'matchedPolicyRuleId' },
+  { reasonCode: 'p1_scope_required', status: 'approval_required', risks: ['P1'], evidence: undefined },
+  { reasonCode: 'p2_approval_required', status: 'approval_required', risks: ['P2'], evidence: undefined },
+  { reasonCode: 'p3_approval_required', status: 'approval_required', risks: ['P3'], evidence: undefined },
+  { reasonCode: 'p4_explicit_approval_required', status: 'approval_required', risks: ['P4'], evidence: undefined },
+  { reasonCode: 'p5_blocked', status: 'blocked', risks: ['P5'], evidence: undefined },
+] as const);
+export type PermissionRequest = {
+  readonly requestId: string; readonly actorId: string; readonly toolId: string;
+  readonly action: string; readonly resource: string; readonly reason: string; readonly requestedAt: string;
+  readonly taskId?: string; readonly sessionId?: string;
+};
+export type PermissionEvaluation = {
+  readonly requestId: string; readonly actorId: string; readonly toolId: string;
+  readonly riskLevel: (typeof permissionRisks)[number]; readonly permissionRequirement: string;
+  readonly status: (typeof permissionStatuses)[number]; readonly reasonCode: (typeof permissionEvidenceRules)[number]['reasonCode'];
+  readonly matchedGrantId?: string; readonly matchedPolicyRuleId?: string; readonly userDecisionId?: string;
+};
+export type PermissionEntry = { readonly request: PermissionRequest; readonly evaluation?: PermissionEvaluation };
+export type DecisionIntent = 'approved' | 'denied';
+export type PermissionPort = {
+  readonly status: 'connected' | 'unavailable' | 'degraded'; readonly requests: readonly PermissionEntry[];
+  readonly submitDecision?: (requestId: string, decision: DecisionIntent) => Promise<void>;
+};
+export type PermissionFlight = { pending: boolean; submittedIds: string[] };
+export type IntentOutcome = 'submitted' | 'failed' | 'busy' | 'waiting_evidence' | 'ineligible';
+
+function permissionId(value: unknown): value is string {
+  return taskText(value, 128) && value === value.trim();
+}
+
+export function permissionUtc(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 64) return false;
+  const parts = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|\+00:00)$/);
+  if (!parts) return false;
+  const year = Number(parts[1]);
+  const month = Number(parts[2]);
+  const day = Number(parts[3]);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 0;
+  return year > 0 && month >= 1 && month <= 12 && day >= 1 && day <= days &&
+    Number(parts[4]) <= 23 && Number(parts[5]) <= 59 && Number(parts[6]) <= 59;
+}
+
+function readPermissionRequest(value: unknown): PermissionRequest | undefined {
+  const fields = agentDataFields(value, ['requestId', 'actorId', 'toolId', 'action', 'resource', 'reason', 'requestedAt'], ['taskId', 'sessionId']);
+  if (!fields || !permissionId(fields.requestId) || !permissionId(fields.actorId) || !permissionId(fields.toolId) ||
+      !taskText(fields.action, 256) || !taskText(fields.resource, 512) || !taskText(fields.reason, 2000) || !permissionUtc(fields.requestedAt)) return undefined;
+  for (const key of ['taskId', 'sessionId']) if (key in fields && !permissionId(fields[key])) return undefined;
+  // Shape/primitive validation above precedes this narrow copy-only type assertion.
+  return Object.freeze({ ...fields }) as PermissionRequest;
+}
+
+function readPermissionEvaluation(value: unknown, request: PermissionRequest): PermissionEvaluation | undefined {
+  const fields = agentDataFields(value, ['requestId', 'actorId', 'toolId', 'riskLevel', 'permissionRequirement', 'status', 'reasonCode'], ['matchedGrantId', 'matchedPolicyRuleId', 'userDecisionId']);
+  if (!fields || fields.requestId !== request.requestId || fields.actorId !== request.actorId || fields.toolId !== request.toolId ||
+      !taskText(fields.permissionRequirement, 256)) return undefined;
+  // Mirror only PHX-041's output-shape consistency. No policy or grant evaluation.
+  const rule = permissionEvidenceRules.find((item) => item.reasonCode === fields.reasonCode);
+  if (!rule || fields.status !== rule.status || !rule.risks.some((risk) => risk === fields.riskLevel)) return undefined;
+  for (const key of ['matchedGrantId', 'matchedPolicyRuleId', 'userDecisionId']) {
+    if ((key in fields) !== (key === rule.evidence) || (key in fields && !permissionId(fields[key]))) return undefined;
+  }
+  return Object.freeze({ ...fields }) as PermissionEvaluation;
+}
+
+export function readPermissionPort(value: unknown) {
+  const unavailable = { status: 'unavailable' as PermissionPort['status'], requests: [] as readonly PermissionEntry[], submitDecision: undefined as PermissionPort['submitDecision'], rejected: value !== undefined };
+  try {
+    const fields = agentDataFields(value, ['status', 'requests'], ['submitDecision']);
+    if (!fields || (fields.status !== 'connected' && fields.status !== 'unavailable' && fields.status !== 'degraded') ||
+        ('submitDecision' in fields && typeof fields.submitDecision !== 'function')) return unavailable;
+    const entries = taskArray(fields.requests, 64);
+    if (!entries) return unavailable;
+    const requests: PermissionEntry[] = [];
+    for (const entry of entries) {
+      const record = agentDataFields(entry, ['request'], ['evaluation']);
+      const request = readPermissionRequest(record?.request);
+      if (!record || !request || requests.some((item) => item.request.requestId === request.requestId)) return unavailable;
+      const evaluation = 'evaluation' in record ? readPermissionEvaluation(record.evaluation, request) : undefined;
+      if ('evaluation' in record && !evaluation) return unavailable;
+      requests.push(Object.freeze({ request, ...(evaluation ? { evaluation } : {}) }));
+    }
+    if (fields.status !== 'connected') return { ...unavailable, status: fields.status, rejected: false };
+    return { status: fields.status, requests: Object.freeze(requests),
+      submitDecision: fields.submitDecision as PermissionPort['submitDecision'], rejected: false };
+  } catch {
+    return unavailable;
+  }
+}
+
+export function permissionNeedsIntent(entry: PermissionEntry | undefined): boolean {
+  const evaluation = entry?.evaluation;
+  return evaluation?.status === 'approval_required' && evaluation.riskLevel !== 'P0' && evaluation.riskLevel !== 'P5';
+}
+
+export function prunePermissionIntents(snapshot: ReturnType<typeof readPermissionPort>, flight: PermissionFlight) {
+  if (snapshot.status !== 'connected' || snapshot.rejected) return;
+  flight.submittedIds = flight.submittedIds.filter((id) => {
+    const entry = snapshot.requests.find((item) => item.request.requestId === id);
+    return entry !== undefined && (!entry.evaluation || entry.evaluation.status === 'approval_required');
+  });
+}
+
+export async function deliverPermissionIntent(value: unknown, requestId: unknown, decision: unknown, flight: PermissionFlight): Promise<IntentOutcome> {
+  if (flight.pending) return 'busy';
+  const port = readPermissionPort(value);
+  prunePermissionIntents(port, flight);
+  const entry = port.requests.find((item) => item.request.requestId === requestId);
+  if (port.status !== 'connected' || !port.submitDecision || !entry || !permissionNeedsIntent(entry) ||
+      (decision !== 'approved' && decision !== 'denied')) return 'ineligible';
+  if (flight.submittedIds.includes(entry.request.requestId)) return 'waiting_evidence';
+  flight.pending = true;
+  try {
+    const acknowledgement = port.submitDecision(entry.request.requestId, decision);
+    if (!(acknowledgement instanceof Promise) || await acknowledgement !== undefined) return 'failed';
+    flight.submittedIds.push(entry.request.requestId);
+    return 'submitted';
+  } catch {
+    return 'failed';
+  } finally {
+    flight.pending = false;
+  }
+}
+
+export function filterPermissionRequests(entries: readonly PermissionEntry[], value: unknown) {
+  const query = boundedAgentQuery(value).toLowerCase();
+  return entries.filter(({ request, evaluation }) => {
+    const text = [request.requestId, request.actorId, request.toolId, request.action, request.resource, request.reason,
+      request.requestedAt, request.taskId, request.sessionId, evaluation?.riskLevel, evaluation?.status, evaluation?.reasonCode,
+      evaluation?.permissionRequirement, evaluation?.matchedGrantId, evaluation?.matchedPolicyRuleId, evaluation?.userDecisionId];
+    return text.some((field) => typeof field === 'string' && field.toLowerCase().includes(query));
+  });
+}
+
+function usePermissionCenter(permissionPort: PermissionPort | undefined) {
+  const snapshot = readPermissionPort(permissionPort);
+  const [query, setPermissionQuery] = useState('');
+  const [selectedId, setSelectedPermissionId] = useState<string | undefined>(undefined);
+  const [pending, setPermissionPending] = useState(false);
+  const [feedback, setPermissionFeedback] = useState('');
+  const [feedbackId, setPermissionFeedbackId] = useState<string | undefined>(undefined);
+  const flight = useRef<PermissionFlight>({ pending: false, submittedIds: [] });
+  prunePermissionIntents(snapshot, flight.current);
+  const selected = snapshot.requests.find((entry) => entry.request.requestId === selectedId) ?? snapshot.requests[0];
+  if (selectedId !== selected?.request.requestId) setSelectedPermissionId(selected?.request.requestId);
+  function search(value: unknown) { setPermissionQuery(boundedAgentQuery(value)); }
+  function select(value: unknown) {
+    const entry = snapshot.requests.find((item) => item.request.requestId === value);
+    if (entry) setSelectedPermissionId(entry.request.requestId);
+  }
+  async function submit(decision: DecisionIntent) {
+    if (flight.current.pending) return;
+    const requestId = selected?.request.requestId;
+    const delivery = deliverPermissionIntent(permissionPort, requestId, decision, flight.current);
+    setPermissionFeedbackId(requestId);
+    if (flight.current.pending) {
+      setPermissionPending(true);
+      setPermissionFeedback('Waiting for adapter acknowledgement. Duplicate intents are blocked; delivery cannot be cancelled here.');
+    }
+    const outcome = await delivery;
+    setPermissionPending(false);
+    setPermissionFeedback(outcome === 'submitted' ? 'Intent submitted to the adapter; waiting for updated permission evidence. This is not authorization or execution.' :
+      outcome === 'failed' ? 'Intent delivery was not acknowledged. Request evidence is unchanged; you may deliberately retry.' :
+      outcome === 'waiting_evidence' ? 'Intent already submitted; waiting for updated permission evidence.' : 'Decision submission is unavailable for this request.');
+  }
+  return { snapshot, query, selected, search, select, submit, pending,
+    submitted: selected !== undefined && flight.current.submittedIds.includes(selected.request.requestId),
+    feedback: feedbackId === selected?.request.requestId ? feedback : '' };
+}
+type PermissionPresentation = ReturnType<typeof usePermissionCenter>;
+
+export function PermissionCenter({ permissions }: { permissions: PermissionPresentation }) {
+  const { snapshot, selected } = permissions;
+  const matches = filterPermissionRequests(snapshot.requests, permissions.query);
+  const request = selected?.request;
+  const evaluation = selected?.evaluation;
+  const reviewable = permissionNeedsIntent(selected);
+  const reason = permissions.pending ? 'One intent is pending. Duplicate decisions are blocked until the adapter settles.' :
+    permissions.submitted ? 'Intent submitted; waiting for updated permission evidence.' :
+    !snapshot.submitDecision ? 'Decision submission is not connected. A trusted adapter is required.' :
+    'These buttons deliver only this request-specific human intent. PermissionEngine remains authoritative.';
+  return (
+    <section className="permission-center" aria-labelledby="permission-heading">
+      <header className="permission-header">
+        <p className="eyebrow">Human intent · supplied evidence</p>
+        <h3 id="permission-heading">Permission Center</h3>
+        <p>Review requests. PermissionEngine is the sole authorization authority; this interface creates no grants and executes no tools.</p>
+        <p>{snapshot.status === 'connected' ? 'Caller-supplied evidence. Live permission transport is not implemented.' :
+          snapshot.status === 'degraded' ? 'Permission source degraded. Supplied requests are hidden.' : 'No permission source connected.'}</p>
+        {snapshot.rejected && <p>Permission snapshot rejected because it is malformed or exceeds display limits.</p>}
+      </header>
+      <div className="permission-search">
+        <label htmlFor="permission-query">Search permission evidence</label>
+        <p id="permission-search-help">Local text search only, up to 80 characters.</p>
+        <div className="permission-search-controls">
+          <input id="permission-query" type="search" maxLength={80} value={permissions.query} aria-describedby="permission-search-help permission-match-count"
+            onChange={(event) => permissions.search(event.currentTarget.value)} />
+          <button type="button" onClick={() => permissions.search('')}>Clear search</button>
+        </div>
+        <p id="permission-match-count" role="status" aria-live="polite" aria-atomic="true">{matches.length} of {snapshot.requests.length} supplied requests match</p>
+      </div>
+      <div className="permission-layout">
+        <section className="permission-results" aria-label="Matching permission requests">
+          {snapshot.requests.length === 0 ? <p>No permission requests supplied.</p> : matches.length === 0 ? <p>No requests match. Clear search to restore supplied requests.</p> :
+            <ul className="permission-list">{matches.map((entry) => <li key={entry.request.requestId}>
+              <button className="permission-card" type="button" aria-pressed={request?.requestId === entry.request.requestId} aria-controls="permission-detail"
+                onClick={() => permissions.select(entry.request.requestId)}>
+                <span className="permission-id">{entry.request.requestId}</span><span>{entry.request.action}</span>
+                <span>{entry.evaluation ? `Supplied evaluation: ${entry.evaluation.riskLevel} · ${entry.evaluation.status}` : 'Evaluation not reported'}</span>
+              </button>
+            </li>)}</ul>}
+        </section>
+        <section className="permission-detail" id="permission-detail" aria-labelledby="permission-detail-heading">
+          <h4 id="permission-detail-heading">Selected request evidence</h4>
+          {!request ? <p>No admitted request selected.</p> : <>
+            <p role="status" aria-live="polite" aria-atomic="true">Selected request: {request.requestId}{!matches.some((entry) => entry.request.requestId === request.requestId) ? ' — outside the current filter. Clear search to show its selection button.' : ''}</p>
+            <dl>
+              <dt>Request ID</dt><dd>{request.requestId}</dd><dt>Actor / agent ID</dt><dd>{request.actorId}</dd>
+              <dt>Tool ID</dt><dd>{request.toolId}</dd><dt>Requested action</dt><dd className="permission-text">{request.action}</dd>
+              <dt>Resource / scope</dt><dd className="permission-text">{request.resource}</dd><dt>Reason (untrusted text)</dt><dd className="permission-text">{request.reason}</dd>
+              <dt>Requested at (supplied UTC)</dt><dd>{request.requestedAt}</dd>
+              {request.taskId !== undefined && <><dt>Task scope ID</dt><dd>{request.taskId}</dd></>}
+              {request.sessionId !== undefined && <><dt>Session scope ID</dt><dd>{request.sessionId}</dd></>}
+            </dl>
+            <h5>Caller-supplied evaluation</h5>
+            {!evaluation ? <p>Evaluation not reported. Risk, status and decision actions are not inferred.</p> : <>
+              <dl><dt>Risk level</dt><dd>{evaluation.riskLevel}</dd><dt>Permission requirement</dt><dd className="permission-text">{evaluation.permissionRequirement}</dd>
+                <dt>Supplied status</dt><dd>{evaluation.status}</dd><dt>Reason code</dt><dd>{evaluation.reasonCode}</dd>
+                {evaluation.matchedGrantId !== undefined && <><dt>Matched grant evidence ID</dt><dd>{evaluation.matchedGrantId}</dd></>}
+                {evaluation.matchedPolicyRuleId !== undefined && <><dt>Matched policy evidence ID</dt><dd>{evaluation.matchedPolicyRuleId}</dd></>}
+                {evaluation.userDecisionId !== undefined && <><dt>User decision evidence ID</dt><dd>{evaluation.userDecisionId}</dd></>}
+              </dl>
+              <p>Supplied evaluation is not proof of live transport, audit persistence, tool execution or success.</p>
+              {evaluation.riskLevel === 'P5' && <p>P5 is unconditionally blocked. No decision intent is available.</p>}
+            </>}
+            {reviewable && <div className="permission-intent">
+              <p id="permission-intent-reason">{reason}</p>
+              <div className="permission-actions" aria-busy={permissions.pending}>
+                <button type="button" disabled={!snapshot.submitDecision || permissions.pending || permissions.submitted} aria-describedby="permission-intent-reason" onClick={() => permissions.submit('approved')}>Approve this request</button>
+                <button type="button" disabled={!snapshot.submitDecision || permissions.pending || permissions.submitted} aria-describedby="permission-intent-reason" onClick={() => permissions.submit('denied')}>Deny this request</button>
+              </div>
+            </div>}
+            <p role="status" aria-live="polite" aria-atomic="true">{permissions.feedback}</p>
+          </>}
+          {permissions.pending && <p role="status">A decision intent is still pending. It cannot be cancelled or duplicated here.</p>}
+        </section>
+      </div>
+    </section>
+  );
+}
+
+export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, permissions }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft; agentPort?: AgentPort; directory?: AgentDirectory; task?: TaskPresentation; permissions?: PermissionPresentation }) {
   if (view.id === 'home') {
     return chat ? <ChatWorkspace chatPort={chatPort} chat={chat} /> : null;
   }
   if (view.id === 'agents') return directory ? <AgentNetwork agentPort={agentPort} directory={directory} /> : null;
   if (view.id === 'tasks') return task ? <TaskWorkspace task={task} /> : null;
+  if (view.id === 'permissions') return permissions ? <PermissionCenter permissions={permissions} /> : null;
   return (
     <section className="placeholder-panel" aria-labelledby="workspace-heading">
       <p className="eyebrow">Workspace preview</p>
@@ -615,7 +875,7 @@ export function ViewPanel({ view, chatPort, chat, agentPort, directory, task }: 
   );
 }
 
-export default function App({ chatPort, agentPort, taskPort }: { chatPort?: ChatPort; agentPort?: AgentPort; taskPort?: TaskGraphPort } = {}) {
+export default function App({ chatPort, agentPort, taskPort, permissionPort }: { chatPort?: ChatPort; agentPort?: AgentPort; taskPort?: TaskGraphPort; permissionPort?: PermissionPort } = {}) {
   const [selectedView, setSelectedView] = useState<ViewId>('home');
   const mainRef = useRef<HTMLElement>(null);
   const focusRequested = useRef(false);
@@ -624,6 +884,7 @@ export default function App({ chatPort, agentPort, taskPort }: { chatPort?: Chat
   const chat = useChatDraft(chatPort);
   const directory = useAgentDirectory();
   const task = useTaskGraph(taskPort);
+  const permissions = usePermissionCenter(permissionPort);
 
   useEffect(() => {
     if (focusRequested.current) {
@@ -678,7 +939,7 @@ export default function App({ chatPort, agentPort, taskPort }: { chatPort?: Chat
           <h2 id="page-title">{currentView.label}</h2>
           <p className="page-purpose">{currentView.purpose}</p>
         </header>
-        <div className="page-content"><ViewPanel view={currentView} chatPort={chatPort} chat={chat} agentPort={agentPort} directory={directory} task={task} /></div>
+        <div className="page-content"><ViewPanel view={currentView} chatPort={chatPort} chat={chat} agentPort={agentPort} directory={directory} task={task} permissions={permissions} /></div>
       </main>
     </div>
   );

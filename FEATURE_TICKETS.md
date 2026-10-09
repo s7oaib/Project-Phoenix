@@ -80,12 +80,12 @@ Phase 7 status: COMPLETE.
 - PHX-081 Chat/voice UI — DONE
 - PHX-082 Agent network — DONE
 - PHX-083 Task graph — DONE
-- PHX-084 Permission center — TODO
+- PHX-084 Permission center — DONE
 - PHX-085 Memory/files workspace — TODO
 - PHX-086 Models/voice/settings — TODO
 - PHX-087 Observability/developer view — TODO
 
-Phase 8 status: INCOMPLETE — PHX-084 through PHX-087 remain TODO.
+Phase 8 status: INCOMPLETE — PHX-085 through PHX-087 remain TODO.
 
 ## Phase 9 — Validation & Release
 - PHX-090 Automated test matrix — TODO
