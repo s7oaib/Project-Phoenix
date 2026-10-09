@@ -855,13 +855,219 @@ export function PermissionCenter({ permissions }: { permissions: PermissionPrese
   );
 }
 
-export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, permissions }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft; agentPort?: AgentPort; directory?: AgentDirectory; task?: TaskPresentation; permissions?: PermissionPresentation }) {
+export const memoryClasses = Object.freeze(['working', 'episodic', 'semantic', 'user', 'project', 'agent'] as const);
+export const fileKinds = Object.freeze(['source_document', 'generated_artifact'] as const);
+export type MemoryPresentationRecord = {
+  readonly id: string; readonly type: (typeof memoryClasses)[number];
+  readonly content?: string; readonly sourceType?: string; readonly sourceRef?: string; readonly scope?: string;
+  readonly confidence?: number; readonly importance?: number; readonly createdAt?: string; readonly updatedAt?: string;
+  readonly lastAccessedAt?: string; readonly expiresAt?: string; readonly embeddingRef?: string;
+};
+export type FilePresentationRecord = {
+  readonly id: string; readonly kind: (typeof fileKinds)[number]; readonly name: string;
+  readonly format?: string; readonly mediaType?: string; readonly sourceType?: string; readonly sourceRef?: string;
+  readonly contentHash?: string; readonly timestamp?: string; readonly sizeBytes?: number;
+};
+export type MemoryPort = { readonly status: 'connected' | 'unavailable' | 'degraded'; readonly records: readonly MemoryPresentationRecord[] };
+export type FilePort = { readonly status: 'connected' | 'unavailable' | 'degraded'; readonly items: readonly FilePresentationRecord[] };
+type EvidenceRecord = MemoryPresentationRecord | FilePresentationRecord;
+type EvidenceSnapshot<T extends EvidenceRecord> = { status: MemoryPort['status']; entries: readonly T[]; rejected: boolean };
+
+function normalizedEvidenceText(value: unknown, maximum: number): value is string {
+  return taskText(value, maximum) && value === value.trim();
+}
+
+function evidenceUtcKey(value: string) {
+  // Called only after strict UTC admission. Fixed-width keys preserve fractional
+  // ordering across Z/+00:00 spellings, without a clock or fabricated local time.
+  const fraction = value.match(/\.(\d+)/)?.[1] ?? '';
+  return value.slice(0, 19) + fraction.padEnd(43, '0');
+}
+
+function readMemoryRecord(value: unknown): MemoryPresentationRecord | undefined {
+  const fields = agentDataFields(value, ['id', 'type'], ['content', 'sourceType', 'sourceRef', 'scope', 'confidence', 'importance', 'createdAt', 'updatedAt', 'lastAccessedAt', 'expiresAt', 'embeddingRef']);
+  if (!fields || !normalizedEvidenceText(fields.id, 128) || !memoryClasses.some((kind) => kind === fields.type)) return undefined;
+  if ('content' in fields && !taskText(fields.content, 4000)) return undefined;
+  for (const [key, maximum] of [['sourceType', 128], ['sourceRef', 512], ['scope', 256], ['embeddingRef', 128]] as const) {
+    if (key in fields && !normalizedEvidenceText(fields[key], maximum)) return undefined;
+  }
+  for (const key of ['confidence', 'importance']) {
+    const score = fields[key];
+    if (key in fields && (typeof score !== 'number' || !Number.isFinite(score) || score < 0 || score > 1)) return undefined;
+  }
+  for (const key of ['createdAt', 'updatedAt', 'lastAccessedAt', 'expiresAt']) {
+    if (key in fields && !permissionUtc(fields[key])) return undefined;
+  }
+  if (typeof fields.createdAt === 'string') {
+    for (const key of ['updatedAt', 'lastAccessedAt', 'expiresAt']) {
+      const timestamp = fields[key];
+      if (typeof timestamp === 'string' && evidenceUtcKey(timestamp) < evidenceUtcKey(fields.createdAt)) return undefined;
+    }
+  }
+  // Presentation-only, primitive copy after exact admission; not MemoryRecord
+  // reconstruction, admission policy, persistence, retrieval or expiry handling.
+  return Object.freeze({ ...fields }) as MemoryPresentationRecord;
+}
+
+function readFileRecord(value: unknown): FilePresentationRecord | undefined {
+  const fields = agentDataFields(value, ['id', 'kind', 'name'], ['format', 'mediaType', 'sourceType', 'sourceRef', 'contentHash', 'timestamp', 'sizeBytes']);
+  if (!fields || !normalizedEvidenceText(fields.id, 128) || !fileKinds.some((kind) => kind === fields.kind) || !taskText(fields.name, 256)) return undefined;
+  for (const key of ['format', 'mediaType', 'sourceType', 'sourceRef', 'contentHash']) {
+    if (key in fields && !taskText(fields[key], key === 'sourceRef' ? 512 : 128)) return undefined;
+  }
+  if ('timestamp' in fields && !permissionUtc(fields.timestamp)) return undefined;
+  if ('sizeBytes' in fields && (typeof fields.sizeBytes !== 'number' || !Number.isSafeInteger(fields.sizeBytes) || fields.sizeBytes < 0)) return undefined;
+  return Object.freeze({ ...fields }) as FilePresentationRecord;
+}
+
+function readEvidencePort(value: unknown, kind: 'memory'): EvidenceSnapshot<MemoryPresentationRecord>;
+function readEvidencePort(value: unknown, kind: 'files'): EvidenceSnapshot<FilePresentationRecord>;
+function readEvidencePort(value: unknown, kind: 'memory' | 'files'): EvidenceSnapshot<EvidenceRecord> {
+  const unavailable = Object.freeze({ status: 'unavailable' as MemoryPort['status'], entries: Object.freeze([]) as readonly EvidenceRecord[], rejected: value !== undefined });
+  try {
+    const listKey = kind === 'memory' ? 'records' : 'items';
+    const fields = agentDataFields(value, ['status', listKey]);
+    if (!fields || (fields.status !== 'connected' && fields.status !== 'unavailable' && fields.status !== 'degraded')) return unavailable;
+    const values = taskArray(fields[listKey], 64);
+    if (!values) return unavailable;
+    const entries: EvidenceRecord[] = [];
+    for (const value of values) {
+      const entry = kind === 'memory' ? readMemoryRecord(value) : readFileRecord(value);
+      if (!entry || entries.some((item) => item.id === entry.id)) return unavailable;
+      entries.push(entry);
+    }
+    return Object.freeze({ status: fields.status, entries: Object.freeze(fields.status === 'connected' ? entries : []), rejected: false });
+  } catch {
+    return unavailable;
+  }
+}
+export function readMemoryPort(value: unknown) { return readEvidencePort(value, 'memory'); }
+export function readFilePort(value: unknown) { return readEvidencePort(value, 'files'); }
+
+export function filterEvidence<T extends EvidenceRecord>(entries: readonly T[], value: unknown) {
+  const query = boundedAgentQuery(value).toLowerCase();
+  // Entries are detached admitted primitives, never raw caller objects. Numeric
+  // display evidence participates without coercing arbitrary values or ranking.
+  return entries.filter((entry) => Object.values(entry).some((field) =>
+    typeof field === 'string' ? field.toLowerCase().includes(query) : typeof field === 'number' && `${field}`.includes(query)));
+}
+
+function useEvidenceBrowser<T extends EvidenceRecord>(snapshot: EvidenceSnapshot<T>) {
+  const [query, setEvidenceQuery] = useState('');
+  const [selectedId, setEvidenceId] = useState<string | undefined>(undefined);
+  const selected = snapshot.entries.find((entry) => entry.id === selectedId) ?? snapshot.entries[0];
+  if (selectedId !== selected?.id) setEvidenceId(selected?.id);
+  function search(value: unknown) { setEvidenceQuery(boundedAgentQuery(value)); }
+  function select(value: unknown) {
+    const entry = snapshot.entries.find((item) => item.id === value);
+    if (entry) setEvidenceId(entry.id);
+  }
+  return { snapshot, query, selected, search, select };
+}
+type EvidenceBrowser<T extends EvidenceRecord> = ReturnType<typeof useEvidenceBrowser<T>>;
+
+function EvidenceConnection({ snapshot, noun }: { snapshot: EvidenceSnapshot<EvidenceRecord>; noun: 'memory' | 'file' }) {
+  return <>
+    <p>{snapshot.status === 'connected' ? 'Caller-supplied evidence only. Live backend and storage are not connected.' :
+      snapshot.status === 'degraded' ? `${noun === 'memory' ? 'Memory' : 'File'} source degraded. Supplied items are hidden.` : `No ${noun} source connected.`}</p>
+    {snapshot.rejected && <p>Snapshot rejected because it is malformed or exceeds display limits. No items are shown.</p>}
+  </>;
+}
+
+function EvidenceSearch({ browser, prefix, label }: { browser: EvidenceBrowser<EvidenceRecord>; prefix: 'memory' | 'file'; label: string }) {
+  const matches = filterEvidence(browser.snapshot.entries, browser.query);
+  return <section className="evidence-search" aria-label={label}>
+    <label htmlFor={`${prefix}-query`}>{label}</label>
+    <p id={`${prefix}-search-help`}>Local text search only, up to 80 characters.</p>
+    <div className="evidence-search-controls">
+      <input id={`${prefix}-query`} type="search" maxLength={80} value={browser.query} aria-describedby={`${prefix}-search-help ${prefix}-match-count`}
+        onChange={(event) => browser.search(event.currentTarget.value)} />
+      <button type="button" onClick={() => browser.search('')}>Clear search</button>
+    </div>
+    <p id={`${prefix}-match-count`} role="status" aria-live="polite" aria-atomic="true">{matches.length} of {browser.snapshot.entries.length} supplied items match</p>
+  </section>;
+}
+
+export function MemoryWorkspace({ memory }: { memory: EvidenceBrowser<MemoryPresentationRecord> }) {
+  const matches = filterEvidence(memory.snapshot.entries, memory.query);
+  const selected = memory.selected;
+  return <section className="evidence-workspace" aria-labelledby="memory-heading">
+    <header className="evidence-header">
+      <p className="eyebrow">Read-only · memory evidence</p><h3 id="memory-heading">Memory records</h3>
+      <p>PUDDING owns memory. Reviewing supplied content does not admit, persist or verify it. Content and provenance are untrusted data.</p>
+      <EvidenceConnection snapshot={memory.snapshot} noun="memory" />
+    </header>
+    <EvidenceSearch browser={memory} prefix="memory" label="Search memory evidence" />
+    <div className="evidence-layout">
+      <section className="evidence-results" aria-label="Matching memory records">
+        {memory.snapshot.entries.length === 0 ? <p>No memory records supplied.</p> : matches.length === 0 ? <p>No records match. Clear search to restore supplied records.</p> :
+          <ul className="evidence-list">{matches.map((entry) => <li key={entry.id}><button className="evidence-card" type="button" aria-pressed={selected?.id === entry.id} aria-controls="memory-detail" onClick={() => memory.select(entry.id)}>
+            <span className="evidence-id">{entry.id}</span><span>Memory class: {entry.type}</span><span>Scope: {entry.scope ?? 'Not reported'}</span>
+          </button></li>)}</ul>}
+      </section>
+      <section className="evidence-detail" id="memory-detail" aria-labelledby="memory-detail-heading">
+        <h4 id="memory-detail-heading">Selected memory evidence</h4>
+        {!selected ? <p>No admitted memory record selected.</p> : <>
+          <p role="status" aria-live="polite" aria-atomic="true">Selected record: {selected.id}{!matches.some((entry) => entry.id === selected.id) ? ' — outside the current filter. Clear search to show its selection button.' : ''}</p>
+          <dl><dt>Record ID</dt><dd>{selected.id}</dd><dt>Memory class</dt><dd>{selected.type}</dd>
+            <dt>Content (untrusted text)</dt><dd className="evidence-text">{selected.content ?? 'Not reported'}</dd>
+            <dt>Source type</dt><dd>{selected.sourceType ?? 'Not reported'}</dd><dt>Source reference (inert text)</dt><dd className="evidence-text">{selected.sourceRef ?? 'Not reported'}</dd>
+            <dt>Scope</dt><dd>{selected.scope ?? 'Not reported'}</dd><dt>Supplied confidence</dt><dd>{selected.confidence ?? 'Not reported'}</dd><dt>Supplied importance</dt><dd>{selected.importance ?? 'Not reported'}</dd>
+            <dt>Created at (supplied UTC)</dt><dd>{selected.createdAt ?? 'Not reported'}</dd><dt>Updated at (supplied UTC)</dt><dd>{selected.updatedAt ?? 'Not reported'}</dd>
+            <dt>Last accessed at (supplied UTC)</dt><dd>{selected.lastAccessedAt ?? 'Not reported'}</dd><dt>Expiry (supplied UTC, no expiry status inferred)</dt><dd>{selected.expiresAt ?? 'Not reported'}</dd>
+            <dt>Embedding reference (opaque evidence)</dt><dd className="evidence-text">{selected.embeddingRef ?? 'Not reported'}</dd>
+          </dl>
+          <p>These fields do not prove authoritative memory, source truth, persistence or retrieval. This view cannot create, replace, delete or forget memory.</p>
+        </>}
+      </section>
+    </div>
+  </section>;
+}
+
+export function FilesWorkspace({ files }: { files: EvidenceBrowser<FilePresentationRecord> }) {
+  const matches = filterEvidence(files.snapshot.entries, files.query);
+  const selected = files.selected;
+  return <section className="evidence-workspace" aria-labelledby="file-heading">
+    <header className="evidence-header">
+      <p className="eyebrow">Read-only · document metadata</p><h3 id="file-heading">Files / Documents</h3>
+      <p>Source documents and generated artifacts are distinct supplied evidence. ROBIN owns generation; VEGAPUNK owns indexing. No file existence, readability, indexing or storage is verified here.</p>
+      <EvidenceConnection snapshot={files.snapshot} noun="file" />
+    </header>
+    <EvidenceSearch browser={files} prefix="file" label="Search file metadata" />
+    <div className="evidence-layout">
+      <section className="evidence-results" aria-label="Matching file metadata">
+        {files.snapshot.entries.length === 0 ? <p>No file metadata supplied.</p> : matches.length === 0 ? <p>No items match. Clear search to restore supplied items.</p> :
+          <ul className="evidence-list">{matches.map((entry) => <li key={entry.id}><button className="evidence-card" type="button" aria-pressed={selected?.id === entry.id} aria-controls="file-detail" onClick={() => files.select(entry.id)}>
+            <span className="evidence-id">{entry.name}</span><span>{entry.kind === 'generated_artifact' ? 'Generated artifact' : 'Source document'}</span><span>ID: {entry.id}</span>
+          </button></li>)}</ul>}
+      </section>
+      <section className="evidence-detail" id="file-detail" aria-labelledby="file-detail-heading">
+        <h4 id="file-detail-heading">Selected document / artifact metadata</h4>
+        {!selected ? <p>No admitted item selected.</p> : <>
+          <p role="status" aria-live="polite" aria-atomic="true">Selected item: {selected.id}{!matches.some((entry) => entry.id === selected.id) ? ' — outside the current filter. Clear search to show its selection button.' : ''}</p>
+          <dl><dt>Item ID</dt><dd>{selected.id}</dd><dt>Kind</dt><dd>{selected.kind}</dd><dt>Display name / title (untrusted text)</dt><dd className="evidence-text">{selected.name}</dd>
+            <dt>Supplied format</dt><dd>{selected.format ?? 'Not reported'}</dd><dt>Supplied media type</dt><dd>{selected.mediaType ?? 'Not reported'}</dd>
+            <dt>Source type</dt><dd>{selected.sourceType ?? 'Not reported'}</dd><dt>Source reference (inert text)</dt><dd className="evidence-text">{selected.sourceRef ?? 'Not reported'}</dd>
+            <dt>Supplied content hash (not independently verified)</dt><dd className="evidence-text">{selected.contentHash ?? 'Not reported'}</dd>
+            <dt>Timestamp (supplied UTC)</dt><dd>{selected.timestamp ?? 'Not reported'}</dd><dt>Supplied byte size</dt><dd>{selected.sizeBytes ?? 'Not reported'}</dd>
+          </dl>
+          {selected.kind === 'generated_artifact' && <p>A generated artifact may exist only in memory. Supplied metadata is not proof that it was saved to disk.</p>}
+          <p>Names, references, formats and hashes are inert text. No open, read, upload, download, save, export, delete, parsing or indexing action is connected.</p>
+        </>}
+      </section>
+    </div>
+  </section>;
+}
+
+export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, permissions, memory, files }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft; agentPort?: AgentPort; directory?: AgentDirectory; task?: TaskPresentation; permissions?: PermissionPresentation; memory?: EvidenceBrowser<MemoryPresentationRecord>; files?: EvidenceBrowser<FilePresentationRecord> }) {
   if (view.id === 'home') {
     return chat ? <ChatWorkspace chatPort={chatPort} chat={chat} /> : null;
   }
   if (view.id === 'agents') return directory ? <AgentNetwork agentPort={agentPort} directory={directory} /> : null;
   if (view.id === 'tasks') return task ? <TaskWorkspace task={task} /> : null;
   if (view.id === 'permissions') return permissions ? <PermissionCenter permissions={permissions} /> : null;
+  if (view.id === 'memory') return memory ? <MemoryWorkspace memory={memory} /> : null;
+  if (view.id === 'files') return files ? <FilesWorkspace files={files} /> : null;
   return (
     <section className="placeholder-panel" aria-labelledby="workspace-heading">
       <p className="eyebrow">Workspace preview</p>
@@ -875,7 +1081,7 @@ export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, pe
   );
 }
 
-export default function App({ chatPort, agentPort, taskPort, permissionPort }: { chatPort?: ChatPort; agentPort?: AgentPort; taskPort?: TaskGraphPort; permissionPort?: PermissionPort } = {}) {
+export default function App({ chatPort, agentPort, taskPort, permissionPort, memoryPort, filePort }: { chatPort?: ChatPort; agentPort?: AgentPort; taskPort?: TaskGraphPort; permissionPort?: PermissionPort; memoryPort?: MemoryPort; filePort?: FilePort } = {}) {
   const [selectedView, setSelectedView] = useState<ViewId>('home');
   const mainRef = useRef<HTMLElement>(null);
   const focusRequested = useRef(false);
@@ -885,6 +1091,8 @@ export default function App({ chatPort, agentPort, taskPort, permissionPort }: {
   const directory = useAgentDirectory();
   const task = useTaskGraph(taskPort);
   const permissions = usePermissionCenter(permissionPort);
+  const memory = useEvidenceBrowser(readMemoryPort(memoryPort));
+  const files = useEvidenceBrowser(readFilePort(filePort));
 
   useEffect(() => {
     if (focusRequested.current) {
@@ -939,7 +1147,7 @@ export default function App({ chatPort, agentPort, taskPort, permissionPort }: {
           <h2 id="page-title">{currentView.label}</h2>
           <p className="page-purpose">{currentView.purpose}</p>
         </header>
-        <div className="page-content"><ViewPanel view={currentView} chatPort={chatPort} chat={chat} agentPort={agentPort} directory={directory} task={task} permissions={permissions} /></div>
+        <div className="page-content"><ViewPanel view={currentView} chatPort={chatPort} chat={chat} agentPort={agentPort} directory={directory} task={task} permissions={permissions} memory={memory} files={files} /></div>
       </main>
     </div>
   );

@@ -98,7 +98,7 @@ test('React SSR renders the semantic branded shell and selected home navigation'
 });
 
 test('every future workspace renders its own purpose and an honest placeholder', () => {
-  for (const [id, label] of expectedViews.filter(([id]) => id !== 'home' && id !== 'agents' && id !== 'tasks' && id !== 'permissions')) {
+  for (const [id, label] of expectedViews.filter(([id]) => id !== 'home' && id !== 'agents' && id !== 'tasks' && id !== 'permissions' && id !== 'memory' && id !== 'files')) {
     const view = app.resolveView(id);
     const markup = renderToStaticMarkup(createElement(app.ViewPanel, { view }));
     assert.ok(markup.includes(`${label} workspace`));
@@ -163,6 +163,7 @@ test('shell has no backend, native bridge, storage or unsafe content execution',
   for (const name of ['Object.freeze', 'canonicalAgents.map', 'agentRoster.find', 'agentRoster.filter', 'boundedAgentQuery', 'value.slice', 'boundedAgentQuery(value).toLowerCase', 'agent.alias.toLowerCase', 'agent.alias.toLowerCase().includes', 'agent.internalId.toLowerCase', 'agent.internalId.toLowerCase().includes', 'agent.professionalRole.toLowerCase', 'agent.professionalRole.toLowerCase().includes', 'required.includes', 'optional.includes', 'required.every', 'keys.includes', 'agentDataFields', 'Number.isInteger', 'findAgent', 'agents.some', 'agents.push', 'setQuery', 'setSelectedId', 'filterAgents', 'readAgentSnapshot', 'snapshot.agents.find', 'matches.some', 'directory.search', 'matches.map', 'directory.select', 'useAgentDirectory']) allowedCalls.add(name);
   for (const name of ['taskText', 'taskArray', 'taskTopology', 'readTaskGraphPort', 'useTaskGraph', 'result.push', 'steps.map', 'steps.filter', 'steps.filter((step) => step.dependsOn.length === 0).map', 'steps.findIndex', 'Math.max', 'step.dependsOn.map', 'ordered.findIndex', 'ordered.push', 'layers.push', 'steps.forEach', 'item.dependsOn.includes', 'taskStates.some', 'steps.some', 'Number.isFinite', 'dependsOn.includes', 'dependsOn.push', 'inputRefs.push', 'steps.push', 'step.dependsOn.some', 'taskStates.find', 'graph?.ordered.find', 'setTaskSelection', 'graph.roots.join', 'graph.ordered.map', 'task.select', 'step.dependsOn.join', 'selected.dependsOn.join', 'selected.inputRefs.map']) allowedCalls.add(name);
   for (const name of ['permissionId', 'permissionUtc', 'value.match', 'Number', 'readPermissionRequest', 'readPermissionEvaluation', 'permissionEvidenceRules.find', 'rule.risks.some', 'readPermissionPort', 'requests.some', 'requests.push', 'permissionNeedsIntent', 'prunePermissionIntents', 'flight.submittedIds.filter', 'snapshot.requests.find', 'port.requests.find', 'flight.submittedIds.includes', 'port.submitDecision', 'flight.submittedIds.push', 'filterPermissionRequests', 'entries.filter', 'text.some', 'field.toLowerCase', 'field.toLowerCase().includes', 'usePermissionCenter', 'setPermissionQuery', 'setSelectedPermissionId', 'deliverPermissionIntent', 'setPermissionFeedbackId', 'setPermissionPending', 'setPermissionFeedback', 'flight.current.submittedIds.includes', 'permissions.search', 'permissions.select', 'permissions.submit']) allowedCalls.add(name);
+  for (const name of ['normalizedEvidenceText', 'memoryClasses.some', 'fileKinds.some', 'evidenceUtcKey', 'fraction.padEnd', 'readMemoryRecord', 'readFileRecord', 'Number.isSafeInteger', 'readEvidencePort', 'entries.some', 'entries.push', 'readMemoryPort', 'readFilePort', 'Object.values', 'Object.values(entry).some', '`${field}`.includes', 'snapshot.entries.find', 'setEvidenceQuery', 'setEvidenceId', 'filterEvidence', 'browser.search', 'memory.select', 'files.select', 'useEvidenceBrowser']) allowedCalls.add(name);
   for (const call of nodes(ts.isCallExpression)) {
     const name = call.expression.getText(appTree);
     assert.ok(allowedCalls.has(name) || name === 'views.filter((view) => view.group === group).map', name);
@@ -399,7 +400,7 @@ test('failure, cancellation and malformed acknowledgements retain the draft', as
 });
 
 // This deterministic hook harness tests state/handlers, not native DOM event delivery.
-function hookHarness(port, agentPort, taskPort, permissionPort) {
+function hookHarness(port, agentPort, taskPort, permissionPort, memoryPort, filePort) {
   const state = [];
   const refs = [];
   let stateIndex = 0;
@@ -416,11 +417,11 @@ function hookHarness(port, agentPort, taskPort, permissionPort) {
   return () => {
     stateIndex = 0;
     refIndex = 0;
-    const shell = module.default({ chatPort: port, agentPort, taskPort, permissionPort });
+    const shell = module.default({ chatPort: port, agentPort, taskPort, permissionPort, memoryPort, filePort });
     const chat = shell.props.children[2].props.children[1].props.children.props.chat;
     const panel = shell.props.children[2].props.children[1].props.children;
     const buttons = shell.props.children[1].props.children[1].props.children.flatMap((group) => group.props.children[1].props.children.map((item) => item.props.children));
-    return { ...chat, directory: panel.props.directory, task: panel.props.task, permissions: panel.props.permissions, panel, updateTaskPort(value) { taskPort = value; }, updatePermissionPort(value) { permissionPort = value; }, navigate(label) { buttons.find((button) => button.props.children === label).props.onClick(); } };
+    return { ...chat, directory: panel.props.directory, task: panel.props.task, permissions: panel.props.permissions, memory: panel.props.memory, files: panel.props.files, panel, updateTaskPort(value) { taskPort = value; }, updatePermissionPort(value) { permissionPort = value; }, updateMemoryPort(value) { memoryPort = value; }, updateFilePort(value) { filePort = value; }, navigate(label) { buttons.find((button) => button.props.children === label).props.onClick(); } };
   };
 }
 
@@ -1369,4 +1370,228 @@ test('permission CSS and semantics retain accessible controls, bounded scrolling
   assert.match(css, /\.permission-card\s*\{[^}]*min-height:\s*42px/);
   assert.doesNotMatch(css, /\.permission-[^}]*position:\s*(?:fixed|absolute)/);
   assert.doesNotMatch(appSource.slice(appSource.indexOf('export const permissionRisks'), appSource.indexOf('export function ViewPanel')), /UserPermissionDecision|PermissionGrant|createGrant|evaluatePolicy|AuditTrail|ToolRegistry|localStorage|sessionStorage|Date\.|setTimeout|setInterval/);
+});
+
+const memoryRecord = (id = 'memory-one', extra = {}) => ({ id, type: 'semantic', ...extra });
+const fileRecord = (id = 'file-one', extra = {}) => ({ id, kind: 'source_document', name: 'Supplied document', ...extra });
+const memoryEvidence = (records = [memoryRecord()], status = 'connected') => ({ status, records });
+const fileEvidence = (items = [fileRecord()], status = 'connected') => ({ status, items });
+const evidenceCases = [
+  { label: 'memory', read: app.readMemoryPort, make: memoryRecord, port: memoryEvidence, key: 'records', view: app.MemoryWorkspace, prop: 'memory', title: 'Memory' },
+  { label: 'files', read: app.readFilePort, make: fileRecord, port: fileEvidence, key: 'items', view: app.FilesWorkspace, prop: 'files', title: 'Files / Documents' },
+];
+function evidenceMarkup(spec, port, query = '', selectedId) {
+  const snapshot = spec.read(port);
+  const browser = { snapshot, query, selected: snapshot.entries.find((entry) => entry.id === selectedId) ?? snapshot.entries[0], search() {}, select() {} };
+  return renderToStaticMarkup(createElement(spec.view, { [spec.prop]: browser }));
+}
+
+for (const spec of evidenceCases) {
+  test(`${spec.label} is honest when absent, empty, unavailable, degraded or malformed`, () => {
+    assert.equal(spec.read(undefined).rejected, false);
+    for (const status of ['connected', 'unavailable', 'degraded']) {
+      const snapshot = spec.read(spec.port([], status));
+      assert.equal(snapshot.status, status); assert.equal(snapshot.rejected, false); assert.equal(snapshot.entries.length, 0);
+      assert.match(evidenceMarkup(spec, spec.port([], status)), /No (memory records|file metadata) supplied/);
+      if (status !== 'connected') assert.equal(spec.read(spec.port([spec.make()], status)).entries.length, 0);
+      assert.equal(spec.read(spec.port([spec.make('valid'), spec.make('bad', { unexpected: 'private' })], status)).rejected, true);
+    }
+    for (const value of [null, 1, 'connected', {}, [], { status: 'online', [spec.key]: [] }, { status: 'connected', [spec.key]: [], callback() {} }]) {
+      assert.equal(spec.read(value).rejected, true); assert.equal(spec.read(value).entries.length, 0);
+    }
+    assert.match(evidenceMarkup(spec, null), /Snapshot rejected/);
+    assert.doesNotMatch(evidenceMarkup(spec, undefined), /Snapshot rejected/);
+  });
+
+  test(`${spec.label} detaches and freezes exact primitive evidence without mutating caller input`, () => {
+    const record = spec.make('stable'); const port = spec.port([record]); const before = JSON.stringify(port);
+    const snapshot = spec.read(port);
+    assert.ok(Object.isFrozen(snapshot)); assert.ok(Object.isFrozen(snapshot.entries)); assert.ok(Object.isFrozen(snapshot.entries[0]));
+    assert.notEqual(snapshot.entries, port[spec.key]); assert.notEqual(snapshot.entries[0], record);
+    assert.equal(JSON.stringify(port), before); record.id = 'changed'; port[spec.key].push(spec.make('new'));
+    assert.equal(snapshot.entries[0].id, 'stable'); assert.equal(snapshot.entries.length, 1);
+    assert.ok(Object.isFrozen(spec.read(undefined).entries));
+  });
+
+  test(`${spec.label} accepts 64 records in source order and rejects duplicates or overflow whole`, () => {
+    const entries = Array.from({ length: 64 }, (_, i) => spec.make(`id-${63 - i}`));
+    assert.deepEqual(Array.from(spec.read(spec.port(entries)).entries, (entry) => entry.id), entries.map((entry) => entry.id));
+    for (const invalid of [[...entries, spec.make('extra')], [spec.make('duplicate'), spec.make('duplicate')]]) {
+      assert.equal(spec.read(spec.port(invalid)).rejected, true); assert.equal(spec.read(spec.port(invalid)).entries.length, 0);
+    }
+  });
+
+  test(`${spec.label} rejects accessor, symbol, inherited and sparse fields without executing getters`, () => {
+    let reads = 0;
+    const getter = Object.defineProperty(spec.make(), 'id', { get() { reads++; throw new Error('secret'); } });
+    const symbol = { ...spec.make(), [Symbol('private')]: 1 };
+    const inherited = Object.create(spec.make());
+    const sparse = new Array(2); sparse[0] = spec.make();
+    const arrayGetter = [spec.make()]; Object.defineProperty(arrayGetter, '0', { get() { reads++; throw new Error('secret'); } });
+    const arrayExtra = [spec.make()]; arrayExtra.extra = 'secret';
+    const topGetter = Object.defineProperty({ status: 'connected' }, spec.key, { get() { reads++; throw new Error('secret'); } });
+    for (const port of [spec.port([getter]), spec.port([symbol]), spec.port([inherited]), spec.port(sparse), spec.port(arrayGetter), spec.port(arrayExtra), topGetter]) {
+      assert.equal(spec.read(port).rejected, true); assert.equal(spec.read(port).entries.length, 0);
+    }
+    assert.equal(reads, 0);
+  });
+
+  test(`${spec.label} handles throwing reflection without coercion or diagnostic leakage`, () => {
+    const secret = 'PRIVATE_PROXY_PAYLOAD'; let coercions = 0;
+    const hostile = { toString() { coercions++; throw new Error(secret); }, valueOf() { coercions++; throw new Error(secret); } };
+    for (const value of [hostile, new Proxy({}, { ownKeys() { throw new Error(secret); } }), new Proxy(spec.port(), { getOwnPropertyDescriptor() { throw new Error(secret); } }), spec.port([new Proxy(spec.make(), { ownKeys() { throw new Error(secret); } })]), spec.port([spec.make(hostile)])]) {
+      assert.equal(spec.read(value).rejected, true); assert.doesNotMatch(evidenceMarkup(spec, value), new RegExp(secret));
+    }
+    assert.equal(coercions, 0);
+    // Catching reflection exceptions is robustness in this realm, not a Proxy sandbox.
+  });
+
+  test(`${spec.label} IDs are normalized meaningful opaque strings bounded in UTF-16 units`, () => {
+    for (const id of ['x'.repeat(128), '😀'.repeat(64), '<b>opaque</b>']) assert.equal(spec.read(spec.port([spec.make(id)])).rejected, false);
+    for (const id of ['', ' ', ' padded', 'padded ', 'x'.repeat(129), '😀'.repeat(65), 1, null, undefined, {}]) assert.equal(spec.read(spec.port([spec.make('fixture', { id })])).rejected, true);
+  });
+
+  test(`${spec.label} local search preserves source order and does not alter selection or evidence`, () => {
+    const snapshot = spec.read(spec.port([spec.make('zeta'), spec.make('alpha'), spec.make('omega')])); const before = JSON.stringify(snapshot);
+    assert.deepEqual(Array.from(app.filterEvidence(snapshot.entries, 'A'), (entry) => entry.id), ['zeta', 'alpha', 'omega']);
+    assert.equal(app.filterEvidence(snapshot.entries, 'missing').length, 0);
+    assert.equal(app.filterEvidence(snapshot.entries, { toString() { throw new Error('never'); } }).length, 3);
+    assert.equal(JSON.stringify(snapshot), before);
+    assert.match(evidenceMarkup(spec, spec.port([spec.make('first'), spec.make('second')]), 'second', 'first'), /outside the current filter/);
+    assert.match(evidenceMarkup(spec, spec.port([spec.make()]), 'no-match'), /0 of 1 supplied items match/);
+  });
+
+  test(`${spec.label} uses labelled native search and selection with inert escaped detail text`, () => {
+    const payload = '<script>alert(1)</script> [link](javascript:bad)';
+    const record = spec.label === 'memory' ? spec.make('opaque', { content: payload, sourceRef: 'javascript:bad' }) : spec.make('opaque', { name: payload, sourceRef: 'javascript:bad' });
+    const markup = evidenceMarkup(spec, spec.port([record]));
+    assert.match(markup, /<label for="(?:memory|file)-query">Search/); assert.match(markup, /type="search" maxLength="80"/);
+    assert.match(markup, /aria-pressed="true" aria-controls="(?:memory|file)-detail"/);
+    assert.match(markup, /role="status" aria-live="polite" aria-atomic="true"/);
+    assert.match(markup, /&lt;script&gt;/); assert.match(markup, /javascript:bad/);
+    assert.doesNotMatch(markup, /<script|<a\b|href=|<iframe|<img|<form|<input[^>]*type="file"/);
+    assert.equal((markup.match(/<button\b/g) ?? []).length, 2);
+    assert.match(markup, /Not reported/);
+  });
+
+  test(`${spec.label} actual local handlers preserve query, select safely, and clear on disconnect`, () => {
+    const read = hookHarness(undefined, undefined, undefined, undefined, spec.label === 'memory' ? spec.port([spec.make('first'), spec.make('second')]) : undefined, spec.label === 'files' ? spec.port([spec.make('first'), spec.make('second')]) : undefined);
+    read().navigate(spec.title); const browser = () => read()[spec.prop];
+    browser().select('second'); assert.equal(browser().selected.id, 'second');
+    for (const id of ['unknown', {}, null]) browser().select(id);
+    assert.equal(browser().selected.id, 'second'); browser().search('😀'.repeat(41)); assert.equal(browser().query.length, 80);
+    browser().search('first'); assert.equal(browser().selected.id, 'second');
+    const tree = spec.view({ [spec.prop]: browser() }); const search = tree.props.children[1]; const controls = search.type(search.props);
+    const input = controls.props.children[2].props.children[0]; input.props.onChange({ currentTarget: { value: 'second' } }); assert.equal(browser().query, 'second');
+    controls.props.children[2].props.children[1].props.onClick(); assert.equal(browser().query, '');
+    const cards = elementButtons(spec.view({ [spec.prop]: browser() })).filter((button) => button.props.className === 'evidence-card'); cards[0].props.onClick(); assert.equal(browser().selected.id, 'first');
+    const update = spec.label === 'memory' ? 'updateMemoryPort' : 'updateFilePort';
+    read()[update](spec.port([spec.make('replacement')])); assert.equal(browser().selected.id, 'replacement');
+    read()[update](spec.port([spec.make('replacement')], 'degraded')); assert.equal(browser().selected, undefined);
+    read()[update](spec.port([spec.make('fresh')])); assert.equal(browser().selected.id, 'fresh');
+    read().navigate('Home / Chat'); read().navigate(spec.title); assert.equal(browser().selected.id, 'fresh');
+  });
+}
+
+test('memory presentation accepts only the six canonical classes and never fabricates missing evidence', () => {
+  assert.deepEqual(Array.from(app.memoryClasses), ['working', 'episodic', 'semantic', 'user', 'project', 'agent']);
+  for (const type of app.memoryClasses) assert.equal(app.readMemoryPort(memoryEvidence([memoryRecord('id', { type })])).rejected, false);
+  for (const type of ['Semantic', 'other', 'semantic ', null, 1]) assert.equal(app.readMemoryPort(memoryEvidence([memoryRecord('id', { type })])).rejected, true);
+  const markup = evidenceMarkup(evidenceCases[0], memoryEvidence());
+  assert.equal((markup.match(/<dd[^>]*>Not reported<\/dd>/g) ?? []).length, 11);
+  assert.match(markup, /PUDDING owns memory/); assert.match(markup, /source truth, persistence or retrieval/);
+});
+
+test('memory text fields enforce confirmed caps, normalization and exact optional presence', () => {
+  for (const [field, cap] of [['content', 4000], ['sourceType', 128], ['sourceRef', 512], ['scope', 256], ['embeddingRef', 128]]) {
+    const admit = (value) => app.readMemoryPort(memoryEvidence([memoryRecord('id', { [field]: value })])).rejected;
+    assert.equal(admit('x'.repeat(cap)), false); assert.equal(admit('x'.repeat(cap + 1)), true);
+    for (const value of ['', ' ', null, undefined, 1, {}, []]) assert.equal(admit(value), true, field);
+    assert.equal(admit(' padded '), field !== 'content');
+  }
+  for (const field of ['metadata', 'bytes', 'delete', 'admitted', 'verified', 'callback']) assert.equal(app.readMemoryPort(memoryEvidence([memoryRecord('id', { [field]: true })])).rejected, true);
+});
+
+test('memory scores preserve zero and enforce finite numeric values in the closed unit interval', () => {
+  for (const field of ['confidence', 'importance']) {
+    for (const value of [0, 0.5, 1]) assert.equal(app.readMemoryPort(memoryEvidence([memoryRecord('id', { [field]: value })])).entries[0][field], value);
+    for (const value of [-0.1, 1.1, NaN, Infinity, '0', null, undefined, {}]) assert.equal(app.readMemoryPort(memoryEvidence([memoryRecord('id', { [field]: value })])).rejected, true);
+  }
+  assert.match(evidenceMarkup(evidenceCases[0], memoryEvidence([memoryRecord('id', { confidence: 0, importance: 0 })])), /Supplied confidence<\/dt><dd>0<\/dd>/);
+});
+
+test('memory UTC evidence rejects invalid calendars, offsets, caps and chronology without inferring expiry', () => {
+  const earlier = '2026-10-09T10:00:00.009Z'; const later = '2026-10-09T10:00:00.01+00:00';
+  for (const field of ['createdAt', 'updatedAt', 'lastAccessedAt', 'expiresAt']) {
+    for (const value of [earlier, later, '2024-02-29T00:00:00Z']) assert.equal(app.readMemoryPort(memoryEvidence([memoryRecord('id', { [field]: value })])).rejected, false);
+    for (const value of ['2025-02-29T00:00:00Z', '2026-10-09T24:00:00Z', '2026-10-09T10:00:00+01:00', '2026-10-09', '2026-10-09T10:00:00.' + '1'.repeat(44) + 'Z', null, undefined, 1]) assert.equal(app.readMemoryPort(memoryEvidence([memoryRecord('id', { [field]: value })])).rejected, true);
+  }
+  for (const field of ['updatedAt', 'lastAccessedAt', 'expiresAt']) {
+    assert.equal(app.readMemoryPort(memoryEvidence([memoryRecord('id', { createdAt: later, [field]: earlier })])).rejected, true);
+    assert.equal(app.readMemoryPort(memoryEvidence([memoryRecord('id', { createdAt: earlier, [field]: later })])).rejected, false);
+    assert.equal(app.readMemoryPort(memoryEvidence([memoryRecord('id', { createdAt: '2026-10-09T10:00:00Z', [field]: '2026-10-09T10:00:00.000+00:00' })])).rejected, false);
+  }
+  assert.match(evidenceMarkup(evidenceCases[0], memoryEvidence([memoryRecord('id', { expiresAt: '2000-01-01T00:00:00Z' })])), /no expiry status inferred/);
+});
+
+test('files distinguish source documents and generated artifacts without claiming persistence', () => {
+  assert.deepEqual(Array.from(app.fileKinds), ['source_document', 'generated_artifact']);
+  for (const kind of app.fileKinds) assert.equal(app.readFilePort(fileEvidence([fileRecord('id', { kind })])).rejected, false);
+  for (const kind of ['file', 'artifact', 'Generated_artifact', null, 1]) assert.equal(app.readFilePort(fileEvidence([fileRecord('id', { kind })])).rejected, true);
+  const markup = evidenceMarkup(evidenceCases[1], fileEvidence([fileRecord('id', { kind: 'generated_artifact' })]));
+  assert.match(markup, /Generated artifact/); assert.match(markup, /may exist only in memory/); assert.match(markup, /not proof that it was saved to disk/);
+  assert.equal((markup.match(/<dd[^>]*>Not reported<\/dd>/g) ?? []).length, 7);
+});
+
+test('file text metadata enforces caps while rejecting bytes, callbacks, storage claims and arbitrary metadata', () => {
+  for (const [field, cap] of [['name', 256], ['format', 128], ['mediaType', 128], ['sourceType', 128], ['sourceRef', 512], ['contentHash', 128]]) {
+    const admit = (value) => app.readFilePort(fileEvidence([fileRecord('id', { [field]: value })])).rejected;
+    assert.equal(admit('x'.repeat(cap)), false); assert.equal(admit('x'.repeat(cap + 1)), true); assert.equal(admit(' padded '), false);
+    for (const value of ['', ' ', null, undefined, 1, {}, []]) assert.equal(admit(value), true);
+  }
+  for (const field of ['metadata', 'bytes', 'content', 'open', 'save', 'delete', 'exists', 'indexed']) assert.equal(app.readFilePort(fileEvidence([fileRecord('id', { [field]: true })])).rejected, true);
+});
+
+test('file size and timestamp preserve zero and UTC text without claiming verified hashes', () => {
+  for (const sizeBytes of [0, 123, Number.MAX_SAFE_INTEGER]) assert.equal(app.readFilePort(fileEvidence([fileRecord('id', { sizeBytes })])).entries[0].sizeBytes, sizeBytes);
+  for (const sizeBytes of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '0', null, undefined]) assert.equal(app.readFilePort(fileEvidence([fileRecord('id', { sizeBytes })])).rejected, true);
+  for (const timestamp of ['2026-10-09T10:00:00Z', '2026-10-09T10:00:00.12+00:00']) assert.equal(app.readFilePort(fileEvidence([fileRecord('id', { timestamp })])).entries[0].timestamp, timestamp);
+  for (const timestamp of ['2026-02-30T00:00:00Z', '2026-10-09T10:00:00-01:00', undefined]) assert.equal(app.readFilePort(fileEvidence([fileRecord('id', { timestamp })])).rejected, true);
+  const markup = evidenceMarkup(evidenceCases[1], fileEvidence([fileRecord('id', { sizeBytes: 0, contentHash: 'supplied-hash' })]));
+  assert.match(markup, /Supplied byte size<\/dt><dd>0<\/dd>/); assert.match(markup, /not independently verified/);
+});
+
+test('local evidence search covers every admitted metadata field and bounds query without coercion', () => {
+  const memory = memoryRecord('id', { content: 'needle', sourceType: 'chat', sourceRef: 'source', scope: 'scope', confidence: 0.125, importance: 0.875, createdAt: '2026-10-09T00:00:00Z', updatedAt: '2026-10-09T00:00:01Z', lastAccessedAt: '2026-10-09T00:00:02Z', expiresAt: '2026-10-10T00:00:00Z', embeddingRef: 'embedding' });
+  const file = fileRecord('file', { format: 'markdown', mediaType: 'text/plain', sourceType: 'upload', sourceRef: 'file-source', contentHash: 'hash', timestamp: '2026-10-09T00:00:00Z', sizeBytes: 987 });
+  for (const [read, port, record] of [[app.readMemoryPort, memoryEvidence, memory], [app.readFilePort, fileEvidence, file]]) {
+    const entries = read(port([record])).entries;
+    for (const value of Object.values(record)) assert.equal(app.filterEvidence(entries, String(value).toUpperCase()).length, 1);
+    assert.equal(app.filterEvidence(entries, '').length, 1);
+  }
+  const long = app.readMemoryPort(memoryEvidence([memoryRecord('x'.repeat(80))])).entries;
+  assert.equal(app.filterEvidence(long, 'x'.repeat(80) + 'ignored').length, 1);
+});
+
+test('both evidence workspaces preserve earlier logic byte for byte and keep all workspace states independent', () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const previous = execFileSync('git', ['show', '5594229ace471804e4571fc40bc159d4b020862e:apps/desktop/src/App.tsx'], { cwd: root, encoding: 'utf8' });
+  assert.equal(appSource.slice(0, appSource.indexOf('export const memoryClasses')), previous.slice(0, previous.indexOf('export function ViewPanel')));
+  const read = hookHarness(undefined, undefined, taskPort(), permissionPort(), memoryEvidence([memoryRecord('first'), memoryRecord('second')]), fileEvidence([fileRecord('one'), fileRecord('two')]));
+  read().setDraft('kept'); read().directory.search('LEVI'); read().task.select('second'); read().permissions.search('permission');
+  read().memory.select('second'); read().memory.search('first'); read().files.select('two'); read().files.search('one');
+  for (const [, label] of expectedViews) read().navigate(label);
+  assert.equal(read().draft, 'kept'); assert.equal(read().directory.query, 'LEVI'); assert.equal(read().permissions.query, 'permission');
+  assert.equal(read().memory.selected.id, 'second'); assert.equal(read().memory.query, 'first'); assert.equal(read().files.selected.id, 'two'); assert.equal(read().files.query, 'one');
+});
+
+test('evidence CSS retains focus, responsive wrapping, bounded scrolling and reachable native controls', () => {
+  assert.match(css, /\.evidence-layout\s*\{[^}]*minmax\(0, 1fr\) minmax\(0, 1fr\)/);
+  assert.match(css, /\.evidence-results\s*\{[^}]*max-height:[^}]*overflow-y:\s*auto/);
+  assert.match(css, /\.evidence-text\s*\{[^}]*white-space:\s*pre-wrap;[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(css, /\.evidence-card\s*\{[^}]*min-height:\s*42px/);
+  assert.match(css, /@media \(max-width: 1000px\)[\s\S]*?\.evidence-layout \{ grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(css, /:focus-visible/); assert.doesNotMatch(css, /\.evidence-[^}]*position:\s*(?:fixed|absolute)/);
+  const block = appSource.slice(appSource.indexOf('export const memoryClasses'), appSource.indexOf('export function ViewPanel'));
+  assert.doesNotMatch(block, /Date\.|setTimeout|setInterval|port\.[a-zA-Z]+\(|\.submit\(|\.sendText\(/);
 });
