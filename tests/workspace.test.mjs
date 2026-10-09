@@ -98,7 +98,7 @@ test('React SSR renders the semantic branded shell and selected home navigation'
 });
 
 test('every future workspace renders its own purpose and an honest placeholder', () => {
-  for (const [id, label] of expectedViews.filter(([id]) => id !== 'home' && id !== 'agents' && id !== 'tasks' && id !== 'permissions' && id !== 'memory' && id !== 'files')) {
+  for (const [id, label] of expectedViews.filter(([id]) => id !== 'home' && id !== 'agents' && id !== 'tasks' && id !== 'permissions' && id !== 'memory' && id !== 'files' && id !== 'models' && id !== 'voice' && id !== 'settings')) {
     const view = app.resolveView(id);
     const markup = renderToStaticMarkup(createElement(app.ViewPanel, { view }));
     assert.ok(markup.includes(`${label} workspace`));
@@ -164,6 +164,7 @@ test('shell has no backend, native bridge, storage or unsafe content execution',
   for (const name of ['taskText', 'taskArray', 'taskTopology', 'readTaskGraphPort', 'useTaskGraph', 'result.push', 'steps.map', 'steps.filter', 'steps.filter((step) => step.dependsOn.length === 0).map', 'steps.findIndex', 'Math.max', 'step.dependsOn.map', 'ordered.findIndex', 'ordered.push', 'layers.push', 'steps.forEach', 'item.dependsOn.includes', 'taskStates.some', 'steps.some', 'Number.isFinite', 'dependsOn.includes', 'dependsOn.push', 'inputRefs.push', 'steps.push', 'step.dependsOn.some', 'taskStates.find', 'graph?.ordered.find', 'setTaskSelection', 'graph.roots.join', 'graph.ordered.map', 'task.select', 'step.dependsOn.join', 'selected.dependsOn.join', 'selected.inputRefs.map']) allowedCalls.add(name);
   for (const name of ['permissionId', 'permissionUtc', 'value.match', 'Number', 'readPermissionRequest', 'readPermissionEvaluation', 'permissionEvidenceRules.find', 'rule.risks.some', 'readPermissionPort', 'requests.some', 'requests.push', 'permissionNeedsIntent', 'prunePermissionIntents', 'flight.submittedIds.filter', 'snapshot.requests.find', 'port.requests.find', 'flight.submittedIds.includes', 'port.submitDecision', 'flight.submittedIds.push', 'filterPermissionRequests', 'entries.filter', 'text.some', 'field.toLowerCase', 'field.toLowerCase().includes', 'usePermissionCenter', 'setPermissionQuery', 'setSelectedPermissionId', 'deliverPermissionIntent', 'setPermissionFeedbackId', 'setPermissionPending', 'setPermissionFeedback', 'flight.current.submittedIds.includes', 'permissions.search', 'permissions.select', 'permissions.submit']) allowedCalls.add(name);
   for (const name of ['normalizedEvidenceText', 'memoryClasses.some', 'fileKinds.some', 'evidenceUtcKey', 'fraction.padEnd', 'readMemoryRecord', 'readFileRecord', 'Number.isSafeInteger', 'readEvidencePort', 'entries.some', 'entries.push', 'readMemoryPort', 'readFilePort', 'Object.values', 'Object.values(entry).some', '`${field}`.includes', 'snapshot.entries.find', 'setEvidenceQuery', 'setEvidenceId', 'filterEvidence', 'browser.search', 'memory.select', 'files.select', 'useEvidenceBrowser']) allowedCalls.add(name);
+  for (const name of ['runtimeStatus', 'runtimeKey', 'providerStatuses.some', 'voiceStates.some', 'voiceComponentIds.some', 'readModelPort', 'readVoicePort', 'filterRuntime', "(field ? 'true' : 'false').includes", 'entries.find', 'setRuntimeQuery', 'setRuntimeKey', 'useRuntimeBrowser', 'runtimeValue', 'models.select', 'voice.select']) allowedCalls.add(name);
   for (const call of nodes(ts.isCallExpression)) {
     const name = call.expression.getText(appTree);
     assert.ok(allowedCalls.has(name) || name === 'views.filter((view) => view.group === group).map', name);
@@ -400,7 +401,7 @@ test('failure, cancellation and malformed acknowledgements retain the draft', as
 });
 
 // This deterministic hook harness tests state/handlers, not native DOM event delivery.
-function hookHarness(port, agentPort, taskPort, permissionPort, memoryPort, filePort) {
+function hookHarness(port, agentPort, taskPort, permissionPort, memoryPort, filePort, modelPort, voicePort) {
   const state = [];
   const refs = [];
   let stateIndex = 0;
@@ -417,11 +418,11 @@ function hookHarness(port, agentPort, taskPort, permissionPort, memoryPort, file
   return () => {
     stateIndex = 0;
     refIndex = 0;
-    const shell = module.default({ chatPort: port, agentPort, taskPort, permissionPort, memoryPort, filePort });
+    const shell = module.default({ chatPort: port, agentPort, taskPort, permissionPort, memoryPort, filePort, modelPort, voicePort });
     const chat = shell.props.children[2].props.children[1].props.children.props.chat;
     const panel = shell.props.children[2].props.children[1].props.children;
     const buttons = shell.props.children[1].props.children[1].props.children.flatMap((group) => group.props.children[1].props.children.map((item) => item.props.children));
-    return { ...chat, directory: panel.props.directory, task: panel.props.task, permissions: panel.props.permissions, memory: panel.props.memory, files: panel.props.files, panel, updateTaskPort(value) { taskPort = value; }, updatePermissionPort(value) { permissionPort = value; }, updateMemoryPort(value) { memoryPort = value; }, updateFilePort(value) { filePort = value; }, navigate(label) { buttons.find((button) => button.props.children === label).props.onClick(); } };
+    return { ...chat, directory: panel.props.directory, task: panel.props.task, permissions: panel.props.permissions, memory: panel.props.memory, files: panel.props.files, models: panel.props.models, voice: panel.props.voice, panel, updateTaskPort(value) { taskPort = value; }, updatePermissionPort(value) { permissionPort = value; }, updateMemoryPort(value) { memoryPort = value; }, updateFilePort(value) { filePort = value; }, updateModelPort(value) { modelPort = value; }, updateVoicePort(value) { voicePort = value; }, navigate(label) { buttons.find((button) => button.props.children === label).props.onClick(); } };
   };
 }
 
@@ -1594,4 +1595,205 @@ test('evidence CSS retains focus, responsive wrapping, bounded scrolling and rea
   assert.match(css, /:focus-visible/); assert.doesNotMatch(css, /\.evidence-[^}]*position:\s*(?:fixed|absolute)/);
   const block = appSource.slice(appSource.indexOf('export const memoryClasses'), appSource.indexOf('export function ViewPanel'));
   assert.doesNotMatch(block, /Date\.|setTimeout|setInterval|port\.[a-zA-Z]+\(|\.submit\(|\.sendText\(/);
+});
+
+const modelEntry = (extra = {}) => ({ providerId: 'provider-one', modelId: 'model-one', ...extra });
+const voiceComponent = (extra = {}) => ({ id: 'stt', status: 'available', ...extra });
+const modelEvidence = (entries = [modelEntry()], status = 'connected') => ({ status, entries });
+const voiceEvidence = (components = [voiceComponent()], status = 'connected', extra = {}) => ({ status, components, ...extra });
+const runtimeCases = [
+  { name: 'models', read: app.readModelPort, make: modelEntry, port: modelEvidence, key: 'entries', limit: 64, view: app.ModelsWorkspace, prop: 'models', title: 'Models', update: 'updateModelPort' },
+  { name: 'voice', read: app.readVoicePort, make: voiceComponent, port: voiceEvidence, key: 'components', limit: 6, view: app.VoiceWorkspace, prop: 'voice', title: 'Voice', update: 'updateVoicePort' },
+];
+function runtimeMarkup(spec, port, query = '', selection) {
+  const snapshot = spec.read(port);
+  const browser = { snapshot, query, selected: snapshot.entries.find((entry) => app.runtimeKey(entry) === selection) ?? snapshot.entries[0], search() {}, select() {} };
+  return renderToStaticMarkup(createElement(spec.view, { [spec.prop]: browser }));
+}
+
+for (const spec of runtimeCases) {
+  test(`${spec.name} admits only exact whole data snapshots and suppresses disconnected details`, () => {
+    assert.equal(spec.read(undefined).rejected, false);
+    for (const value of [null, [], 1, '', {}, { status: 'connected' }, { status: 'online', [spec.key]: [] }, { ...spec.port(), callback() {} }, { ...spec.port(), [Symbol('extra')]: 1 }]) assert.equal(spec.read(value).rejected, true);
+    for (const status of ['connected', 'unavailable', 'degraded']) {
+      assert.equal(spec.read(spec.port([], status)).rejected, false);
+      assert.equal(spec.read(spec.port([spec.make()], status)).entries.length, status === 'connected' ? 1 : 0);
+      assert.equal(spec.read(spec.port([spec.make(), spec.make({ forbidden: 'private' })], status)).rejected, true);
+      assert.equal(spec.read(spec.port([spec.make(), spec.make({ forbidden: 'private' })], status)).entries.length, 0);
+    }
+    assert.match(runtimeMarkup(spec, undefined), /No (model|voice) evidence source connected/);
+    assert.match(runtimeMarkup(spec, null), /Snapshot rejected/);
+    assert.doesNotMatch(runtimeMarkup(spec, undefined), /Snapshot rejected/);
+    for (const field of spec.name === 'models' ? ['providerId', 'modelId'] : ['id', 'status']) {
+      const record = spec.make(); delete record[field]; assert.equal(spec.read(spec.port([record])).rejected, true);
+    }
+  });
+
+  test(`${spec.name} admits the exact count bound, rejects duplicate/oversized lists and preserves order`, () => {
+    const entries = spec.name === 'models' ? Array.from({ length: 64 }, (_, i) => modelEntry({ modelId: `model-${63 - i}` })) : Array.from(app.voiceComponentIds, (id) => voiceComponent({ id }));
+    const snapshot = spec.read(spec.port(entries)); assert.equal(snapshot.entries.length, spec.limit);
+    assert.deepEqual(Array.from(snapshot.entries, (entry) => app.runtimeKey(entry)), entries.map((entry) => app.runtimeKey(entry)));
+    for (const invalid of [[...entries, spec.make()], [spec.make(), spec.make()]]) assert.equal(spec.read(spec.port(invalid)).rejected, true);
+  });
+
+  test(`${spec.name} detaches frozen records and arrays without changing caller data`, () => {
+    const port = spec.port(); const before = JSON.stringify(port); const snapshot = spec.read(port);
+    assert.equal(JSON.stringify(port), before); assert.ok(Object.isFrozen(snapshot)); assert.ok(Object.isFrozen(snapshot.entries)); assert.ok(Object.isFrozen(snapshot.entries[0]));
+    assert.notEqual(snapshot.entries[0], port[spec.key][0]); assert.notEqual(snapshot.entries, port[spec.key]);
+    port[spec.key][0][spec.name === 'models' ? 'modelId' : 'id'] = 'changed'; port[spec.key].push(spec.make());
+    assert.equal(snapshot.entries.length, 1); assert.notEqual(snapshot.entries[0][spec.name === 'models' ? 'modelId' : 'id'], 'changed');
+    assert.ok(Object.isFrozen(spec.read(undefined).entries));
+  });
+
+  test(`${spec.name} rejects sparse/extended/symbol/accessor/inherited data without reading getters`, () => {
+    let reads = 0; const field = spec.name === 'models' ? 'modelId' : 'id';
+    const getter = Object.defineProperty(spec.make(), field, { get() { reads++; throw new Error('private'); } });
+    const recordSymbol = { ...spec.make(), [Symbol('extra')]: 1 };
+    const sparse = new Array(2); sparse[0] = spec.make(); const extended = [spec.make()]; extended.extra = true;
+    const arrayGetter = [spec.make()]; Object.defineProperty(arrayGetter, '0', { get() { reads++; throw new Error('private'); } });
+    const topGetter = Object.defineProperty({ status: 'connected' }, spec.key, { get() { reads++; throw new Error('private'); } });
+    for (const value of [spec.port([getter]), spec.port([recordSymbol]), spec.port([Object.create(spec.make())]), spec.port(sparse), spec.port(extended), spec.port(arrayGetter), topGetter]) assert.equal(spec.read(value).rejected, true);
+    assert.equal(reads, 0);
+  });
+
+  test(`${spec.name} catches reflection failures and rejects coercible objects without leaking diagnostics`, () => {
+    const secret = 'PRIVATE_RUNTIME_PROXY'; let coerced = 0;
+    const hostile = { toString() { coerced++; throw new Error(secret); }, valueOf() { coerced++; throw new Error(secret); } };
+    for (const value of [hostile, new Proxy({}, { ownKeys() { throw new Error(secret); } }), new Proxy(spec.port(), { getOwnPropertyDescriptor() { throw new Error(secret); } }), spec.port([new Proxy(spec.make(), { ownKeys() { throw new Error(secret); } })]), spec.port([spec.make({ [spec.name === 'models' ? 'modelId' : 'id']: hostile })])]) {
+      assert.equal(spec.read(value).rejected, true); assert.doesNotMatch(runtimeMarkup(spec, value), new RegExp(secret));
+    }
+    assert.equal(coerced, 0);
+  });
+
+  test(`${spec.name} rejects unsafe metadata, operations, credentials and domain payload fields`, () => {
+    for (const field of ['metadata', 'url', 'path', 'credentials', 'exception', 'callback', ...(spec.name === 'models' ? ['prompt', 'output', 'loaded', 'generate'] : ['deviceId', 'deviceName', 'microphonePermission', 'pcm', 'transcript', 'audio', 'voiceProfile'])]) {
+      assert.equal(spec.read(spec.port([spec.make({ [field]: true })])).rejected, true);
+      assert.equal(spec.read({ ...spec.port(), [field]: true }).rejected, true);
+    }
+  });
+
+  test(`${spec.name} local search and inspection handlers retain independent navigation state and reset on loss`, () => {
+    const entries = spec.name === 'models' ? [modelEntry(), modelEntry({ modelId: 'second' })] : [voiceComponent(), voiceComponent({ id: 'tts' })];
+    const read = hookHarness(undefined, undefined, undefined, undefined, undefined, undefined, spec.name === 'models' ? spec.port(entries) : undefined, spec.name === 'voice' ? spec.port(entries) : undefined);
+    const browser = () => read()[spec.prop]; read().navigate(spec.title);
+    browser().select(app.runtimeKey(entries[1])); assert.equal(app.runtimeKey(browser().selected), app.runtimeKey(entries[1]));
+    for (const value of ['unknown', undefined, {}]) browser().select(value);
+    assert.equal(app.runtimeKey(browser().selected), app.runtimeKey(entries[1]));
+    browser().search('😀'.repeat(41)); assert.equal(browser().query.length, 80); browser().search(spec.name === 'models' ? 'model-one' : 'stt');
+    assert.match(runtimeMarkup(spec, spec.port(entries), browser().query, app.runtimeKey(entries[1])), /outside the current filter/);
+    read().navigate('Settings'); read().navigate(spec.title); assert.equal(app.runtimeKey(browser().selected), app.runtimeKey(entries[1]));
+    const tree = spec.view({ [spec.prop]: browser() }); const search = tree.props.children[1]; const controls = search.type(search.props);
+    controls.props.children[2].props.children[0].props.onChange({ currentTarget: { value: 'nothing' } }); assert.equal(browser().query, 'nothing');
+    controls.props.children[2].props.children[1].props.onClick(); assert.equal(browser().query, '');
+    elementButtons(spec.view({ [spec.prop]: browser() })).filter((button) => button.props.className === 'runtime-inspect')[0].props.onClick(); assert.equal(app.runtimeKey(browser().selected), app.runtimeKey(entries[0]));
+    read()[spec.update](spec.port([entries[1]])); assert.equal(app.runtimeKey(browser().selected), app.runtimeKey(entries[1]));
+    for (const status of ['degraded', 'unavailable']) { read()[spec.update](spec.port(entries, status)); assert.equal(browser().selected, undefined); }
+    read()[spec.update](spec.port(entries)); assert.equal(app.runtimeKey(browser().selected), app.runtimeKey(entries[0]));
+    read()[spec.update](null); assert.equal(browser().selected, undefined);
+  });
+
+  test(`${spec.name} has labelled native local controls, truthful notices and passive evidence cards`, () => {
+    const markup = runtimeMarkup(spec, spec.port());
+    assert.match(markup, /type="search" maxLength="80"/); assert.match(markup, /<label for="(?:model|voice)-query">Search/);
+    assert.match(markup, /role="status" aria-live="polite" aria-atomic="true"/); assert.match(markup, /<article class="runtime-card">/);
+    assert.match(markup, /aria-pressed="true" aria-controls="(?:model|voice)-detail"/); assert.match(markup, /Inspect evidence/);
+    assert.doesNotMatch(markup, /<button[^>]*class="runtime-card"|<a\b|href=|<iframe|<img|<script|type="file"/);
+    assert.match(runtimeMarkup(spec, spec.port(), 'missing'), /0 of 1 supplied records match/);
+    assert.match(runtimeMarkup(spec, spec.port([], 'connected')), /0 of 0 supplied records match/);
+  });
+}
+
+test('model identities are bounded original strings and composite pairs never collapse across providers or delimiters', () => {
+  for (const field of ['providerId', 'modelId']) {
+    for (const value of ['x'.repeat(128), '😀'.repeat(64), ' padded ']) assert.equal(app.readModelPort(modelEvidence([modelEntry({ [field]: value })])).entries[0][field], value);
+    for (const value of ['', ' ', 'x'.repeat(129), '😀'.repeat(65), null, undefined, 1, {}]) assert.equal(app.readModelPort(modelEvidence([modelEntry({ [field]: value })])).rejected, true);
+  }
+  const entries = [modelEntry({ providerId: 'a:b', modelId: 'c' }), modelEntry({ providerId: 'a', modelId: 'b:c' }), modelEntry({ providerId: 'other', modelId: 'c' })];
+  assert.equal(app.readModelPort(modelEvidence(entries)).entries.length, 3); assert.equal(new Set(entries.map(app.runtimeKey)).size, 3);
+});
+
+test('model optional booleans and provider statuses use exact types and preserve false', () => {
+  assert.deepEqual(Array.from(app.providerStatuses), ['healthy', 'degraded', 'unavailable']);
+  for (const providerStatus of app.providerStatuses) assert.equal(app.readModelPort(modelEvidence([modelEntry({ providerStatus })])).rejected, false);
+  for (const providerStatus of ['available', 'Healthy', null, undefined, 1]) assert.equal(app.readModelPort(modelEvidence([modelEntry({ providerStatus })])).rejected, true);
+  for (const field of ['supportsStreaming', 'supportsStructuredOutput', 'supportsToolUse', 'supportsVision', 'supportsCancellation']) {
+    for (const value of [true, false]) assert.equal(app.readModelPort(modelEvidence([modelEntry({ [field]: value })])).entries[0][field], value);
+    for (const value of ['true', 'false', 0, 1, null, undefined, {}]) assert.equal(app.readModelPort(modelEvidence([modelEntry({ [field]: value })])).rejected, true);
+    assert.match(runtimeMarkup(runtimeCases[0], modelEvidence([modelEntry({ [field]: false })])), /<dd>false<\/dd>/);
+  }
+  assert.equal((runtimeMarkup(runtimeCases[0], modelEvidence()).match(/<dd>Not reported<\/dd>/g) ?? []).length, 9);
+});
+
+test('model context size accepts only positive safe integers without inferring application settings', () => {
+  for (const contextLimitTokens of [1, 16384, Number.MAX_SAFE_INTEGER]) assert.equal(app.readModelPort(modelEvidence([modelEntry({ contextLimitTokens })])).entries[0].contextLimitTokens, contextLimitTokens);
+  for (const contextLimitTokens of [0, -0, -1, 1.1, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '1', true, null, undefined]) assert.equal(app.readModelPort(modelEvidence([modelEntry({ contextLimitTokens })])).rejected, true);
+  const markup = runtimeMarkup(runtimeCases[0], modelEvidence([modelEntry({ contextLimitTokens: 1, supportsToolUse: true })]));
+  assert.match(markup, /Capability flags confer no permissions/); assert.match(markup, /Neither proves a live provider/);
+});
+
+test('all runtime timestamp fields enforce bounded real UTC calendar dates without a clock', () => {
+  const valid = ['2024-02-29T00:00:00Z', '2026-10-10T00:00:00+00:00', '2026-10-10T00:00:00.' + '1'.repeat(43) + 'Z'];
+  const invalid = ['2025-02-29T00:00:00Z', '2026-04-31T00:00:00Z', '2026-10-10T24:00:00Z', '2026-10-10T00:00:60Z', '2026-10-10T00:00:00+01:00', '2026-10-10', '2026-10-10T00:00:00.' + '1'.repeat(44) + 'Z', null, undefined, 1, {}];
+  for (const [spec, field] of [[runtimeCases[0], 'providerCheckedAt'], [runtimeCases[0], 'capabilitiesRefreshedAt'], [runtimeCases[1], 'checkedAt']]) {
+    for (const value of valid) assert.equal(spec.read(spec.port([spec.make({ [field]: value })])).entries[0][field], value);
+    for (const value of invalid) assert.equal(spec.read(spec.port([spec.make({ [field]: value })])).rejected, true);
+  }
+});
+
+test('voice exact state and component vocabularies remain caller evidence and suppress stale state', () => {
+  assert.deepEqual(Array.from(app.voiceStates), ['sleeping', 'listening', 'thinking', 'speaking', 'degraded_voice', 'text_only']);
+  assert.deepEqual(Array.from(app.voiceComponentIds), ['wake_word', 'vad', 'stt', 'tts', 'conversation', 'audio_output']);
+  for (const state of app.voiceStates) assert.equal(app.readVoicePort(voiceEvidence([], 'connected', { state })).state, state);
+  for (const state of ['ready', 'healthy', 'LISTENING', null, undefined, true]) assert.equal(app.readVoicePort(voiceEvidence([], 'connected', { state })).rejected, true);
+  for (const status of ['available', 'degraded', 'unavailable']) assert.equal(app.readVoicePort(voiceEvidence([voiceComponent({ status })])).entries[0].status, status);
+  for (const field of ['id', 'status']) for (const value of ['', 'unknown', 'Available', null, undefined, 1]) assert.equal(app.readVoicePort(voiceEvidence([voiceComponent({ [field]: value })])).rejected, true);
+  for (const status of ['degraded', 'unavailable']) {
+    const port = voiceEvidence(undefined, status, { state: 'speaking' }); assert.equal(app.readVoicePort(port).state, undefined);
+    assert.doesNotMatch(runtimeMarkup(runtimeCases[1], port), /<dd>speaking<\/dd>|Status \(supplied\): available/);
+    assert.equal(app.readVoicePort(voiceEvidence([], status, { state: 'invalid' })).rejected, true);
+  }
+  assert.match(runtimeMarkup(runtimeCases[1], voiceEvidence()), /not whole-application health/);
+  assert.match(runtimeMarkup(runtimeCases[1], voiceEvidence()), /Text interaction remains available/);
+  assert.equal((runtimeMarkup(runtimeCases[1], voiceEvidence()).match(/<dd>Not reported<\/dd>/g) ?? []).length, 2);
+});
+
+test('runtime search covers supplied numeric and boolean evidence in source order with bounded inert input', () => {
+  const entries = app.readModelPort(modelEvidence([modelEntry({ modelId: 'z', supportsVision: false, contextLimitTokens: 987 }), modelEntry({ modelId: 'a', supportsVision: true })])).entries;
+  assert.deepEqual(Array.from(app.filterRuntime(entries, 'PROVIDER'), (entry) => entry.modelId), ['z', 'a']);
+  assert.equal(app.filterRuntime(entries, 'FALSE')[0].modelId, 'z'); assert.equal(app.filterRuntime(entries, 'true')[0].modelId, 'a'); assert.equal(app.filterRuntime(entries, '987')[0].modelId, 'z');
+  assert.equal(app.filterRuntime(entries, { toString() { throw new Error('never'); } }).length, 2);
+  const long = app.readModelPort(modelEvidence([modelEntry({ modelId: 'x'.repeat(80) })])).entries; assert.equal(app.filterRuntime(long, 'x'.repeat(80) + 'ignored').length, 1);
+});
+
+test('model identity strings remain escaped inert text without provider or file links', () => {
+  const markup = runtimeMarkup(runtimeCases[0], modelEvidence([modelEntry({ providerId: '<script>alert(1)</script>', modelId: '[link](javascript:bad)' })]));
+  assert.match(markup, /&lt;script&gt;/); assert.match(markup, /javascript:bad/); assert.doesNotMatch(markup, /<script|<a\b|href=|<img|<iframe/);
+});
+
+test('Settings is a semantic non-editor without a port, fabricated values, callbacks or controls', () => {
+  const markup = renderToStaticMarkup(createElement(app.SettingsWorkspace));
+  for (const label of ['Model / provider configuration', 'Voice / device configuration', 'Application preferences', 'Privacy and permissions', 'Storage / integration']) assert.ok(markup.includes(label));
+  assert.match(markup, /Settings cannot be changed or saved/); assert.match(markup, /No current settings values are reported/); assert.match(markup, /PermissionEngine alone authorizes/);
+  assert.doesNotMatch(markup, /<(button|input|select|textarea|a|form)\b|role="switch"|disabled=|Settings saved|Settings applied/);
+  assert.doesNotMatch(appSource, /SettingsPort/); assert.match(renderToStaticMarkup(createElement(app.ViewPanel, { view: app.resolveView('settings') })), /Settings overview/);
+});
+
+test('PHX-086 preserves every prior logic block and PHX-085 tests byte for byte while state stays independent', () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const previous = execFileSync('git', ['show', '66cfbfdff7a4a0f94312641cf1bdcc2c682b5061:apps/desktop/src/App.tsx'], { cwd: root, encoding: 'utf8' });
+  assert.equal(appSource.slice(0, appSource.indexOf('export const providerStatuses')), previous.slice(0, previous.indexOf('export function ViewPanel')));
+  const baselineTests = execFileSync('git', ['show', '66cfbfdff7a4a0f94312641cf1bdcc2c682b5061:tests/workspace.test.mjs'], { cwd: root, encoding: 'utf8' });
+  const currentTests = readFileSync(new URL('./workspace.test.mjs', import.meta.url), 'utf8');
+  assert.equal(currentTests.slice(currentTests.indexOf('const memoryRecord'), currentTests.indexOf('const modelEntry')).trim(), baselineTests.slice(baselineTests.indexOf('const memoryRecord')).trim());
+  const read = hookHarness(undefined, undefined, taskPort(), permissionPort(), memoryEvidence(), fileEvidence(), modelEvidence(), voiceEvidence());
+  read().setDraft('kept'); read().directory.search('LEVI'); read().memory.search('memory'); read().files.search('file'); read().permissions.search('request'); read().models.search('model'); read().voice.search('stt');
+  for (const [, label] of expectedViews) read().navigate(label);
+  assert.equal(read().draft, 'kept'); assert.equal(read().directory.query, 'LEVI'); assert.equal(read().memory.query, 'memory'); assert.equal(read().files.query, 'file'); assert.equal(read().permissions.query, 'request'); assert.equal(read().models.query, 'model'); assert.equal(read().voice.query, 'stt');
+});
+
+test('runtime CSS keeps cards passive and lists responsive, scrollable, wrapped and keyboard reachable', () => {
+  assert.match(css, /\.runtime-layout\s*\{[^}]*minmax\(0, 1fr\) minmax\(0, 1fr\)/); assert.match(css, /\.runtime-results\s*\{[^}]*max-height:[^}]*overflow-y:\s*auto/);
+  assert.match(css, /\.runtime-header dd, \.runtime-detail dd\s*\{[^}]*white-space:\s*pre-wrap;[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(css, /\.runtime-search button, \.runtime-inspect\s*\{[^}]*min-height:\s*42px/); assert.match(css, /@media \(max-width: 1000px\)[\s\S]*?\.runtime-layout, \.settings-overview \{ grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(css, /:focus-visible/); assert.match(css, /prefers-reduced-motion/); assert.doesNotMatch(css, /\.runtime-card[^}]*cursor:\s*pointer|\.runtime-card:hover|\.runtime-[^}]*position:\s*(?:fixed|absolute)/);
 });

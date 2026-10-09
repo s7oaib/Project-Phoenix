@@ -82,10 +82,10 @@ Phase 7 status: COMPLETE.
 - PHX-083 Task graph — DONE
 - PHX-084 Permission center — DONE
 - PHX-085 Memory/files workspace — DONE
-- PHX-086 Models/voice/settings — TODO
+- PHX-086 Models/voice/settings — DONE
 - PHX-087 Observability/developer view — TODO
 
-Phase 8 status: INCOMPLETE — PHX-086 through PHX-087 remain TODO.
+Phase 8 status: INCOMPLETE — PHX-087 remains TODO.
 
 ## Phase 9 — Validation & Release
 - PHX-090 Automated test matrix — TODO

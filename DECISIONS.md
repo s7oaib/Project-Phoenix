@@ -3039,3 +3039,28 @@ disk persistence or file existence. Future trusted adapters must enforce existin
 secret policy and authoritative evidence. No dependency or native security change.
 Deterministic gates passed before acceptance; manual native WebView2 acceptance
 remains PENDING. Phase 8 is INCOMPLETE and PHX-086/087 remain TODO.
+
+## ADR-073 — Read-only model/voice evidence and non-editor Settings
+
+Date: 2026-10-10
+Status: Accepted
+
+PHX-086 uses the user-specified exact optional readonly ModelPort/VoicePort DTOs
+and caps in the existing React shell; no callbacks or backend-domain replacements.
+Own-data whole-snapshot admission, real bounded UTC, strict booleans/safe integers,
+composite model identity, detached frozen primitives, generic failures and inert
+JSX precede display, including hidden degraded/unavailable evidence. Reflection
+checks are not a Proxy sandbox, authentication or proof of factual source truth.
+Missing evidence is not inferred. Source-order bounded local search and separate
+native Inspect evidence controls change only independent local inspection state.
+Cards remain passive; inspection never chooses a runtime model or activates voice.
+
+Provider health/capability/residency/startup readiness remain distinct; voice
+evidence is channel-local. PermissionEngine alone authorizes. Settings is an
+informational overview, without a port, schema, editor, values, controls or saving.
+No provider/model/audio/device operation, API/network/IPC, filesystem/clipboard,
+settings persistence, background work or dependency is added. Future trusted
+adapters own authentication/privacy and authoritative evidence. PHX-081–085,
+native/CSP/capabilities, backend, manifests/locks and historical guards remain
+unchanged. Deterministic gates passed; manual native WebView2 remains PENDING.
+Phase 8 INCOMPLETE; PHX-087 TODO and NOT STARTED.

@@ -1059,7 +1059,161 @@ export function FilesWorkspace({ files }: { files: EvidenceBrowser<FilePresentat
   </section>;
 }
 
-export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, permissions, memory, files }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft; agentPort?: AgentPort; directory?: AgentDirectory; task?: TaskPresentation; permissions?: PermissionPresentation; memory?: EvidenceBrowser<MemoryPresentationRecord>; files?: EvidenceBrowser<FilePresentationRecord> }) {
+export const providerStatuses = Object.freeze(['healthy', 'degraded', 'unavailable'] as const);
+export const voiceStates = Object.freeze(['sleeping', 'listening', 'thinking', 'speaking', 'degraded_voice', 'text_only'] as const);
+export const voiceComponentIds = Object.freeze(['wake_word', 'vad', 'stt', 'tts', 'conversation', 'audio_output'] as const);
+export type ModelDisplayEntry = {
+  readonly providerId: string; readonly modelId: string; readonly providerStatus?: (typeof providerStatuses)[number];
+  readonly providerCheckedAt?: string; readonly supportsStreaming?: boolean; readonly supportsStructuredOutput?: boolean;
+  readonly supportsToolUse?: boolean; readonly supportsVision?: boolean; readonly supportsCancellation?: boolean;
+  readonly contextLimitTokens?: number; readonly capabilitiesRefreshedAt?: string;
+};
+export type ModelPort = { readonly status: 'connected' | 'unavailable' | 'degraded'; readonly entries: readonly ModelDisplayEntry[] };
+export type VoiceDisplayComponent = { readonly id: (typeof voiceComponentIds)[number]; readonly status: 'available' | 'degraded' | 'unavailable'; readonly checkedAt?: string };
+export type VoicePort = { readonly status: ModelPort['status']; readonly state?: (typeof voiceStates)[number]; readonly components: readonly VoiceDisplayComponent[] };
+type RuntimeRecord = ModelDisplayEntry | VoiceDisplayComponent;
+type RuntimeSnapshot<T extends RuntimeRecord> = { readonly status: ModelPort['status']; readonly entries: readonly T[]; readonly rejected: boolean };
+type ModelSnapshot = RuntimeSnapshot<ModelDisplayEntry>;
+type VoiceSnapshot = RuntimeSnapshot<VoiceDisplayComponent> & { readonly state?: VoicePort['state'] };
+
+function runtimeStatus(value: unknown): value is ModelPort['status'] {
+  return value === 'connected' || value === 'unavailable' || value === 'degraded';
+}
+export function runtimeKey(entry: RuntimeRecord) {
+  // Length-prefixing keeps provider/model pairs distinct even with delimiters in IDs.
+  return 'providerId' in entry ? `${entry.providerId.length}:${entry.providerId}${entry.modelId}` : entry.id;
+}
+export function readModelPort(value: unknown): ModelSnapshot {
+  const unavailable = Object.freeze({ status: 'unavailable' as const, entries: Object.freeze([]), rejected: value !== undefined });
+  try {
+    const port = agentDataFields(value, ['status', 'entries']);
+    if (!port || !runtimeStatus(port.status)) return unavailable;
+    const values = taskArray(port.entries, 64);
+    if (!values) return unavailable;
+    const entries: ModelDisplayEntry[] = [];
+    for (const value of values) {
+      const fields = agentDataFields(value, ['providerId', 'modelId'], ['providerStatus', 'providerCheckedAt', 'supportsStreaming', 'supportsStructuredOutput', 'supportsToolUse', 'supportsVision', 'supportsCancellation', 'contextLimitTokens', 'capabilitiesRefreshedAt']);
+      if (!fields || !taskText(fields.providerId, 128) || !taskText(fields.modelId, 128)) return unavailable;
+      if ('providerStatus' in fields && !providerStatuses.some((status) => status === fields.providerStatus)) return unavailable;
+      for (const key of ['providerCheckedAt', 'capabilitiesRefreshedAt']) if (key in fields && !permissionUtc(fields[key])) return unavailable;
+      for (const key of ['supportsStreaming', 'supportsStructuredOutput', 'supportsToolUse', 'supportsVision', 'supportsCancellation']) if (key in fields && typeof fields[key] !== 'boolean') return unavailable;
+      if ('contextLimitTokens' in fields && (typeof fields.contextLimitTokens !== 'number' || !Number.isSafeInteger(fields.contextLimitTokens) || fields.contextLimitTokens <= 0)) return unavailable;
+      const entry = Object.freeze({ ...fields }) as ModelDisplayEntry;
+      if (entries.some((item) => item.providerId === entry.providerId && item.modelId === entry.modelId)) return unavailable;
+      entries.push(entry);
+    }
+    return Object.freeze({ status: port.status, entries: Object.freeze(port.status === 'connected' ? entries : []), rejected: false });
+  } catch { return unavailable; }
+}
+export function readVoicePort(value: unknown): VoiceSnapshot {
+  const unavailable = Object.freeze({ status: 'unavailable' as const, entries: Object.freeze([]), rejected: value !== undefined });
+  try {
+    const port = agentDataFields(value, ['status', 'components'], ['state']);
+    if (!port || !runtimeStatus(port.status) || ('state' in port && !voiceStates.some((state) => state === port.state))) return unavailable;
+    const values = taskArray(port.components, 6);
+    if (!values) return unavailable;
+    const entries: VoiceDisplayComponent[] = [];
+    for (const value of values) {
+      const fields = agentDataFields(value, ['id', 'status'], ['checkedAt']);
+      if (!fields || !voiceComponentIds.some((id) => id === fields.id) || (fields.status !== 'available' && fields.status !== 'degraded' && fields.status !== 'unavailable') || ('checkedAt' in fields && !permissionUtc(fields.checkedAt))) return unavailable;
+      const entry = Object.freeze({ ...fields }) as VoiceDisplayComponent;
+      if (entries.some((item) => item.id === entry.id)) return unavailable;
+      entries.push(entry);
+    }
+    return Object.freeze({ status: port.status, entries: Object.freeze(port.status === 'connected' ? entries : []), rejected: false,
+      ...(port.status === 'connected' && typeof port.state === 'string' ? { state: port.state as VoicePort['state'] } : {}) });
+  } catch { return unavailable; }
+}
+export function filterRuntime<T extends RuntimeRecord>(entries: readonly T[], value: unknown) {
+  const query = boundedAgentQuery(value).toLowerCase();
+  return entries.filter((entry) => Object.values(entry).some((field) => typeof field === 'string' ? field.toLowerCase().includes(query) :
+    typeof field === 'number' ? `${field}`.includes(query) : typeof field === 'boolean' && (field ? 'true' : 'false').includes(query)));
+}
+function useRuntimeBrowser<T extends RuntimeRecord>(entries: readonly T[]) {
+  const [query, setRuntimeQuery] = useState('');
+  const [selectedKey, setRuntimeKey] = useState<string | undefined>(undefined);
+  const selected = entries.find((entry) => runtimeKey(entry) === selectedKey) ?? entries[0];
+  const nextKey = selected ? runtimeKey(selected) : undefined;
+  if (selectedKey !== nextKey) setRuntimeKey(nextKey);
+  function search(value: unknown) { setRuntimeQuery(boundedAgentQuery(value)); }
+  function select(value: unknown) {
+    const entry = entries.find((item) => runtimeKey(item) === value);
+    if (entry) setRuntimeKey(runtimeKey(entry));
+  }
+  return { query, selected, search, select };
+}
+type RuntimeBrowser<T extends RuntimeRecord> = ReturnType<typeof useRuntimeBrowser<T>> & { snapshot: RuntimeSnapshot<T> };
+type ModelBrowser = RuntimeBrowser<ModelDisplayEntry>;
+type VoiceBrowser = RuntimeBrowser<VoiceDisplayComponent> & { snapshot: VoiceSnapshot };
+function runtimeValue(value: string | number | boolean | undefined) {
+  return value === undefined ? 'Not reported' : typeof value === 'boolean' ? (value ? 'true' : 'false') : value;
+}
+function RuntimeConnection({ snapshot, noun }: { snapshot: RuntimeSnapshot<RuntimeRecord>; noun: 'model' | 'voice' }) {
+  return <><p>{snapshot.status === 'connected' ? 'Caller-supplied evidence only. Live transport is not implemented.' :
+    snapshot.status === 'degraded' ? `Reported ${noun} source degraded. Supplied details are hidden.` : `No ${noun} evidence source connected.`}</p>
+    {snapshot.rejected && <p>Snapshot rejected because it is malformed or exceeds display limits. No supplied details are shown.</p>}</>;
+}
+function RuntimeSearch({ browser, prefix }: { browser: RuntimeBrowser<RuntimeRecord>; prefix: 'model' | 'voice' }) {
+  const matches = filterRuntime(browser.snapshot.entries, browser.query);
+  return <section className="runtime-search" aria-label={`Search ${prefix} evidence`}>
+    <label htmlFor={`${prefix}-query`}>Search {prefix} evidence</label><p id={`${prefix}-search-help`}>Local text search only, up to 80 characters.</p>
+    <div className="runtime-search-controls"><input id={`${prefix}-query`} type="search" maxLength={80} value={browser.query} aria-describedby={`${prefix}-search-help ${prefix}-match-count`} onChange={(event) => browser.search(event.currentTarget.value)} />
+      <button type="button" onClick={() => browser.search('')}>Clear search</button></div>
+    <p id={`${prefix}-match-count`} role="status" aria-live="polite" aria-atomic="true">{matches.length} of {browser.snapshot.entries.length} supplied records match</p>
+  </section>;
+}
+export function ModelsWorkspace({ models }: { models: ModelBrowser }) {
+  const matches = filterRuntime(models.snapshot.entries, models.query); const selected = models.selected;
+  return <section className="runtime-workspace" aria-labelledby="model-heading">
+    <header className="runtime-header"><p className="eyebrow">Read-only · model evidence</p><h3 id="model-heading">Models</h3>
+      <p>Provider health and model capabilities are distinct supplied evidence. Neither proves a live provider, model residency, successful inference, routing preference or PHOENIX readiness.</p><RuntimeConnection snapshot={models.snapshot} noun="model" /></header>
+    <RuntimeSearch browser={models} prefix="model" />
+    <div className="runtime-layout"><section className="runtime-results" aria-label="Matching model evidence">
+      {models.snapshot.entries.length === 0 ? <p>No model evidence supplied.</p> : matches.length === 0 ? <p>No records match. Clear search to restore supplied evidence.</p> :
+        <ul className="runtime-list">{matches.map((entry) => <li key={runtimeKey(entry)}><article className="runtime-card"><p>Provider: {entry.providerId}</p><p>Model: {entry.modelId}</p>
+          <button className="runtime-inspect" type="button" aria-label={`Inspect evidence for ${entry.providerId} / ${entry.modelId}`} aria-pressed={selected ? runtimeKey(selected) === runtimeKey(entry) : false} aria-controls="model-detail" onClick={() => models.select(runtimeKey(entry))}>Inspect evidence</button></article></li>)}</ul>}
+    </section><section className="runtime-detail" id="model-detail" aria-labelledby="model-detail-heading"><h4 id="model-detail-heading">Selected model evidence</h4>
+      {!selected ? <p>No admitted model record selected.</p> : <><p role="status" aria-live="polite" aria-atomic="true">Selected: {selected.providerId} / {selected.modelId}{!matches.some((entry) => runtimeKey(entry) === runtimeKey(selected)) ? ' — outside the current filter. Clear search to show its inspection control.' : ''}</p>
+        <dl><dt>Provider ID (supplied)</dt><dd>{selected.providerId}</dd><dt>Model ID (supplied)</dt><dd>{selected.modelId}</dd>
+          <dt>Provider status (supplied)</dt><dd>{runtimeValue(selected.providerStatus)}</dd><dt>Provider checked at (supplied UTC)</dt><dd>{runtimeValue(selected.providerCheckedAt)}</dd>
+          <dt>Streaming capability (supplied)</dt><dd>{runtimeValue(selected.supportsStreaming)}</dd><dt>Structured output capability (supplied)</dt><dd>{runtimeValue(selected.supportsStructuredOutput)}</dd>
+          <dt>Tool-use capability (supplied)</dt><dd>{runtimeValue(selected.supportsToolUse)}</dd><dt>Vision capability (supplied)</dt><dd>{runtimeValue(selected.supportsVision)}</dd>
+          <dt>Cancellation capability (supplied)</dt><dd>{runtimeValue(selected.supportsCancellation)}</dd><dt>Context limit tokens (supplied)</dt><dd>{runtimeValue(selected.contextLimitTokens)}</dd>
+          <dt>Capabilities refreshed at (supplied UTC)</dt><dd>{runtimeValue(selected.capabilitiesRefreshedAt)}</dd></dl></>}
+      <p>Inspecting evidence does not select, load, unload, download or run a model. Capability flags confer no permissions; PermissionEngine remains authoritative.</p>
+    </section></div>
+  </section>;
+}
+export function VoiceWorkspace({ voice }: { voice: VoiceBrowser }) {
+  const matches = filterRuntime(voice.snapshot.entries, voice.query); const selected = voice.selected;
+  return <section className="runtime-workspace" aria-labelledby="voice-heading">
+    <header className="runtime-header"><p className="eyebrow">Read-only · voice evidence</p><h3 id="voice-heading">Voice</h3><p>UTA owns voice interaction. Reported voice-channel state is not whole-application health.</p>
+      <RuntimeConnection snapshot={voice.snapshot} noun="voice" />{voice.snapshot.status === 'connected' && <dl><dt>Voice-channel state (supplied)</dt><dd>{runtimeValue(voice.snapshot.state)}</dd></dl>}
+      <p>No microphone access, recording, playback, wake-word activation or startup success is verified here. Text interaction remains available.</p></header>
+    <RuntimeSearch browser={voice} prefix="voice" />
+    <div className="runtime-layout"><section className="runtime-results" aria-label="Matching voice components">
+      {voice.snapshot.entries.length === 0 ? <p>No voice components supplied.</p> : matches.length === 0 ? <p>No components match. Clear search to restore supplied evidence.</p> :
+        <ul className="runtime-list">{matches.map((entry) => <li key={entry.id}><article className="runtime-card"><p>Component: {entry.id}</p><p>Status (supplied): {entry.status}</p>
+          <button className="runtime-inspect" type="button" aria-label={`Inspect ${entry.id} evidence`} aria-pressed={selected?.id === entry.id} aria-controls="voice-detail" onClick={() => voice.select(entry.id)}>Inspect evidence</button></article></li>)}</ul>}
+    </section><section className="runtime-detail" id="voice-detail" aria-labelledby="voice-detail-heading"><h4 id="voice-detail-heading">Selected voice-component evidence</h4>
+      {!selected ? <p>No admitted voice component selected.</p> : <><p role="status" aria-live="polite" aria-atomic="true">Selected component: {selected.id}{!matches.some((entry) => entry.id === selected.id) ? ' — outside the current filter. Clear search to show its inspection control.' : ''}</p>
+        <dl><dt>Component ID</dt><dd>{selected.id}</dd><dt>Status (supplied)</dt><dd>{selected.status}</dd><dt>Checked at (supplied UTC)</dt><dd>{runtimeValue(selected.checkedAt)}</dd></dl></>}
+      <p>Only supplied components are shown. Missing evidence is not inferred. This view cannot activate voice, capture audio, play speech or change a voice profile.</p>
+    </section></div>
+  </section>;
+}
+export function SettingsWorkspace() {
+  return <section className="runtime-workspace" aria-labelledby="settings-heading"><header className="runtime-header"><p className="eyebrow">Read-only · configuration overview</p><h3 id="settings-heading">Settings overview</h3>
+    <p>Settings cannot be changed or saved in this workspace yet. No current settings values are reported.</p></header>
+    <div className="settings-overview"><section><h4>Model / provider configuration</h4><p>Not connected. No model selection, loading, unloading, downloading or inference controls.</p></section>
+      <section><h4>Voice / device configuration</h4><p>Not connected. No microphone or audio-device access, recording or playback controls.</p></section>
+      <section><h4>Application preferences</h4><p>No persisted app-preference editor is implemented by this ticket.</p></section>
+      <section><h4>Privacy and permissions</h4><p>The existing Permission Center presents evidence and human intent. PermissionEngine alone authorizes actions; this overview has no local override.</p></section>
+      <section><h4>Storage / integration</h4><p>No new persistence or backend transport. This overview does not read, write or apply configuration.</p></section></div>
+  </section>;
+}
+
+export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, permissions, memory, files, models, voice }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft; agentPort?: AgentPort; directory?: AgentDirectory; task?: TaskPresentation; permissions?: PermissionPresentation; memory?: EvidenceBrowser<MemoryPresentationRecord>; files?: EvidenceBrowser<FilePresentationRecord>; models?: ModelBrowser; voice?: VoiceBrowser }) {
   if (view.id === 'home') {
     return chat ? <ChatWorkspace chatPort={chatPort} chat={chat} /> : null;
   }
@@ -1068,6 +1222,9 @@ export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, pe
   if (view.id === 'permissions') return permissions ? <PermissionCenter permissions={permissions} /> : null;
   if (view.id === 'memory') return memory ? <MemoryWorkspace memory={memory} /> : null;
   if (view.id === 'files') return files ? <FilesWorkspace files={files} /> : null;
+  if (view.id === 'models') return models ? <ModelsWorkspace models={models} /> : null;
+  if (view.id === 'voice') return voice ? <VoiceWorkspace voice={voice} /> : null;
+  if (view.id === 'settings') return <SettingsWorkspace />;
   return (
     <section className="placeholder-panel" aria-labelledby="workspace-heading">
       <p className="eyebrow">Workspace preview</p>
@@ -1081,7 +1238,7 @@ export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, pe
   );
 }
 
-export default function App({ chatPort, agentPort, taskPort, permissionPort, memoryPort, filePort }: { chatPort?: ChatPort; agentPort?: AgentPort; taskPort?: TaskGraphPort; permissionPort?: PermissionPort; memoryPort?: MemoryPort; filePort?: FilePort } = {}) {
+export default function App({ chatPort, agentPort, taskPort, permissionPort, memoryPort, filePort, modelPort, voicePort }: { chatPort?: ChatPort; agentPort?: AgentPort; taskPort?: TaskGraphPort; permissionPort?: PermissionPort; memoryPort?: MemoryPort; filePort?: FilePort; modelPort?: ModelPort; voicePort?: VoicePort } = {}) {
   const [selectedView, setSelectedView] = useState<ViewId>('home');
   const mainRef = useRef<HTMLElement>(null);
   const focusRequested = useRef(false);
@@ -1093,6 +1250,10 @@ export default function App({ chatPort, agentPort, taskPort, permissionPort, mem
   const permissions = usePermissionCenter(permissionPort);
   const memory = useEvidenceBrowser(readMemoryPort(memoryPort));
   const files = useEvidenceBrowser(readFilePort(filePort));
+  const modelSnapshot = readModelPort(modelPort);
+  const voiceSnapshot = readVoicePort(voicePort);
+  const models = { ...useRuntimeBrowser(modelSnapshot.entries), snapshot: modelSnapshot };
+  const voice = { ...useRuntimeBrowser(voiceSnapshot.entries), snapshot: voiceSnapshot };
 
   useEffect(() => {
     if (focusRequested.current) {
@@ -1147,7 +1308,7 @@ export default function App({ chatPort, agentPort, taskPort, permissionPort, mem
           <h2 id="page-title">{currentView.label}</h2>
           <p className="page-purpose">{currentView.purpose}</p>
         </header>
-        <div className="page-content"><ViewPanel view={currentView} chatPort={chatPort} chat={chat} agentPort={agentPort} directory={directory} task={task} permissions={permissions} memory={memory} files={files} /></div>
+        <div className="page-content"><ViewPanel view={currentView} chatPort={chatPort} chat={chat} agentPort={agentPort} directory={directory} task={task} permissions={permissions} memory={memory} files={files} models={models} voice={voice} /></div>
       </main>
     </div>
   );
