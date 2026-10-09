@@ -98,7 +98,7 @@ test('React SSR renders the semantic branded shell and selected home navigation'
 });
 
 test('every future workspace renders its own purpose and an honest placeholder', () => {
-  for (const [id, label] of expectedViews.filter(([id]) => id !== 'home' && id !== 'agents')) {
+  for (const [id, label] of expectedViews.filter(([id]) => id !== 'home' && id !== 'agents' && id !== 'tasks')) {
     const view = app.resolveView(id);
     const markup = renderToStaticMarkup(createElement(app.ViewPanel, { view }));
     assert.ok(markup.includes(`${label} workspace`));
@@ -161,6 +161,7 @@ test('shell has no backend, native bridge, storage or unsafe content execution',
   assert.equal(imports[0].moduleSpecifier.text, 'react');
   const allowedCalls = new Set(['useState', 'useRef', 'useEffect', 'resolveView', 'setSelectedView', 'navigate', 'views.find', 'groups.map', 'views.filter', 'mainRef.current?.focus', 'Object.getOwnPropertyDescriptor', 'Reflect.ownKeys', 'Array.isArray', 'Math.min', 'dataValue', 'readChatPort', 'validateDraft', 'boundedMessages', 'sendDraft', 'cancelWait', 'acknowledgedDraft', 'useChatDraft', 'setDraft', 'setPending', 'setFeedback', 'event.preventDefault', 'chat.setDraft', 'snapshot.messages.map', 'messages.some', 'messages.push', 'port.sendText', 'value.trim', 'id.trim', 'content.trim']);
   for (const name of ['Object.freeze', 'canonicalAgents.map', 'agentRoster.find', 'agentRoster.filter', 'boundedAgentQuery', 'value.slice', 'boundedAgentQuery(value).toLowerCase', 'agent.alias.toLowerCase', 'agent.alias.toLowerCase().includes', 'agent.internalId.toLowerCase', 'agent.internalId.toLowerCase().includes', 'agent.professionalRole.toLowerCase', 'agent.professionalRole.toLowerCase().includes', 'required.includes', 'optional.includes', 'required.every', 'keys.includes', 'agentDataFields', 'Number.isInteger', 'findAgent', 'agents.some', 'agents.push', 'setQuery', 'setSelectedId', 'filterAgents', 'readAgentSnapshot', 'snapshot.agents.find', 'matches.some', 'directory.search', 'matches.map', 'directory.select', 'useAgentDirectory']) allowedCalls.add(name);
+  for (const name of ['taskText', 'taskArray', 'taskTopology', 'readTaskGraphPort', 'useTaskGraph', 'result.push', 'steps.map', 'steps.filter', 'steps.filter((step) => step.dependsOn.length === 0).map', 'steps.findIndex', 'Math.max', 'step.dependsOn.map', 'ordered.findIndex', 'ordered.push', 'layers.push', 'steps.forEach', 'item.dependsOn.includes', 'taskStates.some', 'steps.some', 'Number.isFinite', 'dependsOn.includes', 'dependsOn.push', 'inputRefs.push', 'steps.push', 'step.dependsOn.some', 'taskStates.find', 'graph?.ordered.find', 'setTaskSelection', 'graph.roots.join', 'graph.ordered.map', 'task.select', 'step.dependsOn.join', 'selected.dependsOn.join', 'selected.inputRefs.map']) allowedCalls.add(name);
   for (const call of nodes(ts.isCallExpression)) {
     const name = call.expression.getText(appTree);
     assert.ok(allowedCalls.has(name) || name === 'views.filter((view) => view.group === group).map', name);
@@ -397,7 +398,7 @@ test('failure, cancellation and malformed acknowledgements retain the draft', as
 });
 
 // This deterministic hook harness tests state/handlers, not native DOM event delivery.
-function hookHarness(port, agentPort) {
+function hookHarness(port, agentPort, taskPort) {
   const state = [];
   const refs = [];
   let stateIndex = 0;
@@ -414,11 +415,11 @@ function hookHarness(port, agentPort) {
   return () => {
     stateIndex = 0;
     refIndex = 0;
-    const shell = module.default({ chatPort: port, agentPort });
+    const shell = module.default({ chatPort: port, agentPort, taskPort });
     const chat = shell.props.children[2].props.children[1].props.children.props.chat;
     const panel = shell.props.children[2].props.children[1].props.children;
     const buttons = shell.props.children[1].props.children[1].props.children.flatMap((group) => group.props.children[1].props.children.map((item) => item.props.children));
-    return { ...chat, directory: panel.props.directory, panel, navigate(label) { buttons.find((button) => button.props.children === label).props.onClick(); } };
+    return { ...chat, directory: panel.props.directory, task: panel.props.task, panel, updateTaskPort(value) { taskPort = value; }, navigate(label) { buttons.find((button) => button.props.children === label).props.onClick(); } };
   };
 }
 
@@ -766,4 +767,292 @@ test('agent CSS stacks at 800x600, scrolls reachable native controls and wraps a
   assert.match(css, /\.agent-evidence\s*\{[^}]*white-space:\s*pre-wrap;[^}]*overflow-wrap:\s*anywhere/);
   assert.match(css, /@media \(max-width: 460px\)[\s\S]*?\.agent-search-controls \{ flex-direction: column/);
   assert.doesNotMatch(css, /\.agent-(?:detail|search|results)[^}]*position:\s*(?:fixed|absolute)|text-overflow:\s*ellipsis|line-clamp/);
+});
+
+function taskStep(stepId = 'first', overrides = {}) {
+  return { stepId, ownerAgentId: 'build_engineer', objective: '  Supplied objective\n', dependsOn: [], inputRefs: [],
+    expectedOutput: 'Supplied expected output', timeoutSeconds: 30, completionRule: 'Supplied completion rule', ...overrides };
+}
+function taskGraph(steps = [taskStep()], overrides = {}) { return { taskId: 'supplied-task', steps, ...overrides }; }
+function taskPort(graph = taskGraph(), status = 'connected') { return { status, graph }; }
+function taskMarkup(port) {
+  const snapshot = app.readTaskGraphPort(port);
+  return renderToStaticMarkup(createElement(app.TaskWorkspace, { task: { snapshot, selected: snapshot.graph?.ordered[0], select() {} } }));
+}
+function rejectedTask(port) {
+  const snapshot = app.readTaskGraphPort(port);
+  assert.equal(snapshot.rejected, true);
+  assert.equal(snapshot.graph, undefined);
+  const markup = taskMarkup(port);
+  assert.match(markup, /Task graph snapshot rejected/);
+  assert.doesNotMatch(markup, /Supplied objective|Supplied expected output|Supplied completion rule|Canonical owner ID|Selected step:/);
+}
+
+test('Task Graph defaults disconnected and contains no synthetic steps, task state, activity or controls', () => {
+  const read = hookHarness(); read().navigate('Task Graph');
+  const markup = renderToStaticMarkup(read().panel);
+  assert.match(markup, /<h3 id="task-graph-heading">Task Graph<\/h3>/);
+  assert.match(markup, /No task graph connected/);
+  assert.match(markup, /No tasks or progress are generated/);
+  assert.doesNotMatch(markup, /<button|Task ID:|Selected step:|<time|<progress|<svg|<canvas|state: running|state: completed/);
+  assert.equal(read().task.selected, undefined);
+  assert.equal(app.readTaskGraphPort(undefined).rejected, false);
+});
+
+test('valid borrowed graph renders task evidence, exact step metadata and separate owner alias', () => {
+  const markup = taskMarkup(taskPort(taskGraph([taskStep('first', { inputRefs: ['source-one', 'source-two'] })], { taskState: 'completed' })));
+  assert.match(markup, /Task ID: <span class="task-text">supplied-task/);
+  assert.match(markup, /Caller-supplied task state; not live transport or verified completion: completed/);
+  assert.match(markup, /A completed marker does not prove execution or LEVI verification/);
+  assert.match(markup, /waiting_permission marker is not an approval request/);
+  assert.match(markup, /1 defined steps · 0 dependency edges/);
+  assert.match(markup, /<dt>Canonical owner ID<\/dt><dd>build_engineer<\/dd>/);
+  assert.match(markup, /<dt>Display alias<\/dt><dd>FRANKY<\/dd>/);
+  for (const text of ['  Supplied objective\n', 'Supplied expected output', 'Supplied completion rule', '30 seconds (no timer is running)', 'source-one', 'source-two']) assert.ok(markup.includes(text));
+  assert.match(markup, /Structural root steps: first/);
+  assert.match(markup, /Depends on: None/);
+});
+
+test('eleven task state values match PHX-024 exactly, optional absence stays unknown and extra states reject', () => {
+  const source = readFileSync(new URL('../phoenix/agents/task_graph.py', import.meta.url), 'utf8');
+  const block = source.split('class TaskState(StrEnum):')[1].split('TASK_TRANSITIONS:')[0];
+  const states = [...block.matchAll(/^\s+[A-Z_]+ = "([a-z_]+)"/gm)].map((match) => match[1]);
+  assert.deepEqual(Array.from(app.taskStates), states);
+  assert.equal(states.length, 11);
+  for (const taskState of states) {
+    assert.equal(app.readTaskGraphPort(taskPort(taskGraph(undefined, { taskState }))).graph.taskState, taskState);
+    assert.ok(taskMarkup(taskPort(taskGraph(undefined, { taskState }))).includes(`verified completion: ${taskState}`));
+  }
+  assert.match(taskMarkup(taskPort()), /verified completion: Not reported/);
+  for (const taskState of ['online', 'approved', 'RUNNING', '', undefined, null, true, {}]) rejectedTask(taskPort(taskGraph(undefined, { taskState })));
+  rejectedTask(taskPort(taskGraph([taskStep('first', { state: 'completed' })])));
+  rejectedTask(taskPort(taskGraph([taskStep('first', { verified: true })])));
+});
+
+test('disconnected or degraded task ports suppress every supplied graph and stale state', () => {
+  for (const status of ['unavailable', 'degraded']) {
+    const port = taskPort(taskGraph(undefined, { taskState: 'running' }), status);
+    const snapshot = app.readTaskGraphPort(port);
+    assert.equal(snapshot.status, status);
+    assert.equal(snapshot.graph, undefined);
+    assert.equal(snapshot.rejected, false);
+    assert.doesNotMatch(taskMarkup(port), /supplied-task|Supplied objective|state: running|Selected step:/);
+  }
+  assert.equal(app.readTaskGraphPort({ status: 'connected' }).graph, undefined);
+  assert.equal(app.readTaskGraphPort({ status: 'connected' }).rejected, false);
+});
+
+test('port, graph and step fields are exact data-only records with no callable or privileged extension', () => {
+  for (const value of [null, {}, { status: 'online' }, { status: 'connected', graph: null },
+    { ...taskPort(), cancel() { assert.fail('never called'); } }, { ...taskPort(), [Symbol('hidden')]: true },
+    taskPort({ ...taskGraph(), approved: true }), taskPort({ taskId: 'task' }),
+    taskPort(Object.create(taskGraph())), taskPort(taskGraph([Object.create(taskStep())]))]) rejectedTask(value);
+  const step = taskStep(); Object.defineProperty(step, 'execute', { value() { assert.fail('never called'); } });
+  rejectedTask(taskPort(taskGraph([step])));
+  for (const field of Object.keys(taskStep())) {
+    const step = taskStep(); delete step[field]; rejectedTask(taskPort(taskGraph([step])));
+  }
+  for (const field of ['taskId', 'steps']) {
+    const graph = taskGraph(); delete graph[field]; rejectedTask(taskPort(graph));
+  }
+  const type = appSource.match(/export type TaskGraphPort = \{([^}]+)\}/)[1];
+  assert.doesNotMatch(type, /=>|\([^)]*\)|execute|cancel|approve|fetch/);
+});
+
+test('task/step identifiers and meaningful metadata keep exact text with strict UTF-16 bounds', () => {
+  for (const [field, limit] of [['taskId', 128], ['stepId', 128], ['objective', 600], ['expectedOutput', 400], ['completionRule', 400]]) {
+    function port(value) { return field === 'taskId' ? taskPort(taskGraph(undefined, { [field]: value })) : taskPort(taskGraph([taskStep('first', { [field]: value })])); }
+    for (const value of ['x'.repeat(limit), '😀'.repeat(limit / 2), ' exact text ']) assert.equal(app.readTaskGraphPort(port(value)).rejected, false);
+    for (const value of ['', ' \n\t', 'x'.repeat(limit + 1), '😀'.repeat(limit / 2 + 1), null, 5, true, {}, { toString() { assert.fail('no coercion'); } }]) rejectedTask(port(value));
+  }
+  const snapshot = app.readTaskGraphPort(taskPort(taskGraph([taskStep(' padded id ')], { taskId: ' task exact ' })));
+  assert.equal(snapshot.graph.taskId, ' task exact ');
+  assert.equal(snapshot.graph.ordered[0].stepId, ' padded id ');
+  assert.equal(snapshot.graph.ordered[0].objective, '  Supplied objective\n');
+});
+
+test('timeouts accept finite positive numbers through 86400 without coercion or running a timer', () => {
+  for (const timeoutSeconds of [Number.MIN_VALUE, 0.5, 1, 86400]) assert.equal(app.readTaskGraphPort(taskPort(taskGraph([taskStep('first', { timeoutSeconds })]))).rejected, false);
+  for (const timeoutSeconds of [0, -1, 86400.01, Infinity, -Infinity, NaN, true, '30', null, undefined]) rejectedTask(taskPort(taskGraph([taskStep('first', { timeoutSeconds })])));
+});
+
+test('all thirty canonical owners are accepted while aliases, unknown IDs and coercible objects reject', () => {
+  for (const [ownerAgentId, alias] of rosterTriples) {
+    assert.equal(app.readTaskGraphPort(taskPort(taskGraph([taskStep('first', { ownerAgentId })]))).graph.steps[0].ownerAgentId, ownerAgentId);
+    rejectedTask(taskPort(taskGraph([taskStep('first', { ownerAgentId: alias })])));
+  }
+  for (const ownerAgentId of ['unknown', 'phoenix ', 'PHOENIX', '__proto__', undefined, {}]) rejectedTask(taskPort(taskGraph([taskStep('first', { ownerAgentId })])));
+});
+
+test('step and edge ceilings admit exact bounds and reject the whole graph above them', () => {
+  const forty = Array.from({ length: 40 }, (_, index) => taskStep(`node-${index}`));
+  assert.equal(app.readTaskGraphPort(taskPort(taskGraph(forty))).graph.steps.length, 40);
+  rejectedTask(taskPort(taskGraph([])));
+  rejectedTask(taskPort(taskGraph([...forty, taskStep('extra')])));
+  const roots = Array.from({ length: 12 }, (_, index) => taskStep(`root-${index}`));
+  const rootIds = roots.map((step) => step.stepId);
+  const children = Array.from({ length: 10 }, (_, index) => taskStep(`child-${index}`, { dependsOn: rootIds }));
+  const exact = taskGraph([...roots, ...children]);
+  assert.equal(app.readTaskGraphPort(taskPort(exact)).graph.edgeCount, 120);
+  rejectedTask(taskPort(taskGraph([...exact.steps, taskStep('one-more', { dependsOn: ['root-0'] })])));
+  rejectedTask(taskPort(taskGraph([...roots, taskStep('thirteenth'), taskStep('too-many', { dependsOn: [...rootIds, 'thirteenth'] })])));
+});
+
+test('input references and dependencies use bounded ordered arrays with exact strings and no interpretation', () => {
+  const inputRefs = Array.from({ length: 8 }, () => '😀'.repeat(64));
+  const snapshot = app.readTaskGraphPort(taskPort(taskGraph([taskStep('first', { inputRefs })])));
+  assert.equal(snapshot.graph.steps[0].inputRefs.length, 8, 'duplicate input references remain permitted');
+  for (const inputRefs of [['x'.repeat(129)], [' '], [null], [{}], Array(9).fill('ref'), {}, 'ref']) rejectedTask(taskPort(taskGraph([taskStep('first', { inputRefs })])));
+  for (const dependsOn of ['first', {}, [null], [' '], ['x'.repeat(129)]]) rejectedTask(taskPort(taskGraph([taskStep('first', { dependsOn })])));
+});
+
+test('duplicate IDs/dependencies, unknown/self-dependencies and all cyclic components reject without repair', () => {
+  for (const steps of [[taskStep(), taskStep()], [taskStep('first', { dependsOn: ['first'] })],
+    [taskStep('first', { dependsOn: ['missing'] })], [taskStep('root'), taskStep('child', { dependsOn: ['root', 'root'] })],
+    [taskStep('a', { dependsOn: ['b'] }), taskStep('b', { dependsOn: ['a'] })],
+    [taskStep('root'), taskStep('a', { dependsOn: ['b'] }), taskStep('b', { dependsOn: ['c'] }), taskStep('c', { dependsOn: ['a'] })]]) rejectedTask(taskPort(taskGraph(steps)));
+  assert.equal(app.taskTopology([]), undefined);
+  assert.equal(app.taskTopology([taskStep('a', { dependsOn: ['b'] }), taskStep('b', { dependsOn: ['a'] })]), undefined);
+  rejectedTask(taskPort(taskGraph([taskStep(' exact '), taskStep('downstream', { dependsOn: ['exact'] })])));
+});
+
+test('source-priority topology compares newly eligible earlier nodes against all existing roots', () => {
+  const steps = [taskStep('a', { dependsOn: ['c'] }), taskStep('b', { dependsOn: ['a'] }), taskStep('c'), taskStep('d')];
+  const graph = app.readTaskGraphPort(taskPort(taskGraph(steps))).graph;
+  assert.deepEqual(Array.from(graph.ordered, (step) => step.stepId), ['c', 'a', 'b', 'd']);
+  assert.deepEqual(Array.from(graph.roots), ['c', 'd']);
+  assert.deepEqual(Array.from(graph.layers), [0, 1, 2, 0]);
+  assert.equal(graph.edgeCount, 2);
+  const markup = taskMarkup(taskPort(taskGraph(steps)));
+  assert.deepEqual([...markup.matchAll(/<span class="task-step-id">([^<]+)<\/span>/g)].map((match) => match[1]), ['c', 'a', 'b', 'd']);
+  assert.match(markup, /Dependency layer 2 · Downstream step/);
+  assert.match(markup, /Depends on: c/);
+  assert.match(markup, /Structural root steps: c, d/);
+});
+
+test('topology agrees with independently enumerated legal source-priority orders for 1536 four-node DAGs', () => {
+  function permutations(values) {
+    return values.length ? values.flatMap((value, index) => permutations(values.filter((_, at) => at !== index)).map((tail) => [value, ...tail])) : [[]];
+  }
+  const ids = ['a', 'b', 'c', 'd'];
+  const orders = permutations(ids);
+  const edgeOptions = [['a', 'b'], ['a', 'c'], ['a', 'd'], ['b', 'c'], ['b', 'd'], ['c', 'd']];
+  for (let mask = 0; mask < 64; mask += 1) {
+    const edges = edgeOptions.filter((_, index) => mask & (1 << index));
+    const legal = orders.filter((order) => edges.every(([before, after]) => order.indexOf(before) < order.indexOf(after)));
+    for (const source of orders) {
+      const steps = source.map((id) => taskStep(id, { dependsOn: edges.filter(([, after]) => after === id).map(([before]) => before) }));
+      const expected = [...legal].sort((left, right) => {
+        for (let index = 0; index < 4; index += 1) { const difference = source.indexOf(left[index]) - source.indexOf(right[index]); if (difference) return difference; }
+        return 0;
+      })[0];
+      assert.deepEqual(Array.from(app.taskTopology(steps).ordered, (step) => step.stepId), expected);
+    }
+  }
+});
+
+test('task snapshots are detached frozen copies without writes to caller objects', () => {
+  const step = taskStep('first', { inputRefs: ['original-ref'] });
+  const graph = taskGraph([step]);
+  const snapshot = app.readTaskGraphPort(taskPort(graph)).graph;
+  step.objective = 'changed'; step.inputRefs[0] = 'changed'; graph.steps.push(taskStep('extra'));
+  assert.equal(snapshot.steps.length, 1);
+  assert.equal(snapshot.steps[0].objective, '  Supplied objective\n');
+  assert.equal(snapshot.steps[0].inputRefs[0], 'original-ref');
+  for (const value of [snapshot, snapshot.steps, snapshot.ordered, snapshot.roots, snapshot.layers, snapshot.steps[0], snapshot.steps[0].dependsOn, snapshot.steps[0].inputRefs]) assert.ok(Object.isFrozen(value));
+});
+
+test('accessors, sparse/extended arrays and throwing reflective proxies reject without text or exception leakage', () => {
+  let reads = 0;
+  const getter = () => { reads += 1; throw new Error('private task secret'); };
+  for (const field of ['status', 'graph']) { const port = taskPort(); Object.defineProperty(port, field, { get: getter }); rejectedTask(port); }
+  for (const field of ['taskId', 'steps', 'taskState']) { const graph = taskGraph(); Object.defineProperty(graph, field, { get: getter }); rejectedTask(taskPort(graph)); }
+  for (const field of Object.keys(taskStep())) { const step = taskStep(); Object.defineProperty(step, field, { get: getter }); rejectedTask(taskPort(taskGraph([step]))); }
+  for (const field of ['steps', 'dependsOn', 'inputRefs']) {
+    for (const array of [Array(1), Object.assign([], { extra: true }), Object.assign([], { [Symbol('extra')]: true })]) {
+      rejectedTask(field === 'steps' ? taskPort(taskGraph(array)) : taskPort(taskGraph([taskStep('first', { [field]: array })])));
+    }
+    const array = []; Object.defineProperty(array, '0', { get: getter });
+    rejectedTask(field === 'steps' ? taskPort(taskGraph(array)) : taskPort(taskGraph([taskStep('first', { [field]: array })])));
+  }
+  for (const proxy of [new Proxy(taskPort(), { ownKeys() { throw new Error('private'); } }),
+    new Proxy(taskPort(), { getOwnPropertyDescriptor() { throw new Error('private'); } }),
+    new Proxy(taskPort(), { ownKeys() { return ['unexpected']; } })]) rejectedTask(proxy);
+  const revoked = Proxy.revocable([], {}); revoked.revoke(); rejectedTask(taskPort(taskGraph(revoked.proxy)));
+  const getTrap = new Proxy([taskStep()], { get: getter });
+  assert.equal(app.readTaskGraphPort(taskPort(taskGraph(getTrap))).rejected, false);
+  assert.equal(reads, 0);
+  assert.doesNotMatch(taskMarkup(new Proxy(taskPort(), { ownKeys() { throw new Error('private task secret'); } })), /private task secret/);
+});
+
+test('actual step selection handlers survive navigation, reject unknown IDs and reset on task/graph/disconnect changes', () => {
+  const port = taskPort(taskGraph([taskStep('one'), taskStep('two')]));
+  const read = hookHarness(undefined, undefined, port);
+  read().navigate('Task Graph');
+  assert.equal(read().task.selected.stepId, 'one');
+  const workspace = app.TaskWorkspace({ task: read().task });
+  const graphFragment = workspace.props.children[1];
+  const list = graphFragment.props.children[1].props.children[0].props.children;
+  list.props.children[1].props.children.props.onClick();
+  assert.equal(read().task.selected.stepId, 'two');
+  for (const value of ['unknown', {}, null, 'two ']) read().task.select(value);
+  assert.equal(read().task.selected.stepId, 'two');
+  read().navigate('Agent Network'); read().navigate('Home / Chat'); read().navigate('Task Graph');
+  assert.equal(read().task.selected.stepId, 'two');
+  read().updateTaskPort(taskPort(taskGraph([taskStep('one'), taskStep('two')], { taskId: 'different-task' })));
+  assert.equal(read().task.selected.stepId, 'one', 'same step IDs cannot transfer selection across tasks');
+  read().task.select('two');
+  read().updateTaskPort(taskPort(taskGraph([taskStep('replacement')], { taskId: 'different-task' })));
+  assert.equal(read().task.selected.stepId, 'replacement');
+  read().updateTaskPort(taskPort(port.graph, 'degraded'));
+  assert.equal(read().task.selected, undefined);
+  assert.doesNotMatch(renderToStaticMarkup(read().panel), /Selected step:|Supplied objective/);
+  read().updateTaskPort(port);
+  assert.equal(read().task.selected.stepId, 'one', 'reconnection starts with the first admitted step');
+});
+
+test('step controls are accessible native selection only with no inferred runtime badges or execution actions', () => {
+  const markup = taskMarkup(taskPort(taskGraph([taskStep('first'), taskStep('second', { dependsOn: ['first'] })], { taskState: 'waiting_permission' })));
+  assert.match(markup, /aria-label="Steps in source-priority topological order"/);
+  const buttons = [...markup.matchAll(/<button([^>]*)>/g)];
+  assert.equal(buttons.length, 2);
+  for (const [, attrs] of buttons) { assert.match(attrs, /type="button"/); assert.match(attrs, /aria-pressed="(?:true|false)"/); assert.match(attrs, /aria-controls="task-detail"/); assert.doesNotMatch(attrs, /disabled|tabindex|role=/); }
+  assert.equal(buttons.filter(([, attrs]) => attrs.includes('aria-pressed="true"')).length, 1);
+  assert.match(markup, /Selected step: first/);
+  assert.doesNotMatch(markup, />Run<|>Cancel<|>Retry<|>Approve<|>Deny<|step completed|step running|<progress|<time/i);
+  assert.match(markup, /Definitions and state markers confer no permission or verified success/);
+});
+
+test('all supplied task text remains escaped literal data without HTML/Markdown/URL/code interpretation', () => {
+  const text = '<script>run()</script> [link](https://invalid) **literal**';
+  const graph = taskGraph([taskStep('<img src=x>', { objective: text, expectedOutput: text, completionRule: text, inputRefs: [text] })], { taskId: '<svg onload=run()>' });
+  const markup = taskMarkup(taskPort(graph));
+  assert.match(markup, /&lt;script&gt;run\(\)&lt;\/script&gt;/);
+  assert.match(markup, /&lt;img src=x&gt;/);
+  assert.match(markup, /&lt;svg onload=run\(\)&gt;/);
+  assert.ok(markup.includes('[link](https://invalid) **literal**'));
+  assert.doesNotMatch(markup, /<script|<img|<svg|<iframe|<a\b|<strong|<code/);
+});
+
+test('task composition preserves the entire PHX-082 roster/search/status/UI code block and chat behavior', () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const previous = execFileSync('git', ['show', '09c5b8dcab19b33289caba4c04e2f3b3dfa42752:apps/desktop/src/App.tsx'], { cwd: root, encoding: 'utf8' });
+  const original = previous.slice(previous.indexOf('// Frozen presentation reference'), previous.indexOf('export function ViewPanel'));
+  const current = appSource.slice(appSource.indexOf('// Frozen presentation reference'), appSource.indexOf('export const taskStates'));
+  assert.equal(current, original);
+  const read = hookHarness(); read().setDraft('local draft'); read().directory.select('verifier'); read().directory.search('LEVI');
+  read().navigate('Task Graph'); read().navigate('Agent Network');
+  assert.equal(read().directory.selectedId, 'verifier'); assert.equal(read().directory.query, 'LEVI');
+  read().navigate('Home / Chat'); assert.equal(read().draft, 'local draft');
+  assert.match(renderToStaticMarkup(read().panel), /Voice unavailable/);
+});
+
+test('task CSS bounds scrolling and literal text while stacking at the unchanged 800x600 window', () => {
+  assert.match(css, /\.task-layout\s*\{[^}]*minmax\(0, 1fr\) minmax\(0, 1fr\)/);
+  assert.match(css, /@media \(max-width: 1000px\)[\s\S]*?\.task-layout \{ grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(css, /\.task-steps\s*\{[^}]*max-height:[^}]*overflow-y:\s*auto/);
+  assert.match(css, /\.task-step-button\s*\{[^}]*min-height:\s*42px;[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(css, /\.task-step-button\[aria-pressed="true"\]/);
+  assert.match(css, /\.task-text\s*\{[^}]*white-space:\s*pre-wrap;[^}]*overflow-wrap:\s*anywhere/);
+  assert.doesNotMatch(css, /\.task-[^}]*position:\s*(?:fixed|absolute)|text-overflow:\s*ellipsis|line-clamp/);
 });

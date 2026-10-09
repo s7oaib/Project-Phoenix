@@ -2883,3 +2883,98 @@ Ruff, format, mypy, all 77 Python package source/dependency parity, unchanged he
 credential scan and individual INV-001..024 review pass. All validation receipts
 are external. Live agent status/control are NOT IMPLEMENTED; manual WebView2
 end-to-end acceptance is PENDING. Phase 8 remains INCOMPLETE; PHX-083..087 TODO.
+
+## ADR-070 — Read-only source-priority task graphs from bounded borrowed evidence
+
+Status: Accepted
+Date: 2026-10-08
+Ticket: PHX-083
+
+PHX-083 adds a read-only Task Graph workspace to the existing React/TypeScript/CSS
+shell. Default App supplies no TaskGraphPort and shows No task graph connected with
+no invented task rows/progress. Only an explicitly connected, validated borrowed
+snapshot provides task ID, optional task-level state, steps and metadata. Unavailable
+or degraded ports suppress all graph/state; malformed input shows a generic notice.
+
+TaskGraphPort is passive readonly data: status connected/unavailable/degraded and an
+optional graph containing taskId, optional taskState and ordered steps. Each step has
+only stepId, ownerAgentId, objective, dependsOn, inputRefs, expectedOutput,
+timeoutSeconds and completionRule. Canonical agent IDs alone establish owner identity;
+PHX-082 aliases are separate display metadata. There are no callbacks or action methods.
+
+Exactly eleven serialized task states match Python PHX-024: created, planning, ready,
+running, waiting_permission, verifying, completed, failed, recovering, degraded and
+cancelled. No per-step runtime status or automatic transition exists. The qualifier
+Caller-supplied task state; not live transport or verified completion stays visible.
+Completed is not execution/LEVI evidence; waiting_permission is not an approval request.
+
+Whole-graph admission requires own data fields, nonblank exact task/step IDs <=128
+UTF-16 units, 1..40 steps, exact known owner IDs, meaningful objective <=600,
+expectedOutput/completionRule <=400, finite numeric timeout >0 and <=86400, <=12
+dependencies per step and <=120 total edges, <=8 input refs each meaningful <=128.
+Reject wrong types, unsupported states, extras/symbols/accessors, sparse or extended
+arrays, duplicate step IDs/dependencies, unknown/self dependencies and cycles as a
+whole. No text truncation, dependency repair or partial private-data display.
+Input refs may repeat, matching PHX-024. Caller inputs are never mutated; only detached
+frozen primitive/array snapshots render after acyclicity proof.
+
+Pure Kahn traversal repeatedly picks the earliest original source position among all
+eligible nodes, including newly eligible earlier nodes. A bounded forty-node scan
+matches Python's heap semantics without a graph dependency. Roots retain source order;
+edge count derives only from admitted dependencies. Ordered native cards show inert
+Depends on text, root/downstream designation and structural dependency layers.
+Structure never establishes runtime readiness, completion, permission or verification.
+
+App-owned local selection starts at the first topological step, accepts only current
+graph step IDs, survives navigation and resets when task identity changes, the selected
+step disappears or the port disconnects. Guarded React render adjustment compares
+identity fields only; there is no background effect, timer or task state mutation.
+Details show canonical owner/alias, objective, expected output, completion rule,
+timeout definition with no running timer, dependencies and inert input references.
+
+Native named selection buttons use aria-pressed/aria-controls; labelled sections and
+polite selection feedback complement unchanged navigation focus/skip behavior. Wrapped
+plain text and bounded step scrolling stack below 1000px for the unchanged 800x600
+window. Existing contrast, narrow navigation and reduced-motion treatment remain.
+HTML/Markdown/command-looking IDs, objectives, rules and refs are JSX-escaped text.
+Descriptor checks avoid getters/coercion/ordinary Proxy get traps, catch reflective
+failures and reveal no exceptions. Reflective traps may run: same-realm JS is not a
+sandbox, and snapshot shape does not authenticate activity or hard-limit browser memory.
+
+PHX-080's fourteen destinations/default/fallback/branding/groups/focus remain intact.
+PHX-081's chat code and PHX-082's entire roster/search/status/UI block stay byte-equal
+to main, apart from task-view composition. Eleven remaining views stay placeholders.
+No GET/POST /tasks, WS/events, execution, cancel/retry, approval, verification action,
+provider/tool/native call, persistence or new dependency. Python/backend/Rust/Tauri
+configs/CSP/empty permissions/manifests/locks remain unchanged. PHOENIX stays supreme.
+
+- npm ci --ignore-scripts PASS; all manifests/locks unchanged, zero audit vulnerabilities.
+- npm test THREE final consecutive runs: 65 passed each, zero failures/skips.
+- TypeScript, Vite build, Tauri info, Cargo check/test and Tauri release build PASS;
+  Cargo defines zero Rust tests. No GUI or dev server was launched.
+- Exact PHX-055/052/051 guards 1 passed x3 each; historical files unchanged.
+  Whole prompt/screenshot/Windows suites 604/397/493 passed.
+- All 18 required individual regressions PASS: API 8, bootstrap 11, registry 96,
+  router 213, ToolRegistry 204, permissions 926, audit 302, secrets 402,
+  Spotify 345, YouTube 358, documents 284, upload 336, startup 509,
+  conversation 950, TTS 602, STT 414, VAD 403, wake 537.
+- Additional PHX-024 test_task_graph_state_machine.py: 348 passed unchanged.
+- Full uv run --locked pytest THREE consecutive runs: 15,721 passed each,
+  same 16 existing skip identities/reasons and one Starlette/httpx warning as main.
+  No new skip/xfail/retry/flaky workaround/filter or warning suppression.
+- uv sync --locked PASS: 49 packages; Ruff check PASS; format PASS: 133 files;
+  strict mypy PASS: 127 source files.
+- External wheel/sdist PASS: all 77 Python sources byte-equal to worktree and
+  Git-normalized main; direct dependency metadata and Requires-Python unchanged.
+  Exact GET /health regression and API source parity PASS; no private artifacts.
+- Credential signature/source/native boundary scan and individual INV-001..024 PASS.
+- Full unstaged/staged diff review, git diff --check and cached --check PASS.
+
+LIVE TASK GRAPH ACCEPTANCE: NOT IMPLEMENTED — no live GET /tasks or /tasks/{id}
+backend transport or WS /events is connected.
+LIVE TASK EXECUTION/CANCELLATION ACCEPTANCE: NOT IMPLEMENTED — no execution,
+cancellation, transition, recovery, verification or permission-action controls.
+MANUAL NATIVE TASK GRAPH ACCEPTANCE: PENDING — no verified end-to-end WebView2
+mouse/keyboard interaction; SSR/hook/CSS/native build evidence is not GUI acceptance.
+
+Phase 8 INCOMPLETE; PHX-084..087 TODO/not started.
