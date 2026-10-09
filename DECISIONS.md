@@ -3015,3 +3015,27 @@ and AuditTrail. All prior workspaces, CSP/capabilities, native/backend code and 
 are preserved. Live permission transport, trusted decision authentication, grants,
 audit and execution remain NOT IMPLEMENTED; native WebView2 acceptance is PENDING.
 Phase 8 remains INCOMPLETE; PHX-085 through PHX-087 stay TODO and PHX-085 is not started.
+
+## ADR-072 — Read-only Memory / Files presentation evidence
+
+Status: Accepted
+Date: 2026-10-09
+
+PHX-085 uses optional caller-owned readonly MemoryPort/FilePort in the existing
+React shell, with the user-confirmed exact DTOs and caps documented in
+docs/21_FRONTEND.md. They are display adapters, not replacements for PHX-030/031
+memory, PHX-032–035 RAG, PHX-043 filesystem or PHX-072/073 document contracts.
+Whole-snapshot own-descriptor admission, bounded primitives and UTC chronology,
+detached frozen records, inert JSX and generic failures precede display even for
+hidden unavailable/degraded sources. Reflection validation is not a Proxy sandbox,
+authentication, memory admission or proof of source truth. Missing evidence is
+not inferred. Local search/selection preserves source order and navigation state.
+
+PUDDING/ROBIN/VEGAPUNK ownership and PermissionEngine authority are unchanged.
+No action callback, live transport, IPC, filesystem, memory mutation, persistence,
+upload/download/save/export/delete, parsing/indexing or background work is added.
+Generated artifacts may exist only in memory; metadata/hash evidence never proves
+disk persistence or file existence. Future trusted adapters must enforce existing
+secret policy and authoritative evidence. No dependency or native security change.
+Deterministic gates passed before acceptance; manual native WebView2 acceptance
+remains PENDING. Phase 8 is INCOMPLETE and PHX-086/087 remain TODO.

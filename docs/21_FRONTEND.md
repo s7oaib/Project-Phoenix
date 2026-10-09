@@ -2,9 +2,9 @@
 
 ## Stack
 
-Implemented through PHX-084: Tauri 2, React 19, TypeScript 6, Vite 8 and CSS.
+Implemented through PHX-085: Tauri 2, React 19, TypeScript 6, Vite 8 and CSS.
 Tailwind CSS, shadcn/ui, Zustand, TanStack Query and React Flow/XYFlow remain
-architecture choices for separately justified later tickets; PHX-080/081/082/083/084 add no dependency.
+architecture choices for separately justified later tickets; PHX-080/081/082/083/084/085 add no dependency.
 
 ## PHX-080 app shell
 
@@ -24,14 +24,15 @@ unchanged 800x600 window size, a stacked narrow layout and reduced-motion treatm
 
 PHX-081 replaces only the Home preview with the conversation surface below.
 PHX-082 replaces Agent Network with the canonical directory below; PHX-083 adds
-the read-only Task Graph. PHX-084 adds the Permission Center. The other ten
-panels remain explicitly unconnected.
+the read-only Task Graph. PHX-084 adds the Permission Center; PHX-085 adds the
+read-only Memory and Files workspaces. The other eight panels remain explicitly
+unconnected.
 Backend integration is pending; no operational health, agent, task, permission,
 memory, model or voice success is fabricated.
 
 PHX-082 implements the agent directory and PHX-083 the read-only task view.
-PHX-084 implements permission evidence/human intent, PHX-085 owns memory/files,
-PHX-086 models/voice/settings and PHX-087 observability. PHX-085 through PHX-087
+PHX-084 implements permission evidence/human intent; PHX-085 implements read-only
+memory/file evidence. PHX-086 models/voice/settings and PHX-087 observability
 remain TODO; Phase 8 is INCOMPLETE.
 
 ## PHX-081 chat / voice presentation
@@ -361,3 +362,80 @@ LIVE VOICE ACCEPTANCE: NOT IMPLEMENTED — microphone capture, wake, STT/TTS and
 backend voice binding are not provided in this frontend ticket.
 MANUAL DESKTOP CHAT/VOICE ACCEPTANCE: PENDING — no real GUI/WebView2 end-to-end
 interaction performed; deterministic SSR/AST/build evidence is not a substitute.
+
+## PHX-085 Memory / Files workspace
+
+PHX-085 replaces exactly Memory and Files / Documents with read-only, caller-owned
+presentation ports. Default App has neither port and reports no source connected.
+Connected means supplied evidence only, not a live backend or verified storage.
+Unavailable/degraded sources hide all rows and stale details after full admission;
+malformed snapshots are rejected whole with generic wording. No records are invented.
+
+The user explicitly confirmed these exact DTO keys and caps. MemoryPort is readonly
+{status, records}; FilePort is readonly {status, items}. Status is exactly connected,
+unavailable or degraded. Neither port has callbacks. Memory records require id and
+type (working, episodic, semantic, user, project, agent); optional keys are content,
+sourceType, sourceRef, scope, confidence, importance, createdAt, updatedAt,
+lastAccessedAt, expiresAt, embeddingRef. Files require id, kind, name; kind is exactly
+source_document or generated_artifact. Optional keys are format, mediaType,
+sourceType, sourceRef, contentHash, timestamp, sizeBytes. Raw objects, arbitrary
+metadata, document content, binary bytes, actions and storage claims are rejected.
+
+Both lists admit 0..64 unique opaque IDs. UTF16 bounds: IDs and embedding refs 128,
+memory content 4000, source refs 512, scope/name 256, other text 128, UTC timestamps
+64. Text must be meaningful; IDs and memory provenance/scope/embedding references
+must already be trimmed, consistent with PHX-030. Content and file text formatting
+are preserved. Confidence/importance are finite numbers 0..1; sizeBytes is a safe
+nonnegative integer. UTC timestamps use valid calendar dates and Z or +00:00 only,
+with no local clock or expiry inference. If creation and another memory timestamp
+are both supplied, updated/accessed/expiry cannot precede creation; partial DTOs
+never fabricate missing timestamps. Missing optional fields say Not reported;
+numeric zero remains visible. These DTOs do not replace the Python domain schemas.
+
+Admission uses exact own data descriptors and detached frozen primitive records,
+arrays and snapshots. Unexpected string/symbol keys, missing fields, accessors,
+sparse/extended arrays, duplicates, oversized/invalid values and reflection failures
+reject the whole snapshot. Getters and arbitrary coercion are avoided. Same-realm
+Proxy traps can execute: these checks are neither a sandbox nor authentication.
+All external content, names, references and hashes render as escaped inert text,
+with no HTML/Markdown execution, links, clipboard, logging or source dereferencing.
+
+Case-insensitive local search covers all admitted strings and numeric evidence,
+is capped at 80 UTF16 units, preserves source order, and provides match counts,
+no-match feedback and Clear search. Native selection buttons choose only admitted
+IDs. App-owned query/selection survives navigation, resets to first/none on source
+loss or removed IDs, and explicitly labels selection outside the current filter.
+Memory and Files state remains independent of each other and older workspaces.
+
+Semantic headings, labelled inputs, native buttons, aria-pressed/aria-controls and
+polite atomic counts/selection feedback preserve keyboard operation. Existing
+visible focus, reduced motion, cinder/amber palette and system fonts remain. Wrapped
+details and bounded scrollable lists stack at narrow widths; search does not steal
+focus. All 14 navigation IDs, branding, skip link, landmarks, default/fallback,
+focus wiring and PHX-081/082/083/084 logic are preserved. Eight other destinations
+remain honest placeholders. The entire prior logic prefix and three original
+foundation test bodies are checked byte for byte.
+
+PUDDING owns memory, ROBIN document generation and VEGAPUNK indexing. Supplied
+content/provenance does not prove authoritative memory, source truth, persistence
+or retrieval. File metadata does not prove existence, readability, upload or
+indexing; supplied hashes are not independently verified. Generated artifacts are
+visibly distinct and may exist only in memory, never claimed saved to disk.
+Existing PHX-031 secret-rejection policy remains the future trusted adapter's
+responsibility; display validation cannot establish that supplied content is safe.
+PermissionEngine remains the sole authorization authority; all ten PHX-041 evidence
+combinations and PHX-084 intent semantics remain unchanged.
+
+No live API/network/HTTP/WebSocket, Tauri IPC/plugin, filesystem/file-open, upload,
+download/save/export/delete, memory mutation/forget, parsing/indexing/persistence,
+polling/timers/background work, privileged action or new dependency was added.
+Only GET /health exists; no memory/file route is added or called. Native sources,
+configuration, CSP/capabilities, manifests/locks, backend and historical tests stay
+unchanged. Ports need future trusted adapters; transport remains NOT IMPLEMENTED.
+Manual native WebView2 acceptance remains PENDING: SSR/hooks/AST/build evidence
+does not establish end-to-end GUI acceptance. Phase 8 is INCOMPLETE; PHX-086 and
+PHX-087 remain TODO. PHX-086 was NOT STARTED.
+
+Validation: three final npm runs each 115 passed; all prescribed backend/native,
+package/security gates passed. See PHX-085 completion evidence for exact commands
+and counts. Builds and receipts are outside the repository.
