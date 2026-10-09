@@ -2,9 +2,9 @@
 
 ## Stack
 
-Implemented through PHX-085: Tauri 2, React 19, TypeScript 6, Vite 8 and CSS.
+Implemented through PHX-086: Tauri 2, React 19, TypeScript 6, Vite 8 and CSS.
 Tailwind CSS, shadcn/ui, Zustand, TanStack Query and React Flow/XYFlow remain
-architecture choices for separately justified later tickets; PHX-080/081/082/083/084/085 add no dependency.
+architecture choices for separately justified later tickets; PHX-080/081/082/083/084/085/086 add no dependency.
 
 ## PHX-080 app shell
 
@@ -25,15 +25,15 @@ unchanged 800x600 window size, a stacked narrow layout and reduced-motion treatm
 PHX-081 replaces only the Home preview with the conversation surface below.
 PHX-082 replaces Agent Network with the canonical directory below; PHX-083 adds
 the read-only Task Graph. PHX-084 adds the Permission Center; PHX-085 adds the
-read-only Memory and Files workspaces. The other eight panels remain explicitly
-unconnected.
+read-only Memory and Files workspaces. PHX-086 adds read-only Models, Voice and
+Settings. The other five panels remain explicitly unconnected.
 Backend integration is pending; no operational health, agent, task, permission,
 memory, model or voice success is fabricated.
 
 PHX-082 implements the agent directory and PHX-083 the read-only task view.
 PHX-084 implements permission evidence/human intent; PHX-085 implements read-only
-memory/file evidence. PHX-086 models/voice/settings and PHX-087 observability
-remain TODO; Phase 8 is INCOMPLETE.
+memory/file evidence. PHX-086 implements model/voice evidence and a non-editor
+Settings overview. PHX-087 observability remains TODO; Phase 8 is INCOMPLETE.
 
 ## PHX-081 chat / voice presentation
 
@@ -439,3 +439,86 @@ PHX-087 remain TODO. PHX-086 was NOT STARTED.
 Validation: three final npm runs each 115 passed; all prescribed backend/native,
 package/security gates passed. See PHX-085 completion evidence for exact commands
 and counts. Builds and receipts are outside the repository.
+
+## PHX-086 Models / Voice / Settings
+
+PHX-086 replaces exactly Models, Voice and Settings. ModelPort and VoicePort
+are optional caller-owned readonly evidence ports without callbacks; default App
+has neither and reports no evidence source connected. A connected status means
+caller-supplied evidence only. No operational health or settings are fabricated.
+
+The user's implementation request explicitly specified the exact proposed DTOs
+and bounds; that instruction confirms the ticket's presentation contract.
+ModelPort has exactly status (connected/unavailable/degraded) and entries (0..64).
+Each entry requires providerId/modelId: meaningful strings at most 128 UTF16 units,
+preserved as supplied. The pair, never modelId alone, identifies evidence; a
+length-prefixed internal inspection key avoids delimiter collisions. Optional
+fields are providerStatus (healthy/degraded/unavailable), providerCheckedAt,
+supportsStreaming, supportsStructuredOutput, supportsToolUse, supportsVision,
+supportsCancellation, contextLimitTokens and capabilitiesRefreshedAt. The five
+flags must be booleans; contextLimitTokens a positive safe integer. Both timestamp
+fields are real calendar UTC ISO text (Z/+00:00), at most 64 UTF16 units. Missing
+optional fields say Not reported; explicit false remains false. No timestamp,
+freshness, residency, preference, installed model, default context or support is
+inferred. These partial display DTOs do not reconstruct canonical domain objects.
+
+VoicePort has exactly status, components (0..6) and optional state. State is
+sleeping/listening/thinking/speaking/degraded_voice/text_only. Component fields
+are id, status and optional checkedAt; IDs are wake_word/vad/stt/tts/conversation/
+audio_output, unique within a snapshot. Component status is available/degraded/
+unavailable; checkedAt uses the same bounded real UTC validation. Only supplied
+components appear; missing state/timestamp says Not reported. All state/component
+details are suppressed when top-level status is unavailable/degraded. UTA owns
+voice, while PHOENIX alone owns overall startup/readiness.
+
+Whole-snapshot admission reuses established own-descriptor, exact-field, bounded
+array/text and UTC helpers. Missing/extra/symbol/accessor fields, sparse/extended
+arrays, duplicate pairs/components, invalid types/enums/booleans/integers/time,
+oversized values or reflection failures reject the whole snapshot. Validation
+precedes status-based suppression. Admitted primitive records, arrays and roots
+are detached and frozen. Exceptions have generic wording, with no diagnostics or
+input logging. Proxy traps may execute; validation is not a sandbox, authentication
+boundary or proof of source truth. No arbitrary metadata, URL/path/environment,
+credential/exception, prompt/output, device/permission, PCM/transcript/audio or
+voice-profile fields are admitted. Trusted future adapters still own authentication
+and privacy policy; shape checks do not guarantee strings contain no private data.
+
+Source-order case-insensitive local search retains the established 80 UTF16 cap,
+counts, Clear search and no-match feedback. Model boolean/number evidence is
+searchable as true/false and numeric text. App-owned independent query/inspection
+state survives navigation and resets to first/none on removed records or source
+loss. Off-filter selected evidence is explicitly labelled. Passive article cards
+have separate named native Inspect evidence buttons for the real local detail
+action; cards have no click handler, pointer/hover affordance or runtime action.
+Inspection never selects a runtime model or activates a voice component.
+
+Settings has no SettingsPort, domain schema, state, callbacks, controls, pretend
+values, toggles or save messages. Five semantic sections describe model/provider
+configuration and voice/device configuration as not connected, no persisted app
+preference editor, unchanged Permission Center/PermissionEngine authority, and no
+new storage/backend integration. Settings cannot be changed or saved here.
+
+Normal React escaping keeps strings inert, without links, HTML/Markdown execution,
+external resources, clipboard or dereferencing. Semantic headings, labels, polite
+atomic counts/selection feedback and native inspection controls retain keyboard
+use. Cinder/amber, system fonts, visible focus and reduced motion remain. Wrapped
+details and bounded lists stack at narrow widths/800x600; no focus theft on search.
+All 14 routes, Home default/fallback, groups, branding, skip link, landmarks and
+focus wiring remain. PHX-081–085 logic prefix and all 28 PHX-085 tests are checked
+byte for byte, except necessary composition/harness plumbing. Five destinations
+remain honest placeholders.
+
+Provider health, capabilities, residency and application readiness stay distinct.
+Voice-channel evidence proves no microphone access, recording/playback, wake
+activation or startup success. Capability flags grant no permissions; unchanged
+PermissionEngine and all ten PHX-041 evidence combinations remain authoritative.
+No live API/network/WebSocket, Tauri IPC/events/plugin, provider/model operation,
+microphone/audio/device access, file/shell/clipboard, settings mutation/persistence,
+polling/timers/worker or dependency was added. Current API remains GET /health.
+Native security/configuration, backend, manifests/locks and historical tests are
+unchanged. SSR/hooks/AST/native builds are deterministic evidence only; manual
+native WebView2 acceptance remains PENDING. Phase 8 INCOMPLETE; PHX-087 TODO.
+
+Validation: baseline npm 115 verified before edits; final three runs each 141
+passed. All prescribed and impacted backend/native/package/security gates passed.
+Exact commands/counts are in the PHX-086 receipt; all outputs are external.
