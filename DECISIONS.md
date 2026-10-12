@@ -3064,3 +3064,41 @@ adapters own authentication/privacy and authoritative evidence. PHX-081–085,
 native/CSP/capabilities, backend, manifests/locks and historical guards remain
 unchanged. Deterministic gates passed; manual native WebView2 remains PENDING.
 Phase 8 INCOMPLETE; PHX-087 TODO and NOT STARTED.
+
+## ADR-074 — Bounded read-only diagnostic evidence without telemetry collection
+
+Status: Accepted
+Date: 2026-10-12
+Ticket: PHX-087
+
+Use the explicitly user-confirmed ObservabilityPort display DTO: status plus
+metrics/logs/traces, each capped at 64 unique IDs. Preserve all exact metric,
+severity and trace-kind vocabularies, required/optional field allowlists,
+UTF-16/finite-number/real-UTC bounds and primitive values from the ticket.
+These presentation DTOs replace no backend event, permission, task or model contract.
+
+Validate the complete source through own data descriptors before display,
+including hidden unavailable/degraded data. Reject malformed snapshots whole,
+with generic failure wording; detach/freeze accepted primitive snapshots. Missing
+source, supplied empty evidence, unavailable/degraded and populated evidence stay
+distinct. Source loss hides details and resets selected records. Independent
+source-order local searches (80 UTF-16 units), counts, Clear search and named
+native inspection controls change only local React state. Cards stay passive;
+supplied text is escaped and inert. Existing UI state and architecture remain
+preserved except necessary composition/harness plumbing.
+
+No instrumentation, collection, computation/aggregation, live transport, API/IPC,
+runtime/provider hooks, logging, persistence, filesystem/export/clipboard or new
+dependency. PHOENIX alone orchestrates; PermissionEngine alone authorizes.
+Supplied records prove neither execution, permission outcomes, LEVI completion
+nor recovery success. Shape validation guarantees neither secret-free strings
+nor authenticated/current/complete/factual evidence. Proxy traps may execute;
+trusted future producers must enforce redaction and authentication.
+
+All mandatory deterministic gates passed before acceptance. External evidence
+retains failed/incomplete validation attempts and the explicitly approved
+containment/baseline repairs; no test/security weakening occurred. Manual native
+WebView2 acceptance remains PENDING and live integration remains absent.
+PHX-087 is DONE; Phase 8 stays INCOMPLETE. Its phase-status decision is BLOCKED
+pending explicit phase-level native/backend acceptance policy, as required by
+the user's PHX-087 execution section 9. No phase-level completion is inferred.

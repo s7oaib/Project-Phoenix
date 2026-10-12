@@ -1,5 +1,5 @@
 # PHX-087 — Observability / Developer View
-Status: TODO
+Status: DONE
 Phase: 8 — Frontend
 Branch: feature/PHX-087-observability-developer-view
 Starting main/base SHA: b2cf0fa3552d430343e06b813e76eb50f5b62e04
@@ -157,3 +157,57 @@ Return one complete evidence report with branch/base/final SHAs; exact changed p
 - EXPORT / PERSISTENCE / FILESYSTEM / CLIPBOARD: NOT IMPLEMENTED.
 - MANUAL NATIVE WEBVIEW2 ACCEPTANCE: PENDING unless independently performed.
 - PHX-087 must not claim phase completion beyond what the current project policy and evidence support.
+
+## Completion evidence — 2026-10-12
+
+The explicitly approved DTO contract is implemented in the Observability view:
+bounded caller-supplied metrics/logs/traces, truthful source status, whole-snapshot
+admission, independent local search/inspection and inert text. Original ticket
+requirements remain intact apart from Status and this evidence receipt.
+
+Main remains b2cf0fa3552d430343e06b813e76eb50f5b62e04. Preparation HEAD is
+a220a50604865ea5e70e86971c03c19d1ce62a3c, adding only this specification.
+The existing three-file implementation was preserved without product-code edits
+during this execution review. Final delivery uses only the seven allowed paths.
+
+Fresh detached-main baseline: npm 141; Python 15,721 passed, 16 skipped, one
+existing StarletteDeprecationWarning. Three final npm runs each passed 181
+(40 added cases), with zero failure/cancel/skip/TODO. Three final full Python
+runs each passed 15,721, with the same 16 skip identities/types/reasons/source
+lines and warning text. Raw skip locations differ only by the verified checkout
+root. All 60 required final command gates passed; no warning was suppressed.
+The 19 focused regressions, three model suites and seven memory/filesystem
+suites match actual fresh-main counts. PHX-055 exact guard and full prompt suite
+x3; screenshot/vision 397 and Windows UI automation 493 with exact guards x3.
+TypeScript/Vite/Tauri/Cargo/release, locked sync/Ruff/mypy and wheel/sdist pass.
+Both packages contain the exact 77 Python sources and unchanged dependencies
+and Python requirement. Rust has zero tests; its successful builds are not GUI
+acceptance. INV-001–024 and complete privacy/security/source reviews passed.
+
+Earlier incomplete full-suite launch attempts and the three CRLF main-baseline
+failures remain recorded and receive no passing credit. The owner explicitly
+approved R1–R6 validation policy amendments and resumption after the exact-blob
+baseline repair. The single six-role diagnostic independently found that uv-root
+termination left five admitted descendants alive; later scoped cleanup succeeded.
+Its total physical-process accounting was incomplete and is not generalized.
+Final full suites instead used an exclusive new job assigned before root resume,
+reached zero active job members naturally, and required no forced cleanup.
+Exact commands, exit/count/skip/warning comparisons, immutable receipts, package
+hashes, approvals and full report are external:
+C:\Users\shoai\.codex\validation\PHX-087-phase-review-20261012.
+
+No backend/API/native/CSP/capability/manifest/lock/schema/event change. Earlier
+implementation and test bodies remain preserved except necessary composition
+and harness/source-call plumbing. No unrelated ticket or Phase 9 work started.
+PHX-087 deterministic acceptance is DONE. Phase 8 remains INCOMPLETE: its
+phase-status decision is BLOCKED under the original execution section 9.
+ROADMAP.md requires ticket acceptance and invariant compliance; PHX-080's
+nonblocking native/live statement is ticket-specific, so broader final phase
+acceptance is not inferred. Manual native WebView2 acceptance remains PENDING.
+
+LIVE OBSERVABILITY TRANSPORT / TELEMETRY COLLECTION: NOT IMPLEMENTED.
+RUNTIME METRICS / LOGS / TRACES: NOT CONNECTED BY THIS TICKET.
+LOG REDACTION / TRUSTED SOURCE AUTHENTICATION: OWNED BY FUTURE TRUSTED PRODUCER/ADAPTER; UI VALIDATION IS NOT A GUARANTEE.
+EXPORT / PERSISTENCE / FILESYSTEM / CLIPBOARD: NOT IMPLEMENTED.
+MANUAL NATIVE WEBVIEW2 ACCEPTANCE: PENDING
+PHASE 8 COMPLETION: ONLY AS PER VERIFIED AUTHORITATIVE POLICY AND EVIDENCE.

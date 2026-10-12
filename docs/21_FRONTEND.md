@@ -2,9 +2,9 @@
 
 ## Stack
 
-Implemented through PHX-086: Tauri 2, React 19, TypeScript 6, Vite 8 and CSS.
+Implemented through PHX-087: Tauri 2, React 19, TypeScript 6, Vite 8 and CSS.
 Tailwind CSS, shadcn/ui, Zustand, TanStack Query and React Flow/XYFlow remain
-architecture choices for separately justified later tickets; PHX-080/081/082/083/084/085/086 add no dependency.
+architecture choices for separately justified later tickets; PHX-080/081/082/083/084/085/086/087 add no dependency.
 
 ## PHX-080 app shell
 
@@ -26,14 +26,14 @@ PHX-081 replaces only the Home preview with the conversation surface below.
 PHX-082 replaces Agent Network with the canonical directory below; PHX-083 adds
 the read-only Task Graph. PHX-084 adds the Permission Center; PHX-085 adds the
 read-only Memory and Files workspaces. PHX-086 adds read-only Models, Voice and
-Settings. The other five panels remain explicitly unconnected.
+Settings. PHX-087 adds read-only Observability. The other four panels remain explicitly unconnected.
 Backend integration is pending; no operational health, agent, task, permission,
 memory, model or voice success is fabricated.
 
 PHX-082 implements the agent directory and PHX-083 the read-only task view.
 PHX-084 implements permission evidence/human intent; PHX-085 implements read-only
 memory/file evidence. PHX-086 implements model/voice evidence and a non-editor
-Settings overview. PHX-087 observability remains TODO; Phase 8 is INCOMPLETE.
+Settings overview. PHX-087 displays caller-supplied diagnostics; Phase 8 remains INCOMPLETE pending explicit phase-level acceptance policy.
 
 ## PHX-081 chat / voice presentation
 
@@ -522,3 +522,68 @@ native WebView2 acceptance remains PENDING. Phase 8 INCOMPLETE; PHX-087 TODO.
 Validation: baseline npm 115 verified before edits; final three runs each 141
 passed. All prescribed and impacted backend/native/package/security gates passed.
 Exact commands/counts are in the PHX-086 receipt; all outputs are external.
+
+## PHX-087 Observability / Developer — accepted 2026-10-12
+
+Observability displays optional caller-supplied diagnostic evidence only. Default
+App supplies no ObservabilityPort and reports No diagnostic source connected.
+There is no telemetry collection, live transport, API/IPC, runtime/provider hook,
+filesystem, clipboard/export, logging or persistence. GET /health stays unchanged.
+
+The explicitly confirmed display DTO has exactly status
+(connected/unavailable/degraded), metrics, logs and traces. Each list admits at
+most 64 entries with IDs unique within that collection. IDs are meaningful,
+already-trimmed strings up to 128 UTF-16 code units. IDs may repeat across lists.
+
+Metrics require id/name/value, with optional unit/recordedAt. Names are exactly
+task_step_latency, provider_model, ttft, tokens_per_sec, ram, vram, cpu, disk_io,
+tool_success_failure, verification_result, recovery_attempts, permission_decisions.
+Values retain their finite-number or meaningful-string type (strings <=256 units);
+units <=32. No inferred unit, conversion, aggregation, sorting or freshness claim.
+Logs require id/timestamp/severity/subsystem/message, with optional
+correlationId/taskId/stepId/errorType. Severities are debug/info/warning/error/critical;
+subsystem/errorType <=128 and message <=1000. Traces require
+id/timestamp/kind/summary, with optional correlationId/taskId/stepId/actorId.
+Kinds are decision/agent/tool/permission/failure/recovery/verification; summary
+<=1000. Optional IDs use the same ID bound. Timestamps are real calendar UTC ISO
+text ending Z/+00:00, <=64 units. Missing optional evidence is Not reported.
+
+Whole-snapshot own-data validation rejects extra/missing/string/symbol/accessor
+fields, malformed/sparse/extended arrays, duplicate IDs, wrong types/enums/bounds,
+non-finite numbers, invalid UTC dates and reflective failures before any row
+renders. Accepted primitive records, lists and root are detached and frozen.
+Unavailable/degraded snapshots are fully validated, then all details suppressed.
+Missing source differs from supplied empty data and never implies inactivity.
+Source loss hides details and safely resets selected records. Generic failures
+never echo rejected content. Proxy traps may run; validation is not a sandbox,
+authentication boundary, source-truth check or redaction guarantee. A trusted
+future producer must enforce redaction and source authentication.
+
+Three independent local search/inspection states preserve source order, bound
+search to 80 UTF-16 units, report exact counts and support Clear search/no-match
+feedback. Native named inspection buttons change local display only. Cards stay
+passive; supplied text stays escaped and inert, without links or dereferencing.
+Headings/labels, polite counts/selection feedback, visible focus, reduced motion,
+system fonts, cinder/amber, wrapping and bounded lists preserve keyboard use at
+narrow widths and the unchanged 800x600 window. All 14 routes, Home default,
+shell focus/landmarks and PHX-080–086 behavior remain preserved except necessary
+composition and test-harness plumbing. PHOENIX alone orchestrates; PermissionEngine
+alone authorizes. Diagnostics cannot prove execution, permissions or recovery.
+
+Fresh authoritative main: frontend 141; Python 15,721 passed/16 skipped/one warning.
+Three final frontend runs each passed 181 (40 added cases), with no failures,
+cancellations or skips. Three final Python runs each passed 15,721 with the same
+16 skip identities/types/reasons/source lines and existing Starlette/httpx warning.
+Only the bound absolute checkout root differs in raw baseline skip locations.
+All 60 required final command results, native builds, focused/historical guards,
+package/dependency/source parity and INV-001–024 reviews passed. Earlier incomplete
+launcher attempts and three CRLF baseline failures are preserved; none supplies
+passing credit. Validation resumed under explicit approvals after reviewed job
+containment and byte-verified main-checkout repair, without changing tests.
+Exact commands, receipts, raw JUnit, comparisons and limitations are outside the
+repository: C:\Users\shoai\.codex\validation\PHX-087-phase-review-20261012.
+
+PHX-087 deterministic acceptance: DONE. Manual native WebView2 acceptance: PENDING.
+Phase 8 remains INCOMPLETE; the phase-status decision is BLOCKED because final
+phase-level acceptance policy is unresolved under execution authority section 9.
+Builds and deterministic checks do not establish manual GUI or live integration.

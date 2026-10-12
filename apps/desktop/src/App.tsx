@@ -1213,7 +1213,126 @@ export function SettingsWorkspace() {
   </section>;
 }
 
-export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, permissions, memory, files, models, voice }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft; agentPort?: AgentPort; directory?: AgentDirectory; task?: TaskPresentation; permissions?: PermissionPresentation; memory?: EvidenceBrowser<MemoryPresentationRecord>; files?: EvidenceBrowser<FilePresentationRecord>; models?: ModelBrowser; voice?: VoiceBrowser }) {
+export const diagnosticMetricNames = Object.freeze(['task_step_latency', 'provider_model', 'ttft', 'tokens_per_sec', 'ram', 'vram', 'cpu', 'disk_io', 'tool_success_failure', 'verification_result', 'recovery_attempts', 'permission_decisions'] as const);
+export const diagnosticSeverities = Object.freeze(['debug', 'info', 'warning', 'error', 'critical'] as const);
+export const diagnosticTraceKinds = Object.freeze(['decision', 'agent', 'tool', 'permission', 'failure', 'recovery', 'verification'] as const);
+export type MetricDisplayEntry = { readonly id: string; readonly name: (typeof diagnosticMetricNames)[number]; readonly value: string | number; readonly unit?: string; readonly recordedAt?: string };
+export type LogDisplayEntry = { readonly id: string; readonly timestamp: string; readonly severity: (typeof diagnosticSeverities)[number]; readonly subsystem: string; readonly message: string; readonly correlationId?: string; readonly taskId?: string; readonly stepId?: string; readonly errorType?: string };
+export type TraceDisplayEntry = { readonly id: string; readonly timestamp: string; readonly kind: (typeof diagnosticTraceKinds)[number]; readonly summary: string; readonly correlationId?: string; readonly taskId?: string; readonly stepId?: string; readonly actorId?: string };
+export type ObservabilityPort = { readonly status: 'connected' | 'unavailable' | 'degraded'; readonly metrics: readonly MetricDisplayEntry[]; readonly logs: readonly LogDisplayEntry[]; readonly traces: readonly TraceDisplayEntry[] };
+type DiagnosticEntry = MetricDisplayEntry | LogDisplayEntry | TraceDisplayEntry;
+type DiagnosticCollectionId = 'metrics' | 'logs' | 'traces';
+type DiagnosticSnapshot = ObservabilityPort & { readonly missing: boolean; readonly rejected: boolean };
+
+function readDiagnosticEntry(value: unknown, collection: DiagnosticCollectionId): DiagnosticEntry | undefined {
+  if (collection === 'metrics') {
+    const fields = agentDataFields(value, ['id', 'name', 'value'], ['unit', 'recordedAt']);
+    if (!fields || !permissionId(fields.id) || !diagnosticMetricNames.some((name) => name === fields.name) ||
+        !(typeof fields.value === 'number' ? Number.isFinite(fields.value) : taskText(fields.value, 256)) ||
+        ('unit' in fields && !taskText(fields.unit, 32)) || ('recordedAt' in fields && !permissionUtc(fields.recordedAt))) return undefined;
+    return Object.freeze({ ...fields }) as MetricDisplayEntry;
+  }
+  const fields = collection === 'logs' ?
+    agentDataFields(value, ['id', 'timestamp', 'severity', 'subsystem', 'message'], ['correlationId', 'taskId', 'stepId', 'errorType']) :
+    agentDataFields(value, ['id', 'timestamp', 'kind', 'summary'], ['correlationId', 'taskId', 'stepId', 'actorId']);
+  if (!fields || !permissionId(fields.id) || !permissionUtc(fields.timestamp)) return undefined;
+  for (const key of ['correlationId', 'taskId', 'stepId', 'actorId']) if (key in fields && !permissionId(fields[key])) return undefined;
+  if (collection === 'logs') {
+    if (!diagnosticSeverities.some((severity) => severity === fields.severity) || !taskText(fields.subsystem, 128) ||
+        !taskText(fields.message, 1000) || ('errorType' in fields && !taskText(fields.errorType, 128))) return undefined;
+    return Object.freeze({ ...fields }) as LogDisplayEntry;
+  }
+  if (!diagnosticTraceKinds.some((kind) => kind === fields.kind) || !taskText(fields.summary, 1000)) return undefined;
+  return Object.freeze({ ...fields }) as TraceDisplayEntry;
+}
+function readDiagnosticCollection(value: unknown, collection: DiagnosticCollectionId): readonly DiagnosticEntry[] | undefined {
+  const values = taskArray(value, 64);
+  if (!values) return undefined;
+  const entries: DiagnosticEntry[] = [];
+  for (const value of values) {
+    const entry = readDiagnosticEntry(value, collection);
+    if (!entry || entries.some((item) => item.id === entry.id)) return undefined;
+    entries.push(entry);
+  }
+  return Object.freeze(entries);
+}
+export function readObservabilityPort(value: unknown): DiagnosticSnapshot {
+  const empty = Object.freeze([]);
+  const unavailable = Object.freeze({ status: 'unavailable' as const, metrics: empty, logs: empty, traces: empty, missing: value === undefined, rejected: value !== undefined });
+  try {
+    const fields = agentDataFields(value, ['status', 'metrics', 'logs', 'traces']);
+    if (!fields || !runtimeStatus(fields.status)) return unavailable;
+    const metrics = readDiagnosticCollection(fields.metrics, 'metrics');
+    const logs = readDiagnosticCollection(fields.logs, 'logs');
+    const traces = readDiagnosticCollection(fields.traces, 'traces');
+    if (!metrics || !logs || !traces) return unavailable;
+    return Object.freeze({ status: fields.status, missing: false, rejected: false,
+      metrics: fields.status === 'connected' ? metrics as readonly MetricDisplayEntry[] : empty,
+      logs: fields.status === 'connected' ? logs as readonly LogDisplayEntry[] : empty,
+      traces: fields.status === 'connected' ? traces as readonly TraceDisplayEntry[] : empty });
+  } catch { return unavailable; }
+}
+export function filterDiagnostics<T extends DiagnosticEntry>(entries: readonly T[], value: unknown) {
+  const query = boundedAgentQuery(value).toLowerCase();
+  return entries.filter((entry) => Object.values(entry).some((field) => typeof field === 'string' ? field.toLowerCase().includes(query) :
+    typeof field === 'number' && `${field}`.includes(query)));
+}
+function useDiagnosticBrowser<T extends DiagnosticEntry>(entries: readonly T[]) {
+  const [query, setDiagnosticQuery] = useState('');
+  const [selectedId, setDiagnosticId] = useState<string | undefined>(undefined);
+  const selected = entries.find((entry) => entry.id === selectedId) ?? entries[0];
+  const nextId = selected?.id;
+  if (selectedId !== nextId) setDiagnosticId(nextId);
+  function search(value: unknown) { setDiagnosticQuery(boundedAgentQuery(value)); }
+  function select(value: unknown) { if (entries.some((entry) => entry.id === value)) setDiagnosticId(value as string); }
+  return { entries, query, selected, search, select };
+}
+type DiagnosticBrowser<T extends DiagnosticEntry> = ReturnType<typeof useDiagnosticBrowser<T>>;
+type ObservabilityPresentation = { snapshot: DiagnosticSnapshot; metrics: DiagnosticBrowser<MetricDisplayEntry>; logs: DiagnosticBrowser<LogDisplayEntry>; traces: DiagnosticBrowser<TraceDisplayEntry> };
+
+function DiagnosticCollection({ browser, collection, connected }: { browser: DiagnosticBrowser<DiagnosticEntry>; collection: DiagnosticCollectionId; connected: boolean }) {
+  const title = collection === 'metrics' ? 'Metrics' : collection === 'logs' ? 'Structured logs' : 'Trace events';
+  const matches = filterDiagnostics(browser.entries, browser.query); const selected = browser.selected;
+  return <section className="diagnostic-collection" aria-labelledby={`${collection}-diagnostic-heading`}>
+    <h4 id={`${collection}-diagnostic-heading`}>{title}</h4>
+    <div className="diagnostic-search"><label htmlFor={`${collection}-diagnostic-query`}>Search supplied {collection}</label>
+      <p id={`${collection}-diagnostic-help`}>Local text search, up to 80 UTF-16 code units. Source order is preserved.</p>
+      <div className="diagnostic-search-controls"><input id={`${collection}-diagnostic-query`} type="search" maxLength={80} value={browser.query} aria-describedby={`${collection}-diagnostic-help ${collection}-diagnostic-count`} onChange={(event) => browser.search(event.currentTarget.value)} />
+        <button type="button" onClick={() => browser.search('')}>Clear search</button></div>
+      <p id={`${collection}-diagnostic-count`} role="status" aria-live="polite" aria-atomic="true">{connected ? `${matches.length} of ${browser.entries.length} supplied ${collection} match` : 'Diagnostic counts unavailable while details are hidden.'}</p>
+    </div>
+    <div className="diagnostic-layout"><section className="diagnostic-results" aria-label={`Matching supplied ${collection}`}>
+      {!connected ? <p>No diagnostic details displayed.</p> : browser.entries.length === 0 ? <p>The connected source supplied no {collection}. Empty evidence does not establish runtime inactivity.</p> : matches.length === 0 ? <p>No records match. Clear search to restore supplied evidence.</p> :
+        <ul className="diagnostic-list">{matches.map((entry) => <li key={entry.id}><article className="diagnostic-card"><p>Caller-supplied diagnostic evidence</p><p>{entry.id}</p><p>{'name' in entry ? entry.name : 'severity' in entry ? entry.severity : entry.kind}</p>
+          <button className="diagnostic-inspect" type="button" aria-label={`Inspect supplied ${collection} record ${entry.id}`} aria-pressed={selected?.id === entry.id} aria-controls={`${collection}-diagnostic-detail`} onClick={() => browser.select(entry.id)}>Inspect evidence</button></article></li>)}</ul>}
+    </section><section className="diagnostic-detail" id={`${collection}-diagnostic-detail`} aria-labelledby={`${collection}-diagnostic-detail-heading`}><h5 id={`${collection}-diagnostic-detail-heading`}>Selected {collection} evidence</h5>
+      {!selected ? <p>No admitted record selected.</p> : <><p role="status" aria-live="polite" aria-atomic="true">Selected: {selected.id}{!matches.some((entry) => entry.id === selected.id) ? ' — outside the current filter. Clear search to show its inspection control.' : ''}</p>
+        <dl><dt>ID (supplied)</dt><dd>{selected.id}</dd>
+          {'value' in selected ? <><dt>Metric name (supplied)</dt><dd>{selected.name}</dd><dt>Value (supplied)</dt><dd>{selected.value}</dd><dt>Value type (supplied)</dt><dd>{typeof selected.value}</dd><dt>Unit (supplied)</dt><dd>{runtimeValue(selected.unit)}</dd><dt>Recorded at (supplied UTC)</dt><dd>{runtimeValue(selected.recordedAt)}</dd></> : <>
+            <dt>Timestamp (supplied UTC)</dt><dd>{selected.timestamp}</dd>
+            {'severity' in selected ? <><dt>Severity (supplied)</dt><dd>{selected.severity}</dd><dt>Subsystem (supplied)</dt><dd>{selected.subsystem}</dd><dt>Message (supplied)</dt><dd>{selected.message}</dd><dt>Error type (supplied)</dt><dd>{runtimeValue(selected.errorType)}</dd></> : <><dt>Kind (supplied)</dt><dd>{selected.kind}</dd><dt>Summary (supplied)</dt><dd>{selected.summary}</dd><dt>Actor ID (supplied)</dt><dd>{runtimeValue(selected.actorId)}</dd></>}
+            <dt>Correlation ID (supplied)</dt><dd>{runtimeValue(selected.correlationId)}</dd><dt>Task ID (supplied)</dt><dd>{runtimeValue(selected.taskId)}</dd><dt>Step ID (supplied)</dt><dd>{runtimeValue(selected.stepId)}</dd></>}
+        </dl></>}
+      <p>Inspection changes only local display. These records do not establish execution, permission outcomes, verified completion or successful recovery.</p>
+    </section></div>
+  </section>;
+}
+export function ObservabilityWorkspace({ diagnostics }: { diagnostics: ObservabilityPresentation }) {
+  const snapshot = diagnostics.snapshot;
+  return <section className="diagnostic-workspace" aria-labelledby="diagnostic-heading">
+    <header className="diagnostic-source"><p className="eyebrow">Read-only · caller-supplied evidence</p><h3 id="diagnostic-heading">Observability / Developer</h3><h4>Diagnostic source status</h4>
+      <p role="status" aria-live="polite" aria-atomic="true">{snapshot.missing ? 'No diagnostic source connected.' : snapshot.rejected ? 'Diagnostic snapshot rejected. No supplied details are shown.' :
+        snapshot.status === 'connected' ? 'Caller-supplied diagnostic evidence. Live telemetry is not connected.' : snapshot.status === 'degraded' ? 'Diagnostic source degraded. Supplied details are hidden.' : 'Diagnostic source unavailable. Supplied details are hidden.'}</p>
+      <p>PHOENIX remains the sole supreme orchestrator. PermissionEngine alone authorizes actions.</p>
+      <p>Supplied diagnostics are not proof of live, current, complete, verified or sanitized data. Shape validation does not guarantee secret-free strings; the trusted producer must enforce redaction.</p>
+    </header>
+    <DiagnosticCollection browser={diagnostics.metrics} collection="metrics" connected={snapshot.status === 'connected'} />
+    <DiagnosticCollection browser={diagnostics.logs} collection="logs" connected={snapshot.status === 'connected'} />
+    <DiagnosticCollection browser={diagnostics.traces} collection="traces" connected={snapshot.status === 'connected'} />
+  </section>;
+}
+
+export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, permissions, memory, files, models, voice, diagnostics }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft; agentPort?: AgentPort; directory?: AgentDirectory; task?: TaskPresentation; permissions?: PermissionPresentation; memory?: EvidenceBrowser<MemoryPresentationRecord>; files?: EvidenceBrowser<FilePresentationRecord>; models?: ModelBrowser; voice?: VoiceBrowser; diagnostics?: ObservabilityPresentation }) {
   if (view.id === 'home') {
     return chat ? <ChatWorkspace chatPort={chatPort} chat={chat} /> : null;
   }
@@ -1225,6 +1344,7 @@ export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, pe
   if (view.id === 'models') return models ? <ModelsWorkspace models={models} /> : null;
   if (view.id === 'voice') return voice ? <VoiceWorkspace voice={voice} /> : null;
   if (view.id === 'settings') return <SettingsWorkspace />;
+  if (view.id === 'observability') return diagnostics ? <ObservabilityWorkspace diagnostics={diagnostics} /> : null;
   return (
     <section className="placeholder-panel" aria-labelledby="workspace-heading">
       <p className="eyebrow">Workspace preview</p>
@@ -1238,7 +1358,7 @@ export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, pe
   );
 }
 
-export default function App({ chatPort, agentPort, taskPort, permissionPort, memoryPort, filePort, modelPort, voicePort }: { chatPort?: ChatPort; agentPort?: AgentPort; taskPort?: TaskGraphPort; permissionPort?: PermissionPort; memoryPort?: MemoryPort; filePort?: FilePort; modelPort?: ModelPort; voicePort?: VoicePort } = {}) {
+export default function App({ chatPort, agentPort, taskPort, permissionPort, memoryPort, filePort, modelPort, voicePort, observabilityPort }: { chatPort?: ChatPort; agentPort?: AgentPort; taskPort?: TaskGraphPort; permissionPort?: PermissionPort; memoryPort?: MemoryPort; filePort?: FilePort; modelPort?: ModelPort; voicePort?: VoicePort; observabilityPort?: ObservabilityPort } = {}) {
   const [selectedView, setSelectedView] = useState<ViewId>('home');
   const mainRef = useRef<HTMLElement>(null);
   const focusRequested = useRef(false);
@@ -1254,6 +1374,8 @@ export default function App({ chatPort, agentPort, taskPort, permissionPort, mem
   const voiceSnapshot = readVoicePort(voicePort);
   const models = { ...useRuntimeBrowser(modelSnapshot.entries), snapshot: modelSnapshot };
   const voice = { ...useRuntimeBrowser(voiceSnapshot.entries), snapshot: voiceSnapshot };
+  const diagnosticSnapshot = readObservabilityPort(observabilityPort);
+  const diagnostics = { snapshot: diagnosticSnapshot, metrics: useDiagnosticBrowser(diagnosticSnapshot.metrics), logs: useDiagnosticBrowser(diagnosticSnapshot.logs), traces: useDiagnosticBrowser(diagnosticSnapshot.traces) };
 
   useEffect(() => {
     if (focusRequested.current) {
@@ -1308,7 +1430,7 @@ export default function App({ chatPort, agentPort, taskPort, permissionPort, mem
           <h2 id="page-title">{currentView.label}</h2>
           <p className="page-purpose">{currentView.purpose}</p>
         </header>
-        <div className="page-content"><ViewPanel view={currentView} chatPort={chatPort} chat={chat} agentPort={agentPort} directory={directory} task={task} permissions={permissions} memory={memory} files={files} models={models} voice={voice} /></div>
+        <div className="page-content"><ViewPanel view={currentView} chatPort={chatPort} chat={chat} agentPort={agentPort} directory={directory} task={task} permissions={permissions} memory={memory} files={files} models={models} voice={voice} diagnostics={diagnostics} /></div>
       </main>
     </div>
   );
