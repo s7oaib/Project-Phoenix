@@ -98,7 +98,7 @@ test('React SSR renders the semantic branded shell and selected home navigation'
 });
 
 test('every future workspace renders its own purpose and an honest placeholder', () => {
-  for (const [id, label] of expectedViews.filter(([id]) => id !== 'home' && id !== 'agents' && id !== 'tasks' && id !== 'permissions' && id !== 'memory' && id !== 'files' && id !== 'models' && id !== 'voice' && id !== 'settings')) {
+  for (const [id, label] of expectedViews.filter(([id]) => id !== 'home' && id !== 'agents' && id !== 'tasks' && id !== 'permissions' && id !== 'memory' && id !== 'files' && id !== 'models' && id !== 'voice' && id !== 'settings' && id !== 'observability')) {
     const view = app.resolveView(id);
     const markup = renderToStaticMarkup(createElement(app.ViewPanel, { view }));
     assert.ok(markup.includes(`${label} workspace`));
@@ -165,6 +165,7 @@ test('shell has no backend, native bridge, storage or unsafe content execution',
   for (const name of ['permissionId', 'permissionUtc', 'value.match', 'Number', 'readPermissionRequest', 'readPermissionEvaluation', 'permissionEvidenceRules.find', 'rule.risks.some', 'readPermissionPort', 'requests.some', 'requests.push', 'permissionNeedsIntent', 'prunePermissionIntents', 'flight.submittedIds.filter', 'snapshot.requests.find', 'port.requests.find', 'flight.submittedIds.includes', 'port.submitDecision', 'flight.submittedIds.push', 'filterPermissionRequests', 'entries.filter', 'text.some', 'field.toLowerCase', 'field.toLowerCase().includes', 'usePermissionCenter', 'setPermissionQuery', 'setSelectedPermissionId', 'deliverPermissionIntent', 'setPermissionFeedbackId', 'setPermissionPending', 'setPermissionFeedback', 'flight.current.submittedIds.includes', 'permissions.search', 'permissions.select', 'permissions.submit']) allowedCalls.add(name);
   for (const name of ['normalizedEvidenceText', 'memoryClasses.some', 'fileKinds.some', 'evidenceUtcKey', 'fraction.padEnd', 'readMemoryRecord', 'readFileRecord', 'Number.isSafeInteger', 'readEvidencePort', 'entries.some', 'entries.push', 'readMemoryPort', 'readFilePort', 'Object.values', 'Object.values(entry).some', '`${field}`.includes', 'snapshot.entries.find', 'setEvidenceQuery', 'setEvidenceId', 'filterEvidence', 'browser.search', 'memory.select', 'files.select', 'useEvidenceBrowser']) allowedCalls.add(name);
   for (const name of ['runtimeStatus', 'runtimeKey', 'providerStatuses.some', 'voiceStates.some', 'voiceComponentIds.some', 'readModelPort', 'readVoicePort', 'filterRuntime', "(field ? 'true' : 'false').includes", 'entries.find', 'setRuntimeQuery', 'setRuntimeKey', 'useRuntimeBrowser', 'runtimeValue', 'models.select', 'voice.select']) allowedCalls.add(name);
+  for (const name of ['diagnosticMetricNames.some', 'diagnosticSeverities.some', 'diagnosticTraceKinds.some', 'readDiagnosticEntry', 'readDiagnosticCollection', 'readObservabilityPort', 'filterDiagnostics', 'setDiagnosticQuery', 'setDiagnosticId', 'useDiagnosticBrowser', 'browser.select']) allowedCalls.add(name);
   for (const call of nodes(ts.isCallExpression)) {
     const name = call.expression.getText(appTree);
     assert.ok(allowedCalls.has(name) || name === 'views.filter((view) => view.group === group).map', name);
@@ -401,7 +402,7 @@ test('failure, cancellation and malformed acknowledgements retain the draft', as
 });
 
 // This deterministic hook harness tests state/handlers, not native DOM event delivery.
-function hookHarness(port, agentPort, taskPort, permissionPort, memoryPort, filePort, modelPort, voicePort) {
+function hookHarness(port, agentPort, taskPort, permissionPort, memoryPort, filePort, modelPort, voicePort, observabilityPort) {
   const state = [];
   const refs = [];
   let stateIndex = 0;
@@ -418,11 +419,11 @@ function hookHarness(port, agentPort, taskPort, permissionPort, memoryPort, file
   return () => {
     stateIndex = 0;
     refIndex = 0;
-    const shell = module.default({ chatPort: port, agentPort, taskPort, permissionPort, memoryPort, filePort, modelPort, voicePort });
+    const shell = module.default({ chatPort: port, agentPort, taskPort, permissionPort, memoryPort, filePort, modelPort, voicePort, observabilityPort });
     const chat = shell.props.children[2].props.children[1].props.children.props.chat;
     const panel = shell.props.children[2].props.children[1].props.children;
     const buttons = shell.props.children[1].props.children[1].props.children.flatMap((group) => group.props.children[1].props.children.map((item) => item.props.children));
-    return { ...chat, directory: panel.props.directory, task: panel.props.task, permissions: panel.props.permissions, memory: panel.props.memory, files: panel.props.files, models: panel.props.models, voice: panel.props.voice, panel, updateTaskPort(value) { taskPort = value; }, updatePermissionPort(value) { permissionPort = value; }, updateMemoryPort(value) { memoryPort = value; }, updateFilePort(value) { filePort = value; }, updateModelPort(value) { modelPort = value; }, updateVoicePort(value) { voicePort = value; }, navigate(label) { buttons.find((button) => button.props.children === label).props.onClick(); } };
+    return { ...chat, directory: panel.props.directory, task: panel.props.task, permissions: panel.props.permissions, memory: panel.props.memory, files: panel.props.files, models: panel.props.models, voice: panel.props.voice, diagnostics: panel.props.diagnostics, panel, updateObservabilityPort(value) { observabilityPort = value; }, updateTaskPort(value) { taskPort = value; }, updatePermissionPort(value) { permissionPort = value; }, updateMemoryPort(value) { memoryPort = value; }, updateFilePort(value) { filePort = value; }, updateModelPort(value) { modelPort = value; }, updateVoicePort(value) { voicePort = value; }, navigate(label) { buttons.find((button) => button.props.children === label).props.onClick(); } };
   };
 }
 
@@ -1796,4 +1797,234 @@ test('runtime CSS keeps cards passive and lists responsive, scrollable, wrapped 
   assert.match(css, /\.runtime-header dd, \.runtime-detail dd\s*\{[^}]*white-space:\s*pre-wrap;[^}]*overflow-wrap:\s*anywhere/);
   assert.match(css, /\.runtime-search button, \.runtime-inspect\s*\{[^}]*min-height:\s*42px/); assert.match(css, /@media \(max-width: 1000px\)[\s\S]*?\.runtime-layout, \.settings-overview \{ grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(css, /:focus-visible/); assert.match(css, /prefers-reduced-motion/); assert.doesNotMatch(css, /\.runtime-card[^}]*cursor:\s*pointer|\.runtime-card:hover|\.runtime-[^}]*position:\s*(?:fixed|absolute)/);
+});
+
+const diagnosticTime = '2026-10-10T12:30:45.123Z';
+const diagnosticMetric = (id = 'metric-first', extra = {}) => ({ id, name: 'ttft', value: 0, ...extra });
+const diagnosticLog = (id = 'log-first', extra = {}) => ({ id, timestamp: diagnosticTime, severity: 'info', subsystem: 'core', message: 'Supplied observation', ...extra });
+const diagnosticTrace = (id = 'trace-first', extra = {}) => ({ id, timestamp: diagnosticTime, kind: 'decision', summary: 'Supplied decision evidence', ...extra });
+const diagnosticEvidence = (extra = {}) => ({ status: 'connected', metrics: [diagnosticMetric()], logs: [diagnosticLog()], traces: [diagnosticTrace()], ...extra });
+const diagnosticCases = [
+  { key: 'metrics', make: diagnosticMetric, required: ['id', 'name', 'value'], optional: ['unit', 'recordedAt'], extras: { unit: 'ms', recordedAt: diagnosticTime } },
+  { key: 'logs', make: diagnosticLog, required: ['id', 'timestamp', 'severity', 'subsystem', 'message'], optional: ['correlationId', 'taskId', 'stepId', 'errorType'], extras: { correlationId: 'correlation', taskId: 'task', stepId: 'step', errorType: 'reported_error' } },
+  { key: 'traces', make: diagnosticTrace, required: ['id', 'timestamp', 'kind', 'summary'], optional: ['correlationId', 'taskId', 'stepId', 'actorId'], extras: { correlationId: 'correlation', taskId: 'task', stepId: 'step', actorId: 'verifier' } },
+];
+function diagnosticMarkup(port, query = '', selection) {
+  const snapshot = app.readObservabilityPort(port);
+  const diagnostics = { snapshot };
+  for (const { key } of diagnosticCases) diagnostics[key] = { entries: snapshot[key], query, selected: snapshot[key].find((entry) => entry.id === selection) ?? snapshot[key][0], search() {}, select() {} };
+  return renderToStaticMarkup(createElement(app.ObservabilityWorkspace, { diagnostics }));
+}
+function diagnosticRejected(value) {
+  const snapshot = app.readObservabilityPort(value);
+  assert.equal(snapshot.rejected, true);
+  for (const { key } of diagnosticCases) assert.equal(snapshot[key].length, 0, key);
+  return snapshot;
+}
+
+test('PHX-087 defaults disconnected and distinguishes supplied empty, unavailable, degraded and rejected sources', () => {
+  assert.match(diagnosticMarkup(undefined), /No diagnostic source connected/);
+  assert.equal(app.readObservabilityPort(undefined).rejected, false);
+  const read = hookHarness(); read().navigate('Observability / Developer');
+  assert.match(renderToStaticMarkup(read().panel), /No diagnostic source connected/);
+  const empty = diagnosticMarkup(diagnosticEvidence({ metrics: [], logs: [], traces: [] }));
+  assert.match(empty, /Live telemetry is not connected/);
+  for (const { key } of diagnosticCases) assert.ok(empty.includes(`connected source supplied no ${key}`));
+  assert.match(empty, /Empty evidence does not establish runtime inactivity/);
+  for (const status of ['unavailable', 'degraded']) {
+    const port = diagnosticEvidence({ status }); const snapshot = app.readObservabilityPort(port);
+    assert.equal(snapshot.rejected, false); assert.equal(snapshot.missing, false);
+    assert.match(diagnosticMarkup(port), new RegExp(`Diagnostic source ${status}`));
+    for (const { key } of diagnosticCases) assert.equal(snapshot[key].length, 0);
+    assert.doesNotMatch(diagnosticMarkup(port), /metric-first|log-first|trace-first|Supplied observation/);
+    diagnosticRejected(diagnosticEvidence({ status, logs: [diagnosticLog('bad', { timestamp: 'invalid' })] }));
+  }
+  for (const value of [null, false, 1, '', [], {}, diagnosticEvidence({ status: 'healthy' }), diagnosticEvidence({ extra: 1 })]) diagnosticRejected(value);
+});
+
+test('PHX-087 presentation types expose only the exact approved own data fields', () => {
+  const fields = (name) => nodes(ts.isTypeAliasDeclaration).find((node) => node.name.text === name).type.members.map((member) => member.name.text);
+  assert.deepEqual(fields('ObservabilityPort'), ['status', 'metrics', 'logs', 'traces']);
+  for (const [index, name] of ['MetricDisplayEntry', 'LogDisplayEntry', 'TraceDisplayEntry'].entries()) assert.deepEqual(fields(name), [...diagnosticCases[index].required, ...diagnosticCases[index].optional]);
+  for (const key of ['status', 'metrics', 'logs', 'traces']) { const port = diagnosticEvidence(); delete port[key]; diagnosticRejected(port); }
+  for (const key of ['status', 'metrics', 'logs', 'traces']) diagnosticRejected(diagnosticEvidence({ [key]: undefined }));
+});
+
+for (const spec of diagnosticCases) {
+  test(`PHX-087 ${spec.key} require exact fields, optional primitives and whole-snapshot admission`, () => {
+    const port = diagnosticEvidence({ [spec.key]: [spec.make('complete', spec.extras)] });
+    const snapshot = app.readObservabilityPort(port); assert.equal(snapshot.rejected, false);
+    assert.equal(JSON.stringify(snapshot[spec.key]), JSON.stringify(port[spec.key]));
+    assert.ok(diagnosticMarkup(port).includes('complete'));
+    for (const key of spec.required) { const row = spec.make(); delete row[key]; diagnosticRejected(diagnosticEvidence({ [spec.key]: [spec.make('good'), row] })); }
+    for (const key of [...spec.required, ...spec.optional]) {
+      for (const invalid of [undefined, null, {}, [], () => 1, true]) diagnosticRejected(diagnosticEvidence({ [spec.key]: [spec.make('bad', { [key]: invalid })] }));
+    }
+    for (const key of ['extra', 'metadata', 'stack', 'prompt', 'modelOutput', 'transcript', 'body', 'credentials', 'environment', 'path', 'arguments', 'result', 'callback']) diagnosticRejected(diagnosticEvidence({ [spec.key]: [spec.make('bad', { [key]: 'forbidden field' })] }));
+    const invalidMarkup = diagnosticMarkup(diagnosticEvidence({ [spec.key]: [spec.make('valid-but-hidden'), spec.make('invalid', { extra: 'private diagnostic' })] }));
+    assert.match(invalidMarkup, /Diagnostic snapshot rejected/); assert.doesNotMatch(invalidMarkup, /valid-but-hidden|private diagnostic|metric-first|log-first|trace-first/);
+  });
+  test(`PHX-087 ${spec.key} enforce 64 unique IDs, strict normalized identities and source order`, () => {
+    const rows = Array.from({ length: 64 }, (_, index) => spec.make(`id-${63 - index}`));
+    const snapshot = app.readObservabilityPort(diagnosticEvidence({ [spec.key]: rows }));
+    assert.equal(snapshot.rejected, false); assert.equal(JSON.stringify(snapshot[spec.key].map((row) => row.id)), JSON.stringify(rows.map((row) => row.id)));
+    diagnosticRejected(diagnosticEvidence({ [spec.key]: [...rows, spec.make('overflow')] }));
+    diagnosticRejected(diagnosticEvidence({ [spec.key]: [spec.make('same'), spec.make('same')] }));
+    for (const id of [' ', '\t', ' id', 'id ', 'x'.repeat(129), '😀'.repeat(65)]) diagnosticRejected(diagnosticEvidence({ [spec.key]: [spec.make(id)] }));
+    assert.equal(app.readObservabilityPort(diagnosticEvidence({ [spec.key]: [spec.make('😀'.repeat(64))] })).rejected, false);
+  });
+  test(`PHX-087 ${spec.key} reject sparse, extended, accessor and reflective arrays without exposing input`, () => {
+    let reads = 0;
+    const accessor = []; Object.defineProperty(accessor, '0', { get() { reads++; throw Error('private reflection'); } });
+    const extended = [spec.make()]; extended.extra = 1;
+    const symbol = [spec.make()]; symbol[Symbol('hidden')] = 1;
+    const sparse = [spec.make(), , spec.make('last')];
+    const traps = [new Proxy([spec.make()], { ownKeys() { throw Error('private reflection'); } }), new Proxy([spec.make()], { getOwnPropertyDescriptor() { throw Error('private reflection'); } })];
+    for (const array of [null, {}, 'array', sparse, accessor, extended, symbol, ...traps]) diagnosticRejected(diagnosticEvidence({ [spec.key]: array }));
+    assert.equal(reads, 0);
+  });
+  test(`PHX-087 ${spec.key} read only own descriptors, detach values and freeze every admitted level`, () => {
+    let reads = 0;
+    const accessor = spec.make(); Object.defineProperty(accessor, 'id', { get() { reads++; throw Error('private read'); } });
+    const symbolic = spec.make(); symbolic[Symbol('private')] = 1;
+    for (const row of [accessor, symbolic, new Proxy(spec.make(), { ownKeys() { throw Error('private read'); } }), new Proxy(spec.make(), { getOwnPropertyDescriptor() { throw Error('private read'); } })]) diagnosticRejected(diagnosticEvidence({ [spec.key]: [row] }));
+    const row = spec.make('preserved', spec.extras);
+    const proxy = new Proxy(row, { get() { reads++; throw Error('private read'); } });
+    const port = diagnosticEvidence({ [spec.key]: [proxy] }); const snapshot = app.readObservabilityPort(port);
+    assert.equal(snapshot.rejected, false); assert.equal(reads, 0);
+    assert.ok(Object.isFrozen(snapshot)); for (const { key } of diagnosticCases) { assert.ok(Object.isFrozen(snapshot[key])); for (const entry of snapshot[key]) assert.ok(Object.isFrozen(entry)); }
+    row.id = 'changed'; port[spec.key].push(spec.make('appended'));
+    assert.equal(snapshot[spec.key].length, 1); assert.equal(snapshot[spec.key][0].id, 'preserved');
+  });
+}
+
+test('PHX-087 top-level reflection rejects safely and cross-collection IDs remain independent', () => {
+  let reads = 0; const accessor = diagnosticEvidence(); Object.defineProperty(accessor, 'status', { get() { reads++; throw Error('private source'); } });
+  const symbolic = diagnosticEvidence(); symbolic[Symbol('hidden')] = true;
+  for (const port of [accessor, symbolic, new Proxy(diagnosticEvidence(), { ownKeys() { throw Error('private source'); } }), new Proxy(diagnosticEvidence(), { getOwnPropertyDescriptor() { throw Error('private source'); } })]) { diagnosticRejected(port); assert.doesNotMatch(diagnosticMarkup(port), /private source/); }
+  assert.equal(reads, 0);
+  const same = diagnosticEvidence({ metrics: [diagnosticMetric('same')], logs: [diagnosticLog('same')], traces: [diagnosticTrace('same')] });
+  assert.equal(app.readObservabilityPort(same).rejected, false);
+});
+
+test('PHX-087 admits every exact diagnostic vocabulary and rejects invented values', () => {
+  const names = ['task_step_latency', 'provider_model', 'ttft', 'tokens_per_sec', 'ram', 'vram', 'cpu', 'disk_io', 'tool_success_failure', 'verification_result', 'recovery_attempts', 'permission_decisions'];
+  const severities = ['debug', 'info', 'warning', 'error', 'critical'];
+  const kinds = ['decision', 'agent', 'tool', 'permission', 'failure', 'recovery', 'verification'];
+  assert.deepEqual(Array.from(app.diagnosticMetricNames), names); assert.deepEqual(Array.from(app.diagnosticSeverities), severities); assert.deepEqual(Array.from(app.diagnosticTraceKinds), kinds);
+  for (const [key, field, values, make] of [['metrics', 'name', names, diagnosticMetric], ['logs', 'severity', severities, diagnosticLog], ['traces', 'kind', kinds, diagnosticTrace]]) {
+    for (const value of values) assert.equal(app.readObservabilityPort(diagnosticEvidence({ [key]: [make('valid', { [field]: value })] })).rejected, false);
+    for (const value of ['unknown', values[0].toUpperCase(), ` ${values[0]}`, 1, { toString() { throw Error('coercion'); } }]) diagnosticRejected(diagnosticEvidence({ [key]: [make('bad', { [field]: value })] }));
+  }
+});
+
+for (const [key, field, bound, normalized] of [
+  ['metrics', 'id', 128, true], ['metrics', 'value', 256, false], ['metrics', 'unit', 32, false],
+  ['logs', 'id', 128, true], ['logs', 'subsystem', 128, false], ['logs', 'message', 1000, false], ['logs', 'errorType', 128, false],
+  ['traces', 'id', 128, true], ['traces', 'summary', 1000, false],
+  ...['logs', 'traces'].flatMap((key) => ['correlationId', 'taskId', 'stepId'].map((field) => [key, field, 128, true])), ['traces', 'actorId', 128, true],
+]) {
+  test(`PHX-087 ${key}.${field} enforces its ${bound} UTF-16 bound without repairing text`, () => {
+    const spec = diagnosticCases.find((spec) => spec.key === key);
+    for (const text of ['x'.repeat(bound), '😀'.repeat(bound / 2)]) assert.equal(app.readObservabilityPort(diagnosticEvidence({ [key]: [spec.make('valid', { [field]: text })] })).rejected, false);
+    for (const text of ['', ' \n\t', 'x'.repeat(bound + 1), '😀'.repeat(bound / 2) + 'x']) diagnosticRejected(diagnosticEvidence({ [key]: [spec.make('bad', { [field]: text })] }));
+    const text = '  exact text\n'; const snapshot = app.readObservabilityPort(diagnosticEvidence({ [key]: [spec.make('valid', { [field]: text })] }));
+    if (normalized) assert.equal(snapshot.rejected, true); else { assert.equal(snapshot.rejected, false); assert.equal(snapshot[key][0][field], text); }
+  });
+}
+
+test('PHX-087 metric values preserve finite numeric primitives and strings without aggregation or units', () => {
+  for (const value of [0, -0, -123.5, Number.MAX_VALUE, Number.MIN_VALUE, '0', ' 123.50 ']) {
+    const snapshot = app.readObservabilityPort(diagnosticEvidence({ metrics: [diagnosticMetric('value', { value })] }));
+    assert.equal(snapshot.rejected, false); assert.ok(Object.is(snapshot.metrics[0].value, value));
+    const markup = diagnosticMarkup(diagnosticEvidence({ metrics: [diagnosticMetric('value', { value })] }));
+    assert.ok(markup.includes(`<dd>${typeof value}</dd>`)); assert.match(markup, /Unit \(supplied\)<\/dt><dd>Not reported/);
+  }
+  for (const value of [NaN, Infinity, -Infinity, true, null, undefined, 1n, { valueOf() { throw Error('coercion'); } }]) diagnosticRejected(diagnosticEvidence({ metrics: [diagnosticMetric('bad', { value })] }));
+});
+
+test('PHX-087 every diagnostic timestamp requires bounded real calendar UTC without clock inference', () => {
+  for (const [key, field, make] of [['metrics', 'recordedAt', diagnosticMetric], ['logs', 'timestamp', diagnosticLog], ['traces', 'timestamp', diagnosticTrace]]) {
+    for (const time of ['2000-02-29T23:59:59Z', '2024-02-29T00:00:00+00:00', '0001-01-01T00:00:00Z', `2026-10-10T12:30:45.${'1'.repeat(43)}Z`]) assert.equal(app.readObservabilityPort(diagnosticEvidence({ [key]: [make('valid', { [field]: time })] })).rejected, false);
+    for (const time of ['0000-01-01T00:00:00Z', '1900-02-29T00:00:00Z', '2026-02-29T00:00:00Z', '2026-04-31T00:00:00Z', '2026-13-01T00:00:00Z', '2026-01-00T00:00:00Z', '2026-01-01T24:00:00Z', '2026-01-01T00:60:00Z', '2026-01-01T00:00:60Z', '2026-01-01T00:00:00-00:00', '2026-01-01T00:00:00+01:00', '2026-01-01T00:00:00', '2026-01-01t00:00:00z', ' 2026-01-01T00:00:00Z', `2026-10-10T12:30:45.${'1'.repeat(44)}Z`, 123]) diagnosticRejected(diagnosticEvidence({ [key]: [make('bad', { [field]: time })] }));
+  }
+});
+
+test('PHX-087 rendering preserves inert supplied text, source order and optional unknowns', () => {
+  const text = '<img src="external" onerror="run()"> **permission approved**';
+  const port = diagnosticEvidence({ metrics: [diagnosticMetric('second', { value: text }), diagnosticMetric('first', { name: 'cpu', value: 42 })], logs: [diagnosticLog('log', { message: text })], traces: [diagnosticTrace('trace', { summary: text })] });
+  const markup = diagnosticMarkup(port); assert.ok(markup.indexOf('second') < markup.indexOf('first'));
+  assert.ok(markup.includes('&lt;img')); assert.match(markup, /Not reported/);
+  assert.doesNotMatch(markup, /<(img|a|iframe|script|canvas|audio|video)\b/);
+  assert.match(markup, /Shape validation does not guarantee secret-free strings/);
+});
+
+test('PHX-087 local searches preserve source order, bounded queries, numeric text, counts and clear actions', () => {
+  const port = diagnosticEvidence({ metrics: [diagnosticMetric('two', { value: 'ALPHA' }), diagnosticMetric('one', { value: 42 })] });
+  const snapshot = app.readObservabilityPort(port);
+  assert.equal(app.filterDiagnostics(snapshot.metrics, 'alpha')[0].id, 'two'); assert.equal(app.filterDiagnostics(snapshot.metrics, '42')[0].id, 'one');
+  assert.equal(app.filterDiagnostics(snapshot.metrics, { toString() { throw Error('coercion'); } }).length, 2);
+  const read = hookHarness(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, port);
+  read().diagnostics.metrics.search('😀'.repeat(41)); assert.equal(read().diagnostics.metrics.query.length, 80);
+  read().diagnostics.metrics.search('missing'); read().navigate('Observability / Developer');
+  assert.match(renderToStaticMarkup(read().panel), /0 of 2 supplied metrics match/); assert.match(renderToStaticMarkup(read().panel), /No records match/);
+  const workspace = app.ObservabilityWorkspace({ diagnostics: read().diagnostics });
+  const collection = workspace.props.children[1].type(workspace.props.children[1].props);
+  const search = collection.props.children[1]; const controls = search.props.children[2];
+  controls.props.children[1].props.onClick(); assert.equal(read().diagnostics.metrics.query, '');
+  controls.props.children[0].props.onChange({ currentTarget: { value: 'ALPHA' } }); assert.equal(read().diagnostics.metrics.query, 'ALPHA');
+});
+
+test('PHX-087 inspection, navigation, independent state and source loss use actual local handlers', () => {
+  const port = diagnosticEvidence({ metrics: [diagnosticMetric('m1'), diagnosticMetric('m2')], logs: [diagnosticLog('l1'), diagnosticLog('l2')], traces: [diagnosticTrace('t1'), diagnosticTrace('t2')] });
+  const read = hookHarness(undefined, undefined, taskPort(), permissionPort(), memoryEvidence(), fileEvidence(), modelEvidence(), voiceEvidence(), port);
+  read().setDraft('retained'); read().directory.search('LEVI'); read().memory.search('memory'); read().models.search('model');
+  for (const [index, spec] of diagnosticCases.entries()) { read().diagnostics[spec.key].search(`query-${index}`); read().diagnostics[spec.key].select(port[spec.key][1].id); }
+  for (const [, label] of expectedViews) read().navigate(label);
+  for (const [index, spec] of diagnosticCases.entries()) { assert.equal(read().diagnostics[spec.key].query, `query-${index}`); assert.equal(read().diagnostics[spec.key].selected.id, port[spec.key][1].id); }
+  assert.equal(read().draft, 'retained'); assert.equal(read().directory.query, 'LEVI'); assert.equal(read().memory.query, 'memory'); assert.equal(read().models.query, 'model');
+  read().diagnostics.metrics.select('unknown'); assert.equal(read().diagnostics.metrics.selected.id, 'm2');
+  read().diagnostics.metrics.search('');
+  const workspace = app.ObservabilityWorkspace({ diagnostics: read().diagnostics }); const collection = workspace.props.children[1].type(workspace.props.children[1].props);
+  collection.props.children[2].props.children[0].props.children.props.children[0].props.children.props.children[3].props.onClick();
+  assert.equal(read().diagnostics.metrics.selected.id, 'm1');
+  for (const status of ['unavailable', 'degraded']) { read().updateObservabilityPort({ ...port, status }); for (const { key } of diagnosticCases) assert.equal(read().diagnostics[key].selected, undefined); assert.doesNotMatch(renderToStaticMarkup(read().panel), /m1|l1|t1/); }
+  read().updateObservabilityPort(undefined); for (const { key } of diagnosticCases) assert.equal(read().diagnostics[key].selected, undefined);
+  read().updateObservabilityPort(port); for (const { key } of diagnosticCases) assert.equal(read().diagnostics[key].selected.id, port[key][0].id);
+  read().diagnostics.logs.select('l2'); read().updateObservabilityPort({ ...port, logs: [diagnosticLog('new')] }); assert.equal(read().diagnostics.logs.selected.id, 'new');
+  assert.equal(read().diagnostics.metrics.selected.id, 'm1'); assert.equal(read().diagnostics.traces.selected.id, 't1');
+});
+
+test('PHX-087 preserves all prior implementation, runtime tests and security surfaces', () => {
+  const base = 'b2cf0fa3552d430343e06b813e76eb50f5b62e04'; const root = fileURLToPath(new URL('../', import.meta.url));
+  const before = execFileSync('git', ['show', `${base}:apps/desktop/src/App.tsx`], { cwd: root, encoding: 'utf8' });
+  assert.equal(appSource.slice(0, appSource.indexOf('export const diagnosticMetricNames')), before.slice(0, before.indexOf('export function ViewPanel')));
+  const beforeTests = execFileSync('git', ['show', `${base}:tests/workspace.test.mjs`], { cwd: root, encoding: 'utf8' });
+  const currentTests = readFileSync(new URL('./workspace.test.mjs', import.meta.url), 'utf8');
+  assert.equal(currentTests.slice(currentTests.indexOf('const modelEntry'), currentTests.indexOf('const diagnosticTime')).trim(), beforeTests.slice(beforeTests.indexOf('const modelEntry')).trim());
+  const beforeCss = execFileSync('git', ['show', `${base}:apps/desktop/src/styles.css`], { cwd: root, encoding: 'utf8' }); assert.ok(css.startsWith(beforeCss));
+  assert.doesNotMatch(appSource, /console\.|clipboard|writeFile|telemetry\(|collectLogs|fetch\(|WebSocket|setInterval|setTimeout|localStorage|sessionStorage/);
+});
+
+test('PHX-087 diagnostic CSS and markup keep passive cards, semantic controls and reachable responsive lists', () => {
+  assert.match(css, /\.diagnostic-results\s*\{[^}]*max-height:[^}]*overflow-y:\s*auto/);
+  assert.match(css, /\.diagnostic-detail dd\s*\{[^}]*white-space:\s*pre-wrap;[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(css, /@media \(max-width: 1000px\)[\s\S]*\.diagnostic-layout \{ grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(css, /\.diagnostic-search-controls button, \.diagnostic-inspect\s*\{[^}]*min-height:\s*42px/);
+  assert.doesNotMatch(css, /\.diagnostic-card[^}]*cursor:\s*pointer|\.diagnostic-card:hover|\.diagnostic-[^}]*position:\s*(fixed|absolute)/);
+  const markup = diagnosticMarkup(diagnosticEvidence());
+  for (const label of ['Diagnostic source status', 'Metrics', 'Structured logs', 'Trace events', 'Search supplied metrics', 'Search supplied logs', 'Search supplied traces']) assert.ok(markup.includes(label));
+  assert.match(markup, /aria-live="polite"/); assert.match(markup, /type="search"/); assert.match(markup, /type="button"/);
+  assert.doesNotMatch(markup, /<article[^>]*onClick|<(a|form|iframe)\b/);
+});
+
+test('PHX-087 suppressed sources report counts unavailable rather than claiming empty supplied collections', () => {
+  for (const port of [undefined, diagnosticEvidence({ status: 'unavailable' }), diagnosticEvidence({ status: 'degraded' }), diagnosticEvidence({ extra: 1 })]) {
+    const markup = diagnosticMarkup(port);
+    assert.equal((markup.match(/Diagnostic counts unavailable while details are hidden\./g) ?? []).length, 3);
+    assert.doesNotMatch(markup, /0 of 0 supplied|connected source supplied no|metric-first|log-first|trace-first/);
+  }
+  const empty = diagnosticMarkup(diagnosticEvidence({ metrics: [], logs: [], traces: [] }));
+  assert.equal((empty.match(/0 of 0 supplied/g) ?? []).length, 3);
+  assert.doesNotMatch(empty, /Diagnostic counts unavailable/);
 });

@@ -83,9 +83,9 @@ Phase 7 status: COMPLETE.
 - PHX-084 Permission center — DONE
 - PHX-085 Memory/files workspace — DONE
 - PHX-086 Models/voice/settings — DONE
-- PHX-087 Observability/developer view — TODO
+- PHX-087 Observability/developer view — DONE
 
-Phase 8 status: INCOMPLETE — PHX-087 remains TODO.
+Phase 8 status: INCOMPLETE — deterministic frontend tickets are DONE; phase-status decision BLOCKED pending explicit phase-level acceptance policy. Manual native WebView2 acceptance remains PENDING; live integration is not implemented.
 
 ## Phase 9 — Validation & Release
 - PHX-090 Automated test matrix — TODO
