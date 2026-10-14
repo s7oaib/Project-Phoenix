@@ -90,7 +90,7 @@ Phase 7 status: COMPLETE.
 Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (ADR-077): 67 PASS / 0 FAIL / 0 NOT VERIFIED / 1 CONDITIONAL_NOT_REACHABLE (A4, ruled satisfied by the owner). Live backend integration is not implemented; the frontend remains presentation-only by design.
 
 ## Phase 9 — Validation & Release
-- PHX-090 Automated test matrix — TODO
+- PHX-090 Automated test matrix — DONE
 - PHX-091 FYP benchmark suite — TODO
 - PHX-092 Packaging/install workflow — TODO
 - PHX-093 Final demo scenarios — TODO

@@ -3186,3 +3186,44 @@ CONDITIONAL_NOT_REACHABLE. Owner decisions recorded with the evidence:
 Independent read-only verification confirmed the result with caveats, all of
 which were resolved before completion. Required gates pass on main ee2a399.
 PHX-090 is authorized to start. Live backend integration remains out of scope.
+
+## ADR-078 — Automated test matrix and CI
+
+Status: Accepted
+Date: 2026-10-14
+Ticket: PHX-090
+
+Required gates were a hand-run command list kept in external evidence. There
+was no CI; the only PR check was CodeRabbit, which let the PHX-088 guard
+regression reach main.
+
+`scripts/test_matrix.py` (Python standard library only) runs the gates declared
+in `tests/matrix.toml` in order. It records the command, exit code, duration
+and test counts for each gate, and writes schema-versioned JSON plus a Markdown
+summary to the gitignored `.test-matrix/`. The manifest maps every test file to
+the docs/24 categories. Owner decisions (2026-10-14):
+
+- **External manifest.** Existing test files are not edited, because preservation
+  guards pin earlier test blocks.
+- **Explicit gaps.** Uncovered categories are declared `[[gap]]` rows with
+  reasons; gap-filling tests are follow-up tickets.
+- **Manual rows.** Native WebView2 acceptance and live model or device runs are
+  `[[manual]]` rows with evidence and never count as an automated PASS.
+- **CI.** A GitHub Actions workflow runs the matrix on `windows-latest` for PRs to
+  main and pushes to main.
+
+The runner fails on any gate failure, missing tool, timeout, unmapped or missing
+test file, undeclared gap or failed category, or if a gate modifies the working
+tree. It requires a clean tree unless `--allow-dirty` is passed, and records
+that.
+
+`tests/test_test_matrix.py` validates the real manifest inside the normal pytest
+run, so a new test file must be mapped. `pyproject.toml` is pinned by the
+PHX-080 guard and is not edited; the runner is type-checked by its own strict
+mypy gate instead.
+
+New external dependencies are CI-only: GitHub Actions and the actions
+`actions/checkout@v4`, `actions/setup-python@v5`, `astral-sh/setup-uv@v6` (uv
+0.12.10), `actions/setup-node@v4` and `actions/upload-artifact@v4`. There are no
+new runtime, test or package dependencies. `tauri:build` is not part of the
+matrix; the native release build stays a manual, evidence-backed step.
