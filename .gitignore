@@ -26,6 +26,7 @@ target/
 .vite/
 apps/desktop/src-tauri/gen/
 coverage/
+.test-matrix/
 
 # Runtime databases, model weights, caches and logs
 *.db

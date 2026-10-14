@@ -1,0 +1,362 @@
+# PHOENIX automated test matrix manifest (PHX-090, ADR-078).
+# Run: python scripts/test_matrix.py   (see docs/24_TEST_EVALUATION.md)
+# Every tests/test_*.py and tests/*.test.mjs file must be listed under [[file]];
+# every docs/24 category must be covered by a file or declared as a [[gap]].
+schema_version = 1
+
+# ---- Required gates, in execution order. "{out}" is the results directory.
+
+[[gate]]
+id = "uv-sync"
+command = ["uv", "sync", "--locked"]
+timeout = 1200
+
+[[gate]]
+id = "ruff-check"
+command = ["uv", "run", "--locked", "--no-sync", "ruff", "check", "."]
+timeout = 600
+
+[[gate]]
+id = "ruff-format"
+command = ["uv", "run", "--locked", "--no-sync", "ruff", "format", "--check", "."]
+timeout = 600
+
+[[gate]]
+id = "mypy"
+command = ["uv", "run", "--locked", "--no-sync", "mypy"]
+timeout = 1200
+
+[[gate]]
+# pyproject.toml is guard-pinned, so the runner gets its own strict mypy gate.
+id = "mypy-matrix-runner"
+command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py"]
+timeout = 600
+
+[[gate]]
+id = "pytest"
+command = ["uv", "run", "--locked", "--no-sync", "pytest", "-q", "--junitxml={out}/pytest.xml"]
+results = "junit:{out}/pytest.xml"
+timeout = 3600
+
+[[gate]]
+id = "npm-test"
+command = ["npm", "test"]
+results = "node-spec"
+timeout = 1200
+
+[[gate]]
+id = "typecheck"
+command = ["npm", "run", "typecheck", "--workspace", "@phoenix/desktop"]
+timeout = 600
+
+[[gate]]
+id = "frontend-build"
+command = ["npm", "run", "build", "--workspace", "@phoenix/desktop", "--", "--outDir", "{out}/frontend-dist", "--emptyOutDir"]
+timeout = 900
+
+[[gate]]
+id = "tauri-info"
+command = ["npm", "run", "tauri:info", "--workspace", "@phoenix/desktop"]
+timeout = 600
+
+[[gate]]
+id = "cargo-check"
+command = ["cargo", "check", "--locked", "--manifest-path", "apps/desktop/src-tauri/Cargo.toml"]
+timeout = 2400
+
+[[gate]]
+id = "cargo-test"
+command = ["cargo", "test", "--locked", "--manifest-path", "apps/desktop/src-tauri/Cargo.toml"]
+timeout = 2400
+
+[[gate]]
+id = "uv-build"
+command = ["uv", "build", "--out-dir", "{out}/dist"]
+timeout = 900
+
+# ---- Manual acceptance layer (reported as MANUAL; never an automated PASS).
+
+[[manual]]
+id = "native-webview2-acceptance"
+description = "Native WebView2 desktop acceptance of the accepted release executable (keyboard/focus, layout, reduced motion, runtime errors, observability presentation)."
+evidence = "ADR-077; external evidence validation/PHX-phase8-B5-rebuild-20261014-192904 (EXECUTION_REPORT.md, COMPLETE_CHECKLIST.r5.md)"
+
+[[manual]]
+id = "live-models-and-devices"
+description = "Live local-model inference (Ollama/Colibri on BLAZE-6) and real audio/desktop devices; the automated suite uses fakes and fixtures."
+evidence = "Not yet performed as acceptance; scheduled under PHX-091 (benchmarks) and PHX-093 (demo scenarios)."
+
+# ---- Test files -> docs/24 categories (evidence: test names cited per entry).
+# Rules: integration = two or more real PHOENIX subsystems together; secret_leakage =
+# credential/secret handling by the system (repository credential scans alone do not
+# count); security categories need a test that explicitly attacks/defends the threat.
+
+[[file]]
+path = "tests/test_agent_model_router.py"
+categories = ["unit", "integration", "routing"]
+# integration: test_each_technical_requirement_uses_registry_rules
+# routing: test_caller_order_wins_without_provider_or_alphabetical_preference
+
+[[file]]
+path = "tests/test_agent_registry.py"
+categories = ["unit"]
+
+[[file]]
+path = "tests/test_aizen_planner.py"
+categories = ["unit"]
+
+[[file]]
+path = "tests/test_api.py"
+categories = ["unit", "api_contract"]
+# api_contract: test_health_contract, test_unknown_route
+
+[[file]]
+path = "tests/test_audit_trail.py"
+categories = ["unit", "integration", "migrations", "permissions", "forged_tool_results"]
+# integration: test_six_outcomes_p0_p3_p4_and_repeated_request (PermissionEngine + SQLite)
+# migrations: test_migration_lifecycle_preserves_earlier_schema
+# forged_tool_results: test_forged_helper_result_query_and_registry
+
+[[file]]
+path = "tests/test_bootstrap.py"
+categories = ["unit"]
+
+[[file]]
+path = "tests/test_browser_tool.py"
+categories = ["unit", "integration", "tools", "permissions", "permission_bypass", "prompt_injection", "forged_tool_results"]
+# permission_bypass: test_p4_grants_policy_cannot_allow
+# prompt_injection: test_output_is_inert_no_second_action
+# forged_tool_results: test_success_result_contradictions
+
+[[file]]
+path = "tests/test_colibri_provider.py"
+categories = ["unit", "integration", "model_provider_contracts", "secret_leakage"]
+# model_provider_contracts: test_nonstream_request_response_and_metrics
+# secret_leakage: test_auth_headers_and_repr_privacy
+
+[[file]]
+path = "tests/test_config.py"
+categories = ["unit"]
+
+[[file]]
+path = "tests/test_document_generation.py"
+categories = ["unit", "path_traversal", "prompt_injection"]
+# path_traversal: test_filename_attacks
+# prompt_injection: test_untrusted_text_and_provenance_are_inert
+
+[[file]]
+path = "tests/test_document_ingestion.py"
+categories = ["unit", "integration", "migrations", "secret_leakage"]
+# integration: test_event_only_after_atomic_commit_and_close (EventBus + SQLite)
+# migrations: test_real_alembic_lifecycle_preserves_memories_and_old_migrations
+# secret_leakage: test_rejected_or_malformed_admission_precedes_session
+
+[[file]]
+path = "tests/test_embeddings.py"
+categories = ["unit", "model_provider_contracts", "secret_leakage"]
+# secret_leakage: test_invalid_url_does_not_leak
+
+[[file]]
+path = "tests/test_events.py"
+categories = ["unit"]
+
+[[file]]
+path = "tests/test_filesystem_tool.py"
+categories = ["unit", "integration", "tools", "permissions", "path_traversal", "permission_bypass", "prompt_injection", "forged_tool_results"]
+# path_traversal: test_real_symlink_escape_rejected, test_real_windows_junction_escape_rejected
+# permission_bypass: test_approved_file_a_cannot_execute_file_b
+
+[[file]]
+path = "tests/test_hardware.py"
+categories = ["unit"]
+
+[[file]]
+path = "tests/test_kaido_failsafe.py"
+categories = ["unit", "recovery"]
+# recovery: test_decision_is_degraded_only
+
+[[file]]
+path = "tests/test_levi_verification.py"
+categories = ["unit", "forged_tool_results"]
+# forged_tool_results: test_contradictory_results_and_forged_gate_evidence_rejected
+
+[[file]]
+path = "tests/test_mahoraga_recovery.py"
+categories = ["unit", "recovery", "forged_tool_results"]
+# recovery: test_one_exact_request_one_bounded_proposal_no_execution
+
+[[file]]
+path = "tests/test_memory_schema.py"
+categories = ["unit", "migrations"]
+# migrations: test_real_alembic_upgrade_downgrade_reupgrade_lifecycle
+
+[[file]]
+path = "tests/test_model_benchmark.py"
+categories = ["unit", "integration"]
+# integration: test_two_runners_share_global_heavy_capacity (real lifecycle manager)
+
+[[file]]
+path = "tests/test_model_lifecycle.py"
+categories = ["unit"]
+
+[[file]]
+path = "tests/test_model_provider.py"
+categories = ["unit", "model_provider_contracts"]
+# model_provider_contracts: test_fake_provider_substitutability
+
+[[file]]
+path = "tests/test_model_registry.py"
+categories = ["unit", "integration"]
+# integration: test_ollama_refresh_uses_neutral_contract (registry + OllamaProvider)
+
+[[file]]
+path = "tests/test_ollama_provider.py"
+categories = ["unit", "model_provider_contracts", "secret_leakage"]
+# secret_leakage: test_invalid_base_url_is_safe
+
+[[file]]
+path = "tests/test_permission_engine.py"
+categories = ["unit", "permissions", "permission_bypass"]
+# permission_bypass: test_sensitive_and_blocked_no_grant_policy_or_text_bypass
+
+[[file]]
+path = "tests/test_persistence.py"
+categories = ["unit", "api_contract", "migrations"]
+# migrations: test_alembic_baseline_lifecycle
+
+[[file]]
+path = "tests/test_phoenix_orchestrator.py"
+categories = ["unit"]
+
+[[file]]
+path = "tests/test_prompt_injection_defenses.py"
+categories = ["unit", "integration", "tools", "permissions", "prompt_injection", "permission_bypass", "secret_leakage", "forged_tool_results"]
+# prompt_injection: test_representative_detection_and_original_preservation
+# secret_leakage: test_item_unicode_hash_bounds_privacy_and_secret_rejection
+
+[[file]]
+path = "tests/test_provenance_citations.py"
+categories = ["unit", "prompt_injection"]
+# prompt_injection: test_untrusted_values_display_only_and_marker_spoof_inert
+
+[[file]]
+path = "tests/test_pudding_memory_service.py"
+categories = ["unit", "integration", "secret_leakage"]
+# secret_leakage: test_rejected_or_malformed_policy_never_opens_session
+
+[[file]]
+path = "tests/test_retrieval_context.py"
+categories = ["unit", "integration", "prompt_injection"]
+# prompt_injection: test_explicit_authority_precedence_never_inferred
+
+[[file]]
+path = "tests/test_rise_phoenix_startup.py"
+categories = ["unit", "integration", "voice_states", "recovery"]
+# voice_states: test_only_exact_wake_phrase; recovery: test_failsafe_exact_policy_correlation
+
+[[file]]
+path = "tests/test_screenshot_vision_loop.py"
+categories = ["unit", "integration", "tools", "permissions", "prompt_injection", "permission_bypass", "forged_tool_results"]
+# forged_tool_results: test_forged_response_runtime_rejected
+
+[[file]]
+path = "tests/test_search_provider.py"
+categories = ["unit", "tools", "prompt_injection", "forged_tool_results"]
+# prompt_injection: test_untrusted_instructions_are_exact_inert_data
+# forged_tool_results: test_integrity_rejects_gaps_duplicates_order
+
+[[file]]
+path = "tests/test_secrets_boundary.py"
+categories = ["unit", "permissions", "permission_bypass", "secret_leakage"]
+# secret_leakage: test_exact_redaction, test_material_rejected_by_normal_memory
+
+[[file]]
+path = "tests/test_spotify_integration.py"
+categories = ["unit", "integration", "tools", "permissions", "permission_bypass", "prompt_injection", "secret_leakage", "forged_tool_results"]
+# secret_leakage: test_secret_failure_before_http
+
+[[file]]
+path = "tests/test_structured_agent_handoffs.py"
+categories = ["unit", "forged_tool_results"]
+# forged_tool_results: test_forged_graph_and_nested_steps_revalidated
+
+[[file]]
+path = "tests/test_stt_provider.py"
+categories = ["unit", "voice_states", "permission_bypass"]
+# permission_bypass: test_transcripts_cannot_be_permission_or_tool_evidence
+
+[[file]]
+path = "tests/test_task_graph_state_machine.py"
+categories = ["unit"]
+
+[[file]]
+path = "tests/test_terminal_tool.py"
+categories = ["unit", "integration", "tools", "permissions", "path_traversal", "command_argument_injection", "permission_bypass", "prompt_injection", "secret_leakage", "forged_tool_results"]
+# command_argument_injection: test_shell_and_relative_executable_rejected
+# secret_leakage: test_fixed_cwd_and_environment_no_ambient_credentials
+
+[[file]]
+path = "tests/test_test_matrix.py"
+categories = ["unit"]
+# PHX-090 runner self-tests
+
+[[file]]
+path = "tests/test_tool_registry.py"
+categories = ["unit", "tools", "prompt_injection"]
+# prompt_injection: test_schema_description_permission_audit_strings_are_inert
+
+[[file]]
+path = "tests/test_tts_provider.py"
+categories = ["unit", "voice_states", "permission_bypass"]
+# permission_bypass: test_voice_evidence_cannot_be_permission_or_tool
+
+[[file]]
+path = "tests/test_upload_parser_routing.py"
+categories = ["unit", "integration", "path_traversal", "prompt_injection", "secret_leakage", "malicious_documents"]
+# malicious_documents: test_docx_zip_bomb_bounds, test_pdf_malformed_safe
+
+[[file]]
+path = "tests/test_urahara_research_flow.py"
+categories = ["unit", "integration", "tools", "permissions", "permission_bypass", "prompt_injection", "forged_tool_results"]
+# forged_tool_results: test_claim_support_cannot_be_forged
+
+[[file]]
+path = "tests/test_vad.py"
+categories = ["unit", "voice_states"]
+# voice_states: test_energy_capabilities_cancel_close_and_closed_methods
+
+[[file]]
+path = "tests/test_vector_store_sqlite.py"
+categories = ["unit", "migrations"]
+# migrations: test_real_migration_lifecycle_preserves_all_previous_sources
+
+[[file]]
+path = "tests/test_voice_conversation.py"
+categories = ["unit", "integration", "voice_states", "recovery", "permission_bypass"]
+# recovery: test_stage_failures_and_degraded_recovery (degraded fail-safe path)
+
+[[file]]
+path = "tests/test_wake_word_provider.py"
+categories = ["unit", "voice_states"]
+# voice_states: test_scoped_cancellation_keeps_unrelated_operation_and_sorted_ids
+
+[[file]]
+path = "tests/test_windows_ui_automation.py"
+categories = ["unit", "integration", "tools", "permissions", "permission_bypass", "prompt_injection", "secret_leakage", "forged_tool_results"]
+# secret_leakage: test_unknown_native_password_never_queries_value
+
+[[file]]
+path = "tests/test_youtube_integration.py"
+categories = ["unit", "integration", "tools", "permissions", "permission_bypass", "prompt_injection", "secret_leakage", "forged_tool_results"]
+# secret_leakage: test_api_key_never_enters_httpx_info_logs
+
+[[file]]
+path = "tests/workspace.test.mjs"
+categories = ["unit", "frontend"]
+# frontend: 'React SSR renders the semantic branded shell and selected home navigation'
+
+# ---- Declared gaps (reported as GAP; never PASS). Fill in follow-up tickets.
+
+[[gap]]
+category = "end_to_end"
+reason = "No test drives a user request through PhoenixOrchestrator -> AIZEN/task graph -> permissioned tools -> LEVI verification to a verified result; existing flows stop at subsystem boundaries."
