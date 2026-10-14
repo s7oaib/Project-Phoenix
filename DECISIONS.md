@@ -3133,3 +3133,9 @@ build: the unfixed control reproduced the host-element stop, the fixed build
 wrapped in both directions. The previously accepted Phase 8 executable predates
 this change and does not contain it; Phase 8 stays INCOMPLETE and PHX-090 is not
 started.
+
+Amendment (2026-10-14): the PHX-088 delivery did not run `npm test`, whose PHX-080
+byte-identity guard pins Cargo.toml, Cargo.lock and src/main.rs; it failed on main.
+With owner approval those three files are now pinned to the PHX-088 commit
+30c8d57 instead of 4a70867. Every other guarded file keeps its PHX-080 baseline,
+and any further change to the three files still fails the guard.
