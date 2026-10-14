@@ -3157,3 +3157,32 @@ Text files are checked out as LF everywhere, overriding core.autocrlf; binary
 detection plus explicit binary rules keep icons byte-exact. `git add
 --renormalize .` changed no committed content. No tooling, dependency, guard or
 product change; contributors' git configuration is not modified.
+
+## ADR-077 — Phase 8 native acceptance and completion
+
+Status: Accepted
+Date: 2026-10-14
+Ticket: Phase 8 (phase-level decision deferred by ADR-074)
+
+Phase 8 is COMPLETE. The accepted native executable is
+7F32F7656184BA4C90E41817351EF2B61743FD38287B1DF8A246E0D33060C2B7, built with
+the canonical procedure from main 81b3ae9, whose 17 build inputs are unchanged
+through this decision. It supersedes the earlier accepted build 639D8BE5…, which
+lacked the PHX-088 focus fix. Evidence lives outside the repository under
+validation/PHX-phase8-B5-rebuild-20261014-192904 (report, checklist r5).
+
+Final 68-criterion matrix: 67 PASS / 0 FAIL / 0 NOT VERIFIED / 1
+CONDITIONAL_NOT_REACHABLE. Owner decisions recorded with the evidence:
+- Diagnostic-build evidence (in-process CDP observer; identical web content)
+  counts for C4 reduced motion and E3 runtime errors. C4 covers the actual
+  WebView condition plus the reduce rule under emulation, not a real OS-level
+  reduced-motion setting.
+- The external validation fixture composition is the acceptance scope for
+  malformed-snapshot exception leakage (D4) and the D2–D4 presentation rows,
+  because production supplies no ObservabilityPort.
+- A4 unknown-route fallback stays CONDITIONAL_NOT_REACHABLE and is ruled
+  satisfied: no supported native path to an unknown view exists.
+
+Independent read-only verification confirmed the result with caveats, all of
+which were resolved before completion. Required gates pass on main ee2a399.
+PHX-090 is authorized to start. Live backend integration remains out of scope.

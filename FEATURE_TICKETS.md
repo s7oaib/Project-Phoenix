@@ -87,7 +87,7 @@ Phase 7 status: COMPLETE.
 - PHX-087 Observability/developer view — DONE
 - PHX-088 Native WebView2 keyboard focus wrap — DONE
 
-Phase 8 status: INCOMPLETE — deterministic frontend tickets are DONE; phase-status decision BLOCKED pending explicit phase-level acceptance policy. Manual native WebView2 acceptance remains PENDING; live integration is not implemented.
+Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (ADR-077): 67 PASS / 0 FAIL / 0 NOT VERIFIED / 1 CONDITIONAL_NOT_REACHABLE (A4, ruled satisfied by the owner). Live backend integration is not implemented; the frontend remains presentation-only by design.
 
 ## Phase 9 — Validation & Release
 - PHX-090 Automated test matrix — TODO
