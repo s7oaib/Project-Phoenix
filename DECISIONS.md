@@ -3102,3 +3102,34 @@ WebView2 acceptance remains PENDING and live integration remains absent.
 PHX-087 is DONE; Phase 8 stays INCOMPLETE. Its phase-status decision is BLOCKED
 pending explicit phase-level native/backend acceptance policy, as required by
 the user's PHX-087 execution section 9. No phase-level completion is inferred.
+
+## ADR-075 — Native host wraps WebView2 keyboard tab-out back into web content
+
+Status: Accepted
+Date: 2026-10-14
+Ticket: PHX-088
+
+Phase 8 native acceptance (B5-trap step B12) found that Tab past the last, or
+Shift+Tab before the first, focusable element left keyboard focus for one
+keypress on the unnamed, unoutlined WebView2 host element. Cause: WebView2
+raises ICoreWebView2Controller::MoveFocusRequested at those edges and no layer
+of the pinned stack (tauri 2.12.1, tauri-runtime-wry, wry 0.57.0, tao) handles
+it, so the WebView2 default applies. The PHOENIX window has no other tab stops.
+
+The Windows desktop host subscribes to MoveFocusRequested on the main window and,
+for NEXT/PREVIOUS only, calls controller.MoveFocus with the same reason and marks
+the event handled, so focus wraps directly to the first/last focusable element.
+Programmatic requests keep the default. Registration is best effort: failure
+leaves the previous default behaviour, never a crash. React focus management,
+DOM order, CSP, capabilities/permissions, IPC and frontend code are unchanged.
+
+webview2-com 0.39 becomes a direct Windows-only dependency. It was already
+locked transitively through tauri/wry at 0.39.1, so no new crate enters the
+build; it is required to name the WebView2 event handler types Tauri exposes.
+
+Verified by unit tests for the wrap decision, cargo check/test, a locked offline
+release build, and native keyboard replay of the B5 path against an external
+build: the unfixed control reproduced the host-element stop, the fixed build
+wrapped in both directions. The previously accepted Phase 8 executable predates
+this change and does not contain it; Phase 8 stays INCOMPLETE and PHX-090 is not
+started.
