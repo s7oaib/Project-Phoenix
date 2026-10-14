@@ -3139,3 +3139,21 @@ byte-identity guard pins Cargo.toml, Cargo.lock and src/main.rs; it failed on ma
 With owner approval those three files are now pinned to the PHX-088 commit
 30c8d57 instead of 4a70867. Every other guarded file keeps its PHX-080 baseline,
 and any further change to the three files still fails the guard.
+
+## ADR-076 — Repository text is LF on every platform
+
+Status: Accepted
+Date: 2026-10-14
+Ticket: PHX-008
+
+All committed text is LF, but the repository had no .gitattributes, so a
+Windows checkout with core.autocrlf=true writes CRLF. Byte-for-byte guards in
+tests/workspace.test.mjs compare that file's own text with LF git blobs and
+fail whenever git rewrites it with CRLF (observed on main 0e0bd57: npm test
+179/181 until the file was restored to its LF blob).
+
+Add .gitattributes with `* text=auto eol=lf`, marking the two icons binary.
+Text files are checked out as LF everywhere, overriding core.autocrlf; binary
+detection plus explicit binary rules keep icons byte-exact. `git add
+--renormalize .` changed no committed content. No tooling, dependency, guard or
+product change; contributors' git configuration is not modified.

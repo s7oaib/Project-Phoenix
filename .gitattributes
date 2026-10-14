@@ -1,0 +1,4 @@
+# PHX-008 (ADR-076): repository text is LF on every platform, regardless of core.autocrlf.
+* text=auto eol=lf
+*.png binary
+*.ico binary

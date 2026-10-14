@@ -10,6 +10,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-005 SQLite/SQLAlchemy/Alembic foundation — DONE
 - PHX-006 Event bus foundation — DONE
 - PHX-007 Hardware scanner/BLAZE-6 — DONE
+- PHX-008 Repository line-ending policy — DONE
 
 ## Phase 1 — Model Runtime
 - PHX-010 ModelProvider interface — DONE
