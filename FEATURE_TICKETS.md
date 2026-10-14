@@ -84,6 +84,7 @@ Phase 7 status: COMPLETE.
 - PHX-085 Memory/files workspace — DONE
 - PHX-086 Models/voice/settings — DONE
 - PHX-087 Observability/developer view — DONE
+- PHX-088 Native WebView2 keyboard focus wrap — DONE
 
 Phase 8 status: INCOMPLETE — deterministic frontend tickets are DONE; phase-status decision BLOCKED pending explicit phase-level acceptance policy. Manual native WebView2 acceptance remains PENDING; live integration is not implemented.
 
