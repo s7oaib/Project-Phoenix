@@ -12,6 +12,7 @@ Usage::
     python scripts/fyp_benchmark.py --dry-run          # validate task set, print plan
     python scripts/fyp_benchmark.py                    # all baseline tiers (Ollama)
     python scripts/fyp_benchmark.py --model T1=qwen3.5:4b --runs 1
+    python scripts/fyp_benchmark.py --think off        # thinking-off row (PHX-017)
 """
 
 from __future__ import annotations
@@ -190,10 +191,15 @@ def metric_rows() -> list[dict[str, str]]:
     return rows
 
 
-def _ollama_factory() -> AbstractAsyncContextManager[ModelProvider]:
+THINK = {"default": None, "on": True, "off": False}
+
+
+def _ollama_factory(
+    think: bool | None = None,
+) -> AbstractAsyncContextManager[ModelProvider]:
     from phoenix.models.ollama import OllamaProvider
 
-    return OllamaProvider()
+    return OllamaProvider(think=think)
 
 
 async def run_suite(
@@ -228,7 +234,8 @@ def write_summary(results: dict[str, Any], path: Path) -> None:
         "",
         f"{results['started_utc']} → {results['finished_utc']} on "
         f"{results['host']['platform']}. Task set sha256 "
-        f"`{results['suite']['sha256'][:16]}…`.",
+        f"`{results['suite']['sha256'][:16]}…`. Thinking: "
+        f"{results['provider_options']['think_mode']}.",
         "",
         "## Configuration 1 — single local model baseline",
         "",
@@ -283,9 +290,10 @@ def main(
     parser.add_argument("--model", action="append", default=[], help="TIER=model")
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--runs", type=int, default=3)
-    # Qwen3.5 thinks by default and OllamaProvider has no think control (ADR-079):
-    # the budget must cover hidden reasoning plus the answer.
+    # Qwen3.5 thinks by default (ADR-079): with thinking on, the budget must cover
+    # hidden reasoning plus the answer. --think maps to OllamaProvider (ADR-080).
     parser.add_argument("--max-output-tokens", type=int, default=2048)
+    parser.add_argument("--think", choices=tuple(THINK), default="default")
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
@@ -308,8 +316,15 @@ def main(
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     started = datetime.now(UTC).isoformat()
+    think = THINK[args.think]
     rows, reports = asyncio.run(
-        run_suite(suite, categories, tiers, config, provider_factory or _ollama_factory)
+        run_suite(
+            suite,
+            categories,
+            tiers,
+            config,
+            provider_factory or (lambda: _ollama_factory(think)),
+        )
     )
     results: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -324,6 +339,7 @@ def main(
             "cases": len(suite.cases),
         },
         "config": config.model_dump(mode="json"),
+        "provider_options": {"think_mode": args.think, "think": think},
         "host": {"platform": platform.platform(), "python": sys.version.split()[0]},
         "configurations": {
             "baseline": rows,

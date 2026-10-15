@@ -3267,6 +3267,13 @@ Adding thinking control to OllamaProvider is a separate product ticket. After
 it lands, the baseline is re-run with thinking off as an additional row; the
 v1 task set does not change.
 
+Amendment to ADR-079 (2026-10-15, PHX-091 follow-up): after PHX-017
+(ADR-080), `scripts/fyp_benchmark.py --think {default,on,off}` selects the
+Ollama thinking control, and the choice is recorded in the results. The
+thinking-off row was run on 2026-10-15 with the v1 task set and the same budget
+and timeout. Its evidence is in the PHX-091 ticket. The thinking-on baseline
+is still the default and is still owed.
+
 ## ADR-080 — Explicit Ollama thinking control at provider construction
 
 Status: Accepted
