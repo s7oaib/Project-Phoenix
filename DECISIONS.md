@@ -3475,7 +3475,7 @@ OllamaProvider over `httpx.MockTransport` for the `think` wire check.
 
 ## ADR-082 — Permissioned read-only filesystem steps in the PHOENIX mission runtime
 
-Status: Accepted (prompt text `phoenix-prompts-v2` awaits owner approval in the PR)
+Status: Accepted (prompt text `phoenix-prompts-v2` approved by the owner 2026-10-15)
 Date: 2026-10-15
 Ticket: PHX-046
 
