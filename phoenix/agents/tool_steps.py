@@ -2,8 +2,8 @@
 
 A document step makes at most one tool call between two generations:
 
-1. The document specialist may only propose one ``{"tool_request": ...}``; it
-   uses the structured (thinking off) binding (PHX-047).
+1. The document specialist may only propose one ``{"tool_request": ...}``.
+   Both document turns use the structured (thinking off) binding (PHX-047).
 2. PHOENIX checks the proposal against the read-only allowlist and builds the
    ``FilesystemCall`` and ``PermissionRequest`` itself. FilesystemTool decides
    through ToolRegistry and PermissionEngine (INV-004) and runs off the loop.
@@ -14,8 +14,9 @@ P1 operations are reachable, so no audit rows are written (INV-007 covers P3/P4)
 Tool output is never logged or traced: evidence keeps IDs, statuses, hashes and
 lengths only. LEVI checks the tool evidence deterministically before any model
 check (INV-008). PHX-047 grounds LEVI's model check in the same guarded
-``TOOL_OUTPUT`` item the answer turn saw. Failures are explicit (INV-021); there
-are no retries.
+``TOOL_OUTPUT`` item the answer turn saw, and grounds the final-answer check in
+the guarded verified step outputs the final answer saw. Failures are explicit
+(INV-021); there are no retries.
 """
 
 import asyncio
@@ -274,7 +275,6 @@ class DocumentStepRunner:
         binding: ModelBinding,
         handoff: HandoffEnvelope,
         *,
-        proposal_binding: ModelBinding,
         user_request: str,
         evidence: tuple[tuple[str, str], ...],
         grants: tuple[PermissionGrant, ...],
@@ -297,9 +297,10 @@ class DocumentStepRunner:
             f"Expected output:\n{handoff.expected_output_schema}",
         )
         boundary = f"{handoff.task_id}:{handoff.step_id}"
-        # One JSON object: the structured binding, like the other JSON roles.
+        # The caller passes the structured binding: the proposal is one JSON
+        # object, and the answer turn must not spend its budget thinking.
         proposal = await _generate(
-            proposal_binding,
+            binding,
             "document_specialist",
             prompts.DOCUMENT_SPECIALIST_SYSTEM,
             "\n\n".join(
@@ -462,27 +463,115 @@ class DocumentVerificationResponder(ModelVerificationResponder):
                 ),
             )
         )
-        wire = parse_json_object(
+        return _model_checks(
+            request,
+            checks,
             await _generate(self._binding, "document_verifier", system, user),
-            _ChecksWire,
+            self._max_checks,
         )
-        if len(wire.checks) > self._max_checks:
-            raise ResponderOutputError(ResponderErrorCode.SCHEMA)
-        return VerificationDraft(
-            verification_id=request.verification_id,
-            checks=(
-                *checks,
-                *(
-                    VerificationCheck(
-                        check_id=f"model.{index}",
-                        criterion=check.criterion,
-                        passed=check.passed,
-                        evidence_summary=check.evidence_summary,
-                    )
-                    for index, check in enumerate(wire.checks, start=1)
+
+
+class FinalVerificationResponder(ModelVerificationResponder):
+    """LEVI's model verifier for the final answer, grounded in the step outputs.
+
+    PHX-047 (ADR-083): the size check runs first and the model is skipped if it
+    fails; the final answer stays exempt from the plain-text check. The model
+    then sees each verified step output only as a guarded MODEL_OUTPUT item,
+    the same items the final-answer turn saw, next to the guarded objective and
+    candidate. The verdict stays LEVI's all-checks rule.
+    """
+
+    def __init__(
+        self,
+        binding: ModelBinding,
+        guard: PromptInjectionGuard,
+        *,
+        original_request: str,
+        evidence: tuple[tuple[str, str], ...],
+        max_checks: int = 6,
+    ) -> None:
+        super().__init__(
+            binding,
+            guard,
+            original_request=original_request,
+            plain_text_required=False,
+            max_checks=max_checks,
+        )
+        self._step_outputs = evidence
+
+    async def verify(self, request: VerificationRequest) -> VerificationDraft:
+        checks = self._deterministic(request.candidate_output)
+        if not all(check.passed for check in checks):
+            return VerificationDraft(
+                verification_id=request.verification_id, checks=checks
+            )
+        model = UntrustedContentOrigin.MODEL_OUTPUT
+        system = prompts.FINAL_VERIFICATION_SYSTEM.format(max_checks=self._max_checks)
+        user = "\n\n".join(
+            (
+                f"Original request:\n{self._original_request}",
+                f"Expected output:\n{request.expected_output_schema}",
+                f"Completion rule:\n{request.completion_rule}",
+                _guarded(
+                    self._guard,
+                    request.verification_id,
+                    prompts.FINAL_CANDIDATE_TASK,
+                    (
+                        (
+                            prompts.OBJECTIVE_ITEM,
+                            model,
+                            prompts.OBJECTIVE_ITEM,
+                            "output",
+                            request.objective,
+                        ),
+                        *(
+                            (identity, model, identity, "output", text)
+                            for identity, text in self._step_outputs
+                        ),
+                        (
+                            prompts.CANDIDATE_ITEM,
+                            model,
+                            prompts.CANDIDATE_ITEM,
+                            "output",
+                            request.candidate_output,
+                        ),
+                    ),
                 ),
-            ),
+            )
         )
+        return _model_checks(
+            request,
+            checks,
+            await _generate(self._binding, "final_verifier", system, user),
+            self._max_checks,
+        )
+
+
+def _model_checks(
+    request: VerificationRequest,
+    checks: tuple[VerificationCheck, ...],
+    reply: str,
+    max_checks: int,
+) -> VerificationDraft:
+    """Deterministic checks first, then the strictly parsed model checks."""
+    wire = parse_json_object(reply, _ChecksWire)
+    if len(wire.checks) > max_checks:
+        raise ResponderOutputError(ResponderErrorCode.SCHEMA)
+    return VerificationDraft(
+        verification_id=request.verification_id,
+        checks=(
+            *checks,
+            *(
+                VerificationCheck(
+                    check_id=f"model.{index}",
+                    criterion=check.criterion,
+                    passed=check.passed,
+                    evidence_summary=check.evidence_summary,
+                )
+                for index, check in enumerate(wire.checks, start=1)
+            ),
+        ),
+    )
 
 
 class ToolEvidenceVerificationResponder:

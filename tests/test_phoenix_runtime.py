@@ -93,6 +93,7 @@ class ScriptedProvider(ModelProvider):
             "specialist": "Step answer.",
             "final_answer": "100",
             "verifier": PASS,
+            "final_verifier": PASS,
         }
         self.finish: dict[str, str] = {}
         self.hang: set[str] = set()
@@ -259,7 +260,7 @@ def test_complex_mission_plans_routes_verifies_and_completes() -> None:
         ("specialist", "qwen2.5-coder:7b"),
         ("verifier", "qwen3.5:9b"),
         ("final_answer", "qwen3.5:4b"),
-        ("verifier", "qwen3.5:9b"),
+        ("final_verifier", "qwen3.5:9b"),
     ]
     assert [
         (item.step_id, item.agent_id, item.verdict)
@@ -291,7 +292,7 @@ def test_verifier_prefers_a_model_other_than_the_producer() -> None:
     mission(provider, tier_table=table)
     pairs = provider.calls()
     for index, (role, model) in enumerate(pairs):
-        if role == "verifier":
+        if role in ("verifier", "final_verifier"):
             assert pairs[index - 1][1] == "qwen3.5:4b" and model == "qwen3.5:9b"
 
 
@@ -311,11 +312,7 @@ def test_failed_levi_verification_never_completes() -> None:
 def test_final_answer_verification_failure_fails_from_verifying() -> None:
     provider = ScriptedProvider()
 
-    def verdict(request: GenerationRequest) -> str:
-        final = prompts.FINAL_OBJECTIVE in request.messages[1].text
-        return FAIL if final else PASS
-
-    provider.replies["verifier"] = verdict
+    provider.replies["final_verifier"] = FAIL
     result = mission(provider)
     assert result.failure_code == MissionFailureCode.VERIFICATION_FAILED
     assert states(result)[-2:] == ["verifying", "failed"]
@@ -699,6 +696,7 @@ def test_prompt_set_is_versioned_with_role_markers() -> None:
         prompts.FINAL_ANSWER_SYSTEM,
         prompts.VERIFICATION_SYSTEM,
         prompts.DOCUMENT_VERIFICATION_SYSTEM,
+        prompts.FINAL_VERIFICATION_SYSTEM,
     )
     assert len({text.splitlines()[0] for text in systems}) == len(systems)
     assert all(text.startswith("PHOENIX ROLE: ") for text in systems)
@@ -732,9 +730,21 @@ V2_PROMPT_SHA256 = {
 }
 
 
-def test_v3_only_adds_the_document_verifier_to_v2() -> None:
-    # PHX-047 (ADR-083): the text verifier and every other v2 constant are
-    # byte-identical; v3 adds only the document verifier prompt and its task.
+V3_CHANGED = {"ASSIGNMENT_SYSTEM"}
+DOCUMENTS_RULE = (
+    'If "documents" is one of the allowed domains, assign every step that reads a\n'
+    'file, lists a directory or inspects a file\'s metadata to "documents".\n'
+)
+
+
+def digest_of(text: str) -> str:
+    return sha256(text.encode("utf-8")).hexdigest()[:32]
+
+
+def test_v3_changes_exactly_the_listed_v2_constants() -> None:
+    # PHX-047 (ADR-083): v3 adds the document and final verifier prompts and
+    # their tasks, and only inserts the documents rule into ASSIGNMENT_SYSTEM.
+    # The text VERIFICATION_SYSTEM and every other v2 constant are unchanged.
     current = {
         name
         for name, value in vars(prompts).items()
@@ -744,10 +754,15 @@ def test_v3_only_adds_the_document_verifier_to_v2() -> None:
         "PROMPT_SET_VERSION",
         "DOCUMENT_VERIFICATION_SYSTEM",
         "DOCUMENT_CANDIDATE_TASK",
+        "FINAL_VERIFICATION_SYSTEM",
+        "FINAL_CANDIDATE_TASK",
     }
     for name, digest in V2_PROMPT_SHA256.items():
         text: str = getattr(prompts, name)
-        assert sha256(text.encode("utf-8")).hexdigest()[:32] == digest, name
+        assert (digest_of(text) != digest) == (name in V3_CHANGED), name
+    assert prompts.ASSIGNMENT_SYSTEM.count(DOCUMENTS_RULE) == 1
+    v2_assignment = prompts.ASSIGNMENT_SYSTEM.replace(DOCUMENTS_RULE, "")
+    assert digest_of(v2_assignment) == V2_PROMPT_SHA256["ASSIGNMENT_SYSTEM"]
     assert set(prompts.DOMAIN_DESCRIPTIONS) == {
         "intelligence",
         "scenario_analysis",
@@ -789,7 +804,13 @@ def test_structured_roles_use_structured_providers() -> None:
     for path in OrchestrationPath:
         result = mission(default, path, structured_providers=(structured,))
         assert result.kind == MissionKind.COMPLETED
-    assert set(structured.roles()) == {"direct", "planner", "assignment", "verifier"}
+    assert set(structured.roles()) == {
+        "direct",
+        "planner",
+        "assignment",
+        "verifier",
+        "final_verifier",
+    }
     assert set(default.roles()) == {"specialist", "final_answer"}
 
 
@@ -857,6 +878,7 @@ def test_think_false_reaches_ollama_for_structured_roles_only() -> None:
         "specialist": "absent",
         "verifier": False,
         "final_answer": "absent",
+        "final_verifier": False,
     }
 
 

@@ -116,6 +116,7 @@ class ScriptedProvider(ModelProvider):
             "final_answer": "PELICAN-7",
             "verifier": PASS,
             "document_verifier": PASS,
+            "final_verifier": PASS,
         }
         self.requests: list[GenerationRequest] = []
         self.cancelled: list[str] = []
@@ -394,7 +395,7 @@ def test_session_grant_completes_with_verified_tool_evidence(
         "specialist",
         "verifier",
         "final_answer",
-        "verifier",
+        "final_verifier",
     ]
     assert [(v.step_id, v.agent_id, v.verdict) for v in result.trace.verifications] == [
         ("s1", "document_analyst", VerificationVerdict.PASSED),
@@ -456,14 +457,31 @@ def test_session_grant_completes_with_verified_tool_evidence(
     assert (
         item_of(levi, "candidate")["text"] == "The notes give the codename PELICAN-7."
     )
-    # Text steps and the final answer are verified without any tool output.
-    for prompt in stack.provider.prompts_for("verifier"):
-        _, text_levi = boundary(prompt)
-        assert [i["content_id"] for i in text_levi["items"]] == [
-            "objective",
-            "candidate",
-        ]
-        assert "SENTINEL" not in prompt
+    # Intermediate text steps are verified without tool or step outputs.
+    (text_prompt,) = stack.provider.prompts_for("verifier")
+    _, text_levi = boundary(text_prompt)
+    assert [i["content_id"] for i in text_levi["items"]] == ["objective", "candidate"]
+    assert "SENTINEL" not in text_prompt
+    # The final answer is verified against the verified step outputs, as guarded
+    # MODEL_OUTPUT items identical to those the final-answer turn saw.
+    final_head, final_levi = boundary(stack.provider.prompt("final_verifier"))
+    _, final_turn = boundary(stack.provider.prompt("final_answer"))
+    assert [i["content_id"] for i in final_levi["items"]] == [
+        "objective",
+        "s1",
+        "s2",
+        "candidate",
+    ]
+    assert {i["origin"] for i in final_levi["items"]} == {"model_output"}
+    assert [item_of(final_levi, s) for s in ("s1", "s2")] == [
+        item_of(final_turn, s) for s in ("s1", "s2")
+    ]
+    assert [item_of(final_levi, s)["text"] for s in ("s1", "s2")] == [
+        "The notes give the codename PELICAN-7.",
+        "The codename is PELICAN-7.",
+    ]
+    assert "PELICAN" not in final_head and "SENTINEL" not in final_head
+    assert "tool_output" not in [i["content_id"] for i in final_levi["items"]]
     # LEVI prefers a model other than the producer's, as for text steps.
     models = {g.role: (g.agent_id, g.model_id) for g in result.trace.generations}
     assert models["document_verifier"] == ("verifier", "qwen3.5:9b")
@@ -1028,9 +1046,9 @@ def test_document_verifier_skipped_when_a_deterministic_check_fails(
     assert "SENTINEL" not in result.model_dump_json()
 
 
-def test_document_specialist_uses_the_structured_provider(stack: Stack) -> None:
-    # PHX-047: the one-JSON-object proposal turn runs with thinking off, like
-    # the other structured roles; answers keep the default provider.
+def test_document_turns_use_the_structured_provider(stack: Stack) -> None:
+    # PHX-047: both document turns run with thinking off, like the other
+    # structured roles; text specialists and the final answer keep the default.
     structured = ScriptedProvider()
     result = mission(stack, (stack.grant(),), structured_providers=(structured,))
     assert result.kind == MissionKind.COMPLETED
@@ -1038,15 +1056,97 @@ def test_document_specialist_uses_the_structured_provider(stack: Stack) -> None:
         "planner",
         "assignment",
         "document_specialist",
+        "document_answer",
         "document_verifier",
         "verifier",
-        "verifier",
+        "final_verifier",
     ]
-    assert stack.provider.roles() == [
-        "document_answer",
-        "specialist",
-        "final_answer",
-    ]
-    # The file reaches only the default answer turn and the grounded LEVI.
+    assert stack.provider.roles() == ["specialist", "final_answer"]
+    # The file reaches only the answer turn and the grounded LEVI.
+    assert "SENTINEL" in structured.prompt("document_answer")
     assert "SENTINEL" in structured.prompt("document_verifier")
     assert "SENTINEL" not in structured.prompt("document_specialist")
+    assert "SENTINEL" not in stack.provider.prompts_text()
+
+
+def grounded_final_verifier(request: GenerationRequest) -> str:
+    """A scripted LEVI that passes only a final answer a step output supports."""
+    _, payload = boundary(request.messages[1].text)
+    steps = [
+        i["text"]
+        for i in payload["items"]
+        if i["content_id"] not in ("objective", "candidate")
+    ]
+    candidate = item_of(payload, "candidate")["text"]
+    supported = any(candidate in text for text in steps)
+    return json.dumps(
+        {
+            "checks": [
+                {
+                    "criterion": "The answer is supported by the step outputs",
+                    "passed": supported,
+                    "evidence_summary": f"Steps say: {steps[0]}",
+                }
+            ]
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("final", "kind"),
+    [("PELICAN-7", MissionKind.COMPLETED), ("OSPREY-2", MissionKind.FAILED)],
+)
+def test_grounded_final_verifier_judges_the_answer_against_the_steps(
+    stack: Stack, final: str, kind: MissionKind
+) -> None:
+    stack.provider.replies["final_answer"] = final
+    stack.provider.replies["final_verifier"] = grounded_final_verifier
+    result = mission(stack, (stack.grant(),))
+    assert result.kind == kind
+    assert stack.provider.roles()[-1] == "final_verifier"
+    if kind == MissionKind.FAILED:
+        # Unsupported by the step outputs: LEVI's model fails the final answer.
+        assert result.failure_code == MissionFailureCode.VERIFICATION_FAILED
+        assert states(result)[-2:] == ["verifying", "failed"]
+        assert result.trace.verifications[-1].verdict == VerificationVerdict.FAILED
+    # Step outputs and model summaries never reach the trace.
+    dumped = result.model_dump_json()
+    assert "PELICAN" not in dumped.replace(result.text or "", "")
+    assert "SENTINEL" not in dumped
+
+
+def test_assignment_rule_applies_only_when_documents_is_offered(
+    stack: Stack,
+) -> None:
+    rule = 'If "documents" is one of the allowed domains'
+    mission(stack, (stack.grant(),))
+    tool_system = (
+        next(r for r in stack.provider.requests if role_of(r) == "assignment")
+        .messages[0]
+        .text
+    )
+    assert rule in tool_system and "- documents: " in tool_system
+    # A text-only runtime is not offered documents, so the rule cannot apply.
+    text_only = ScriptedProvider()
+    text_only.replies["assignment"] = (
+        '{"assignments": [{"step_id": "s1", "domain": "intelligence"},'
+        ' {"step_id": "s2", "domain": "intelligence"}]}'
+    )
+    store = ModelCapabilityRegistry()
+    for model in MODELS:
+        store.register(capabilities(model))
+    runtime = PhoenixRuntime(
+        providers=(text_only,),
+        capability_registry=store,
+        lifecycle=ModelLifecycleManager(),
+    )
+    result: MissionResult = run(
+        runtime.run(PhoenixRequest(text="Codename?"), OrchestrationPath.COMPLEX)
+    )
+    assert result.kind == MissionKind.COMPLETED
+    text_system = (
+        next(r for r in text_only.requests if role_of(r) == "assignment")
+        .messages[0]
+        .text
+    )
+    assert "- documents: " not in text_system
