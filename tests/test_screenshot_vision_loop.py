@@ -1842,7 +1842,6 @@ def test_no_action_persistence_or_dependency_change() -> None:
             "apps",
             "phoenix/api",
             "phoenix/models/provider.py",
-            "phoenix/models/ollama.py",
             "phoenix/models/colibri.py",
             "phoenix/models/registry.py",
             "phoenix/tools/windows_ui.py",
@@ -1851,6 +1850,18 @@ def test_no_action_persistence_or_dependency_change() -> None:
             "phoenix/tools/terminal.py",
             ":(exclude)apps/desktop/src/App.tsx",
             ":(exclude)apps/desktop/src/styles.css",
+        ],
+        cwd=ROOT,
+    )
+    # PHX-017 (ADR-080) intentionally changed ollama.py; it stays pinned, at the
+    # PHX-017 commit.
+    assert not subprocess.check_output(
+        [
+            "git",
+            "diff",
+            "b7d96518d58ee7466d441cbe3b17c4eaad0866cf",
+            "--",
+            "phoenix/models/ollama.py",
         ],
         cwd=ROOT,
     )

@@ -3297,3 +3297,14 @@ Owner decisions (2026-10-15):
   `text=''` with Ollama's finish reason (for example `length`), not an error.
 
 No new dependencies. Only `phoenix/models/ollama.py` changes in production code.
+
+Amendment (2026-10-15, owner decision "Re-pin to the PHX-017 commit"): two
+historical guards compared `phoenix/models/ollama.py` with `origin/main` and
+would reject this change. In
+`tests/test_prompt_injection_defenses.py::test_protected_existing_sources_dependencies_schema_and_event_vocabulary`
+and `tests/test_screenshot_vision_loop.py::test_no_action_persistence_or_dependency_change`,
+that one file is now pinned to the PHX-017 implementation commit
+`b7d96518d58ee7466d441cbe3b17c4eaad0866cf`, so any further change still fails.
+Every other protected file stays pinned to `origin/main`. This follows the PR #61
+re-pin (commit 52ec305). It requires the PR to land with a merge commit, so
+that SHA stays reachable from main.
