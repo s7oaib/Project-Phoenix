@@ -108,7 +108,7 @@ All tests are offline and use the scripted provider. There are no new test files
 Recorded in the PR and the final report: changed files, test and gate results,
 commit SHAs.
 - Implementation and pin, round 1: `f600f122b2715260384db47b63bd7c07172919b1` and `ea81364`.
-- Round 2: see the pin entry above.
+- Round 2: implementation `73a4f007fab4cf65d4e504e5503fbbec588bdf80`, which `PHX_047_COMMIT` now pins (followed by its pin commit).
 
 The prompt text awaits owner approval. The live smoke run
 (`scripts/phoenix_mission_smoke.py`, unchanged: it already reports the prompt set
