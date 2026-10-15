@@ -72,7 +72,7 @@ All tests are offline and use the scripted provider. There are no new test files
 - `tests/test_phoenix_runtime.py`:
   - the version is `phoenix-prompts-v3`, and role markers are unique;
   - every v2 constant (including `VERIFICATION_SYSTEM`) is hash-pinned as unchanged, and v3 adds only the two new constants.
-- `tests/test_prompt_injection_defenses.py`: the PHX-047 pin (commit 2).
+- `tests/test_prompt_injection_defenses.py` (commit 2): `PHX_047_COMMIT` pins `prompts.py`, `runtime.py` and `tool_steps.py` to the implementation commit `f600f122b2715260384db47b63bd7c07172919b1`, replacing the PHX-046 pin. It also asserts that each path has exactly one baseline. Merge with a merge commit.
 
 ## Non-goals
 

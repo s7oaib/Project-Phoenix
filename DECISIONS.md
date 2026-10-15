@@ -3636,7 +3636,8 @@ Owner decisions (2026-10-16):
   path in `origin/main`, which now includes `tool_steps.py`. `prompts.py`,
   `runtime.py` and `tool_steps.py` leave their previous baselines (the
   `PHX_046_COMMIT` pin for the first two, `origin/main` for the third) and are
-  pinned to the PHX-047 implementation commit (`PHX_047_COMMIT` /
+  pinned to the PHX-047 implementation commit
+  `f600f122b2715260384db47b63bd7c07172919b1` (`PHX_047_COMMIT` /
   `PHX_047_PATHS`), so each path keeps exactly one baseline and any further
   change still fails. As in ADR-082, the work lands as two commits
   (implementation, then the pin) and the PR must merge with a merge commit so
