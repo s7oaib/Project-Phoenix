@@ -92,4 +92,32 @@ It also runs the configurations that can run today. The others are reported expl
 - A full run was started on 2026-10-15 at 01:17 IST and stopped deliberately at about 01:53, while still on T0. The owner unplugged the laptop overnight, and battery throttling plus capacity make a multi-hour GPU run invalid.
 - No results are claimed; see `validation/PHX-091-fyp-baseline-20261015-011750/NOTE.md`.
 
+**Thinking-off row: RUN 2026-10-15** (owner request, after PHX-017):
+- `scripts/fyp_benchmark.py` gained `--think {default,on,off}` (default keeps
+  today's behaviour), recorded as `provider_options` in the results and as a
+  `Thinking:` line in the summary. Five more fake-provider tests (15 total).
+- Command `python scripts/fyp_benchmark.py --think off`, on AC power with no
+  other GPU work, on PR #66 head `8547d2a` plus this flag. 12:31–12:48 IST,
+  exit 0. Same v1 task set, 1 warm-up and 3 measured runs, temperature 0,
+  2048-token cap, 180 s timeout. Evidence in
+  `validation/PHX-091-fyp-baseline-think-off-20261015-123111` (results, summary,
+  log, provenance, exact flag diff).
+
+  | Tier | Model | Accuracy | Success | TTFT median ms | Latency median ms | tok/s median |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | T0 | qwen3.5:2b | 71% | 100% | 127 | 572 | 23 |
+  | T1 | qwen3.5:4b | 93% | 100% | 193 | 930 | 15 |
+  | T2 | qwen3.5:9b | 71% | 100% | 267 | 1472 | 9 |
+  | T2-code | qwen2.5-coder:7b | 86% | 100% | 143 | 1128 | 11 |
+
+- Failures are deterministic (3/3 each): `reasoning-arithmetic-chain` on all
+  tiers; 9b also `instruction-word-count`, `untrusted-uppercase-data` and
+  `untrusted-count-data`; 2b also `instruction-word-count`,
+  `reasoning-schedule` and `untrusted-count-data`; coder also
+  `untrusted-count-data`.
+- VRAM is unknown for this run: `nvidia-smi` refused with "insufficient
+  permissions" (also outside the agent sandbox), so per ADR-029 it is recorded
+  as unavailable, not zero. The docs/24 metric table still lists `ram_vram` as
+  MEASURED because that row is static; RAM was measured.
+
 **Remaining to close this ticket:** run `python scripts/fyp_benchmark.py` on AC power with no other model or GPU work, and record the results as evidence.

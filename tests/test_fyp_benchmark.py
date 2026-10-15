@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import re
@@ -298,6 +299,49 @@ def test_cli_writes_results_with_not_runnable_configs(tmp_path: Path) -> None:
     assert all(c["reason"] for c in results["configurations"]["not_runnable"])
     summary = (out / "fyp-benchmark-summary.md").read_text(encoding="utf-8")
     assert "NOT RUNNABLE" in summary and "fixture-model" in summary
+
+
+@pytest.mark.parametrize(
+    ("argv", "mode", "think"),
+    [
+        ([], "default", None),
+        (["--think", "off"], "off", False),
+        (["--think", "on"], "on", True),
+    ],
+)
+def test_cli_records_think_mode(
+    tmp_path: Path, argv: list[str], mode: str, think: bool | None
+) -> None:
+    out = tmp_path / "out"
+    code = fyp.main(
+        ["--out", str(out), "--model", "T1=fixture-model", "--warmup", "0"]
+        + ["--runs", "1", *argv],
+        provider_factory=lambda: AnswerProvider(_correct_answers()),
+    )
+    assert code == 0
+    results = json.loads(
+        (out / "fyp-benchmark-results.json").read_text(encoding="utf-8")
+    )
+    assert results["provider_options"] == {"think_mode": mode, "think": think}
+    summary = (out / "fyp-benchmark-summary.md").read_text(encoding="utf-8")
+    assert f"Thinking: {mode}." in summary
+
+
+@pytest.mark.parametrize(
+    ("mode", "think"), [("default", None), ("off", False), ("on", True)]
+)
+def test_ollama_factory_passes_think_without_io(mode: str, think: bool | None) -> None:
+    async def run() -> None:
+        provider = fyp._ollama_factory(fyp.THINK[mode])
+        assert provider._think is think
+        await provider.aclose()
+
+    asyncio.run(run())
+
+
+def test_cli_rejects_unknown_think_mode() -> None:
+    with pytest.raises(SystemExit):
+        fyp.main(["--dry-run", "--think", "maybe"])
 
 
 def test_cli_unavailable_provider_fails(tmp_path: Path) -> None:

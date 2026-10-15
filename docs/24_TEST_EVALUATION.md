@@ -55,7 +55,9 @@ Use a fixed, versioned benchmark task set.
 `benchmarks/fyp/tasks-v1.toml` (`phoenix-fyp` 1.0.0) against each single-model
 baseline tier through the PHX-016 harness. It writes
 `.fyp-bench/fyp-benchmark-results.json` (schema-versioned) and a Markdown
-summary.
+summary. `--think {default,on,off}` sets the Ollama thinking control (PHX-017,
+ADR-080) and is recorded in the results; `default` keeps each model's own
+behaviour.
 
 - Configurations (2) and (3) are reported as NOT RUNNABLE until model-backed
   PHOENIX responders exist.
