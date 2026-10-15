@@ -920,3 +920,196 @@ finally:
         check=True,
     )
     assert result.stdout.strip() == "Ollama construction/mock I/O isolation: PASS"
+
+
+# PHX-017: explicit thinking control; reasoning text never leaves the adapter.
+
+
+@pytest.mark.parametrize("think", [None, False, True])
+@pytest.mark.parametrize("streaming", [False, True])
+def test_think_control_payload(
+    think: bool | None, streaming: bool, generation_request: GenerationRequest
+) -> None:
+    bodies: list[dict[str, object]] = []
+
+    async def run() -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            bodies.append(json.loads(request.content))
+            if streaming:
+                return httpx.Response(200, stream=ByteStream([encoded(wire())]))
+            return httpx.Response(200, json=wire())
+
+        async with OllamaProvider(
+            transport=httpx.MockTransport(handler), think=think
+        ) as backend:
+            if streaming:
+                chunks = [chunk async for chunk in backend.stream(generation_request)]
+                assert [chunk.text for chunk in chunks] == ["PHOENIX_OK"]
+            else:
+                response = await backend.generate(generation_request)
+                assert response.text == "PHOENIX_OK"
+
+    asyncio.run(run())
+    (body,) = bodies
+    expected: dict[str, object] = {
+        "model": "model",
+        "messages": [
+            {"role": role.value, "content": role.value} for role in MessageRole
+        ],
+        "stream": streaming,
+        "options": {"temperature": 0, "num_predict": 16, "stop": ["END"]},
+    }
+    if think is not None:
+        expected["think"] = think
+    assert body == expected
+    assert body.get("think") is think
+    assert "think" not in body["options"]  # type: ignore[operator]
+
+
+@pytest.mark.parametrize("value", [0, 1, "false", "true", "off", 0.0])
+def test_invalid_think_rejected_without_io(value: object) -> None:
+    calls: list[httpx.Request] = []
+    with pytest.raises(ValueError, match="think"):
+        OllamaProvider(
+            transport=httpx.MockTransport(lambda request: calls.append(request)),  # type: ignore[arg-type]
+            think=value,  # type: ignore[arg-type]
+        )
+    assert calls == []
+
+
+def test_think_construction_performs_no_io() -> None:
+    calls: list[httpx.Request] = []
+
+    async def run() -> None:
+        for think in (None, False, True):
+            backend = OllamaProvider(
+                transport=httpx.MockTransport(lambda request: calls.append(request)),  # type: ignore[arg-type]
+                think=think,
+            )
+            await backend.aclose()
+
+    asyncio.run(run())
+    assert calls == []
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_think_on_non_thinking_model_fails_explicitly_without_retry(
+    streaming: bool, generation_request: GenerationRequest
+) -> None:
+    calls: list[httpx.Request] = []
+
+    async def run() -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
+            return httpx.Response(
+                400, json={"error": '"model" does not support thinking'}
+            )
+
+        async with OllamaProvider(
+            transport=httpx.MockTransport(handler), think=True
+        ) as backend:
+            with pytest.raises(ModelProviderError) as failure:
+                if streaming:
+                    await anext(backend.stream(generation_request))
+                else:
+                    await backend.generate(generation_request)
+            assert str(failure.value) == "Ollama HTTP status 400"
+            assert backend.active_operation_ids == ()
+
+    asyncio.run(run())
+    assert len(calls) == 1 and json.loads(calls[0].content)["think"] is True
+
+
+def test_think_false_on_non_thinking_model_answers_normally(
+    generation_request: GenerationRequest,
+) -> None:
+    async def run() -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert json.loads(request.content)["think"] is False
+            return httpx.Response(200, json=wire())
+
+        async with OllamaProvider(
+            transport=httpx.MockTransport(handler), think=False
+        ) as backend:
+            response = await backend.generate(generation_request)
+            assert response.text == "PHOENIX_OK" and response.finish_reason == "stop"
+
+    asyncio.run(run())
+
+
+def test_thinking_text_never_surfaced_nonstream(
+    generation_request: GenerationRequest,
+) -> None:
+    async def run() -> None:
+        record = wire(
+            message={
+                "role": "assistant",
+                "content": "PHOENIX_OK",
+                "thinking": "PRIVATE_REASONING",
+            }
+        )
+        async with OllamaProvider(
+            transport=httpx.MockTransport(lambda req: httpx.Response(200, json=record)),
+            think=True,
+        ) as backend:
+            response = await backend.generate(generation_request)
+            assert response.text == "PHOENIX_OK"
+            assert "PRIVATE_REASONING" not in response.model_dump_json()
+            assert response.usage and response.usage.output_tokens == 2
+
+    asyncio.run(run())
+
+
+def test_thinking_text_never_surfaced_stream(
+    generation_request: GenerationRequest,
+) -> None:
+    async def run() -> None:
+        records = [
+            wire(message={"content": "", "thinking": "PRIVATE_"}, done=False),
+            wire(message={"content": "", "thinking": "REASONING"}, done=False),
+            wire(message={"content": "PHOENIX"}, done=False),
+            wire(message={"content": "_OK"}),
+        ]
+        stream = ByteStream([encoded(record) for record in records])
+        async with OllamaProvider(
+            transport=httpx.MockTransport(
+                lambda req: httpx.Response(200, stream=stream)
+            )
+        ) as backend:
+            chunks = [chunk async for chunk in backend.stream(generation_request)]
+            assert [chunk.text for chunk in chunks] == ["", "", "PHOENIX", "_OK"]
+            assert sum(chunk.is_final for chunk in chunks) == 1 and chunks[-1].is_final
+            dumped = "".join(chunk.model_dump_json() for chunk in chunks)
+            assert "PRIVATE" not in dumped and "REASONING" not in dumped
+            assert stream.closed and backend.active_operation_ids == ()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_budget_exhausted_empty_content_is_honest(
+    streaming: bool, generation_request: GenerationRequest
+) -> None:
+    record = wire(
+        message={"content": "", "thinking": "PRIVATE_REASONING"},
+        done_reason="length",
+    )
+
+    async def run() -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if streaming:
+                return httpx.Response(200, stream=ByteStream([encoded(record)]))
+            return httpx.Response(200, json=record)
+
+        async with OllamaProvider(transport=httpx.MockTransport(handler)) as backend:
+            if streaming:
+                (chunk,) = [item async for item in backend.stream(generation_request)]
+                assert chunk.is_final
+                result = chunk.model_dump_json()
+            else:
+                result = (await backend.generate(generation_request)).model_dump_json()
+            assert json.loads(result)["text"] == ""
+            assert json.loads(result)["finish_reason"] == "length"
+            assert "PRIVATE_REASONING" not in result
+
+    asyncio.run(run())
