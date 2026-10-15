@@ -2,7 +2,8 @@
 
 A document step makes at most one tool call between two generations:
 
-1. The document specialist may only propose one ``{"tool_request": ...}``.
+1. The document specialist may only propose one ``{"tool_request": ...}``; it
+   uses the structured (thinking off) binding (PHX-047).
 2. PHOENIX checks the proposal against the read-only allowlist and builds the
    ``FilesystemCall`` and ``PermissionRequest`` itself. FilesystemTool decides
    through ToolRegistry and PermissionEngine (INV-004) and runs off the loop.
@@ -12,7 +13,9 @@ Grants come only from the runtime caller, never from model text (INV-003). Only
 P1 operations are reachable, so no audit rows are written (INV-007 covers P3/P4).
 Tool output is never logged or traced: evidence keeps IDs, statuses, hashes and
 lengths only. LEVI checks the tool evidence deterministically before any model
-check (INV-008). Failures are explicit (INV-021); there are no retries.
+check (INV-008). PHX-047 grounds LEVI's model check in the same guarded
+``TOOL_OUTPUT`` item the answer turn saw. Failures are explicit (INV-021); there
+are no retries.
 """
 
 import asyncio
@@ -37,6 +40,9 @@ from phoenix.agents.handoff import HandoffEnvelope
 from phoenix.agents.responders import (
     ModelBinding,
     ModelVerificationResponder,
+    ResponderErrorCode,
+    ResponderOutputError,
+    _ChecksWire,
     _generate,
     parse_json_object,
 )
@@ -217,6 +223,8 @@ def _guarded(
 
 def _rendered(result: FilesystemToolResult) -> tuple[str, str]:
     """The tool output as (field name, text); content is never interpreted."""
+    if result.output is None:
+        raise ToolStepFailed("Workspace request failed")
     output = result.model_dump(mode="json")["output"]
     if result.operation == FilesystemOperation.READ_TEXT:
         return "content", str(output["content"])
@@ -266,6 +274,7 @@ class DocumentStepRunner:
         binding: ModelBinding,
         handoff: HandoffEnvelope,
         *,
+        proposal_binding: ModelBinding,
         user_request: str,
         evidence: tuple[tuple[str, str], ...],
         grants: tuple[PermissionGrant, ...],
@@ -288,8 +297,9 @@ class DocumentStepRunner:
             f"Expected output:\n{handoff.expected_output_schema}",
         )
         boundary = f"{handoff.task_id}:{handoff.step_id}"
+        # One JSON object: the structured binding, like the other JSON roles.
         proposal = await _generate(
-            binding,
+            proposal_binding,
             "document_specialist",
             prompts.DOCUMENT_SPECIALIST_SYSTEM,
             "\n\n".join(
@@ -364,22 +374,115 @@ class DocumentStepRunner:
                         self._guard,
                         boundary,
                         prompts.DOCUMENT_ANSWER_TASK,
-                        (
-                            objective,
-                            (
-                                prompts.TOOL_OUTPUT_ITEM,
-                                UntrustedContentOrigin.TOOL_OUTPUT,
-                                call.call_id,
-                                field,
-                                text,
-                            ),
-                            *prior,
-                        ),
+                        (objective, _tool_output_item(call, field, text), *prior),
                     ),
                 )
             ),
         )
         return answer, ToolEvidence(call=call, request=request, result=result)
+
+
+def _tool_output_item(call: FilesystemCall, field: str, text: str) -> _Item:
+    """The one guarded TOOL_OUTPUT item, identical for the answer turn and LEVI."""
+    return (
+        prompts.TOOL_OUTPUT_ITEM,
+        UntrustedContentOrigin.TOOL_OUTPUT,
+        call.call_id,
+        field,
+        text,
+    )
+
+
+class DocumentVerificationResponder(ModelVerificationResponder):
+    """LEVI's model verifier for one document step, grounded in its tool output.
+
+    PHX-047 (ADR-083): the same deterministic plain-text and size checks run
+    first, and the model is skipped if any fails. The model then sees the step's
+    tool output only as the guarded TOOL_OUTPUT item the answer turn saw, next
+    to the guarded objective and candidate. The verdict stays LEVI's all-checks
+    rule, so the model cannot override a deterministic failure. Wrap it in
+    ToolEvidenceVerificationResponder so the tool evidence is checked first.
+    """
+
+    def __init__(
+        self,
+        binding: ModelBinding,
+        guard: PromptInjectionGuard,
+        *,
+        original_request: str,
+        evidence: ToolEvidence,
+        max_checks: int = 6,
+    ) -> None:
+        super().__init__(
+            binding,
+            guard,
+            original_request=original_request,
+            plain_text_required=True,
+            max_checks=max_checks,
+        )
+        self._evidence = evidence
+
+    async def verify(self, request: VerificationRequest) -> VerificationDraft:
+        checks = self._deterministic(request.candidate_output)
+        if not all(check.passed for check in checks):
+            return VerificationDraft(
+                verification_id=request.verification_id, checks=checks
+            )
+        field, text = _rendered(self._evidence.result)
+        model = UntrustedContentOrigin.MODEL_OUTPUT
+        system = prompts.DOCUMENT_VERIFICATION_SYSTEM.format(
+            max_checks=self._max_checks
+        )
+        user = "\n\n".join(
+            (
+                f"Original request:\n{self._original_request}",
+                f"Expected output:\n{request.expected_output_schema}",
+                f"Completion rule:\n{request.completion_rule}",
+                _guarded(
+                    self._guard,
+                    request.verification_id,
+                    prompts.DOCUMENT_CANDIDATE_TASK,
+                    (
+                        (
+                            prompts.OBJECTIVE_ITEM,
+                            model,
+                            prompts.OBJECTIVE_ITEM,
+                            "output",
+                            request.objective,
+                        ),
+                        _tool_output_item(self._evidence.call, field, text),
+                        (
+                            prompts.CANDIDATE_ITEM,
+                            model,
+                            prompts.CANDIDATE_ITEM,
+                            "output",
+                            request.candidate_output,
+                        ),
+                    ),
+                ),
+            )
+        )
+        wire = parse_json_object(
+            await _generate(self._binding, "document_verifier", system, user),
+            _ChecksWire,
+        )
+        if len(wire.checks) > self._max_checks:
+            raise ResponderOutputError(ResponderErrorCode.SCHEMA)
+        return VerificationDraft(
+            verification_id=request.verification_id,
+            checks=(
+                *checks,
+                *(
+                    VerificationCheck(
+                        check_id=f"model.{index}",
+                        criterion=check.criterion,
+                        passed=check.passed,
+                        evidence_summary=check.evidence_summary,
+                    )
+                    for index, check in enumerate(wire.checks, start=1)
+                ),
+            ),
+        )
 
 
 class ToolEvidenceVerificationResponder:

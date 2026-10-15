@@ -8,6 +8,7 @@ import ast
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable, Coroutine
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -687,7 +688,7 @@ def test_default_tier_table_matches_master_spec_with_t0_last() -> None:
 
 
 def test_prompt_set_is_versioned_with_role_markers() -> None:
-    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v2"
+    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v3"
     systems = (
         prompts.DIRECT_SYSTEM,
         prompts.PLANNING_SYSTEM,
@@ -697,9 +698,62 @@ def test_prompt_set_is_versioned_with_role_markers() -> None:
         prompts.DOCUMENT_ANSWER_SYSTEM,
         prompts.FINAL_ANSWER_SYSTEM,
         prompts.VERIFICATION_SYSTEM,
+        prompts.DOCUMENT_VERIFICATION_SYSTEM,
     )
     assert len({text.splitlines()[0] for text in systems}) == len(systems)
     assert all(text.startswith("PHOENIX ROLE: ") for text in systems)
+
+
+# First 128 bits of the sha256 of every phoenix-prompts-v2 constant (PHX-046
+# commit 95c5afa).
+V2_PROMPT_SHA256 = {
+    "ASSIGNMENT_SYSTEM": "f819e8032d207c635293ae4d3452bfbe",
+    "CANDIDATE_ITEM": "dda18a0e21ae47c53b4309434cbc02ae",
+    "CANDIDATE_TASK": "7bf35ffdd42c91de727f7e756f5f8a8d",
+    "DIRECT_SYSTEM": "a1a896f5964491ab14e8dd5e4dafdfed",
+    "DOCUMENT_ANSWER_SYSTEM": "70cee99916c9094d456150b80ba34913",
+    "DOCUMENT_ANSWER_TASK": "31166deedec2e119d961bab3443dc621",
+    "DOCUMENT_SPECIALIST_SYSTEM": "3dd00c5456b502e7a5d545cbfe2383a0",
+    "DOCUMENT_STEP_COMPLETION_RULE": "2564a7b558fef9c59b972ecae9107241",
+    "DOCUMENT_STEP_EXPECTED_OUTPUT": "add0a40d8d236e090b0f9c220e48ece0",
+    "DOCUMENT_TOOL_TASK": "cba883f5bb50b0ae60fa618da5d9f48f",
+    "FINAL_ANSWER_SYSTEM": "03306fe70392db1608a87776ba35d1d6",
+    "FINAL_COMPLETION_RULE": "f7688a032cc4239971c0626021e81a7e",
+    "FINAL_EXPECTED_OUTPUT": "dc513033628647a8750564182e070409",
+    "FINAL_OBJECTIVE": "ae493b34b787e691c4419b496235c192",
+    "OBJECTIVE_ITEM": "d454bec656d32723404961023ed9cb3c",
+    "PLANNING_SYSTEM": "e664a681dfce27fe939f8b1c8510199c",
+    "SPECIALIST_SYSTEM": "ca14ed28dbeec717f588bfd2eb304b57",
+    "STEP_COMPLETION_RULE": "cd01ae01c1d97e68d5b959c5e1b5b7bc",
+    "STEP_EXPECTED_OUTPUT": "0ebb078847f3b4304bc092f4d431e082",
+    "STEP_TASK": "7f02c6e862b152968099e6e0d21b3dbc",
+    "TOOL_OUTPUT_ITEM": "38bece272fb70178168892e0c079ed0b",
+    "VERIFICATION_SYSTEM": "9002e516c69063be1f85c1eace3344cc",
+}
+
+
+def test_v3_only_adds_the_document_verifier_to_v2() -> None:
+    # PHX-047 (ADR-083): the text verifier and every other v2 constant are
+    # byte-identical; v3 adds only the document verifier prompt and its task.
+    current = {
+        name
+        for name, value in vars(prompts).items()
+        if name.isupper() and isinstance(value, str)
+    }
+    assert current - set(V2_PROMPT_SHA256) == {
+        "PROMPT_SET_VERSION",
+        "DOCUMENT_VERIFICATION_SYSTEM",
+        "DOCUMENT_CANDIDATE_TASK",
+    }
+    for name, digest in V2_PROMPT_SHA256.items():
+        text: str = getattr(prompts, name)
+        assert sha256(text.encode("utf-8")).hexdigest()[:32] == digest, name
+    assert set(prompts.DOMAIN_DESCRIPTIONS) == {
+        "intelligence",
+        "scenario_analysis",
+        "build_engineering",
+        "documents",
+    }
 
 
 def test_new_modules_stay_provider_neutral() -> None:

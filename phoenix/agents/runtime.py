@@ -76,6 +76,7 @@ from phoenix.agents.task_graph import (
 from phoenix.agents.tool_steps import (
     DOCUMENT_TOOL_IDS,
     DocumentStepRunner,
+    DocumentVerificationResponder,
     ToolCallRecord,
     ToolEvidence,
     ToolEvidenceVerificationResponder,
@@ -355,9 +356,10 @@ class PhoenixRuntime:
     Callers may add their own deadlines on top of RuntimeLimits.
 
     structured_providers optionally serve the structured roles (PHOENIX direct
-    and assignment, AIZEN, LEVI), e.g. adapters constructed with thinking off
-    (ADR-080); specialists always use providers. Each structured provider must
-    share an ID with a default provider, whose health stands for the backend.
+    and assignment, AIZEN, LEVI, and the PHX-047 document_specialist proposal),
+    e.g. adapters constructed with thinking off (ADR-080); specialist answers
+    always use providers. Each structured provider must share an ID with a
+    default provider, whose health stands for the backend.
 
     filesystem_tool optionally enables read-only document steps under its
     explicit workspace root. Their grants come only from run()'s caller.
@@ -710,6 +712,9 @@ class PhoenixRuntime:
                     candidate, tool_evidence = await self._documents.perform(
                         binding,
                         handoff,
+                        proposal_binding=self._binding(
+                            decision.agent_id, producer, evidence, structured=True
+                        ),
                         user_request=request.text,
                         evidence=prior,
                         grants=grants,
@@ -722,17 +727,27 @@ class PhoenixRuntime:
                     ).perform(handoff, user_request=request.text, evidence=prior)
             if final:
                 machine.transition(TaskState.VERIFYING)
-            levi = ModelVerificationResponder(
-                self._control("verifier", health, evidence, avoid=producer),
-                self._guard,
-                original_request=request.text,
-                plain_text_required=not final,
-            )
-            responder: VerificationResponder = (
-                levi
-                if tool_evidence is None
-                else ToolEvidenceVerificationResponder(levi, tool_evidence, grants)
-            )
+            verifier = self._control("verifier", health, evidence, avoid=producer)
+            responder: VerificationResponder
+            if tool_evidence is None:
+                responder = ModelVerificationResponder(
+                    verifier,
+                    self._guard,
+                    original_request=request.text,
+                    plain_text_required=not final,
+                )
+            else:
+                # PHX-047: LEVI's model sees the guarded tool output it verifies.
+                responder = ToolEvidenceVerificationResponder(
+                    DocumentVerificationResponder(
+                        verifier,
+                        self._guard,
+                        original_request=request.text,
+                        evidence=tool_evidence,
+                    ),
+                    tool_evidence,
+                    grants,
+                )
             async with asyncio.timeout(limits.verification_timeout_seconds):
                 verification = await self._verifier.verify(
                     graph=graph,
