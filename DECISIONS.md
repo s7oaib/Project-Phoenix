@@ -3266,3 +3266,45 @@ current PHOENIX behaviour with thinking on.
 Adding thinking control to OllamaProvider is a separate product ticket. After
 it lands, the baseline is re-run with thinking off as an additional row; the
 v1 task set does not change.
+
+## ADR-080 — Explicit Ollama thinking control at provider construction
+
+Status: Accepted
+Date: 2026-10-15
+Ticket: PHX-017
+
+This amends ADR-024, which kept `think` out of the Ollama adapter. The
+MASTER_SPEC Qwen3.5 tiers think by default. Ollama returns that reasoning in
+`message.thinking`, so with bounded output budgets every answer came back empty
+(PHX-091, ADR-079).
+
+Owner decisions (2026-10-15):
+
+- **Construction option.** `OllamaProvider(think=None | False | True)`. The
+  PHX-010 `GenerationRequest` contract is unchanged; Colibri, the PHX-016 runner
+  and other callers are untouched. A caller needing both modes holds two
+  providers. A neutral per-request field waits for a ticket that needs it.
+- **Default `None`.** No `think` field is sent, so existing behaviour and
+  payloads are unchanged. `False`/`True` are sent as top-level `think`. Only a
+  strict bool or `None` is accepted.
+- **Reasoning text is never surfaced.** `message.thinking` stays discarded in
+  generate and stream; it never reaches responses, chunks, errors, logs, memory
+  or benchmark reports. No reasoning token count is inferred.
+- **Non-thinking models.** `think=False` is accepted by Ollama 0.35.1 and sent
+  as-is. `think=True` fails as `ModelProviderError` from Ollama's HTTP 400, with
+  no retry or fallback. Capability metadata is unchanged.
+- **Empty content stays honest.** A completed record with empty content returns
+  `text=''` with Ollama's finish reason (for example `length`), not an error.
+
+No new dependencies. Only `phoenix/models/ollama.py` changes in production code.
+
+Amendment (2026-10-15, owner decision "Re-pin to the PHX-017 commit"): two
+historical guards compared `phoenix/models/ollama.py` with `origin/main` and
+would reject this change. In
+`tests/test_prompt_injection_defenses.py::test_protected_existing_sources_dependencies_schema_and_event_vocabulary`
+and `tests/test_screenshot_vision_loop.py::test_no_action_persistence_or_dependency_change`,
+that one file is now pinned to the PHX-017 implementation commit
+`b7d96518d58ee7466d441cbe3b17c4eaad0866cf`, so any further change still fails.
+Every other protected file stays pinned to `origin/main`. This follows the PR #61
+re-pin (commit 52ec305). It requires the PR to land with a merge commit, so
+that SHA stays reachable from main.

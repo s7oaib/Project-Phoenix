@@ -1706,6 +1706,12 @@ def test_static_no_execution_or_concrete_dependency(path: str) -> None:
             assert name not in banned
 
 
+# PHX-017 (ADR-080) intentionally changed these; they stay pinned, at the
+# PHX-017 commit.
+PHX_017_COMMIT = "b7d96518d58ee7466d441cbe3b17c4eaad0866cf"
+PHX_017_PATHS = ("phoenix/models/ollama.py",)
+
+
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
     # PHX-072's dependency gate owns manifest/lock exactness.
     protected = [
@@ -1716,13 +1722,16 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         if path.startswith(("phoenix/", "alembic/", "apps/desktop/"))
         # PHX-080 owns these shell paths; workspace tests verify their UI/security.
         and path not in {"apps/desktop/src/App.tsx", "apps/desktop/src/styles.css"}
+        and path not in PHX_017_PATHS
     ]
-    for path in protected:
+    baselines = [("origin/main", path) for path in protected]
+    baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
+    for commit, path in baselines:
         actual = subprocess.check_output(
             ["git", "hash-object", "--path=" + path, path], cwd=ROOT
         ).strip()
         expected = subprocess.check_output(
-            ["git", "rev-parse", "origin/main:" + path], cwd=ROOT
+            ["git", "rev-parse", commit + ":" + path], cwd=ROOT
         ).strip()
         assert actual == expected, path
     assert len(EventType) == 32

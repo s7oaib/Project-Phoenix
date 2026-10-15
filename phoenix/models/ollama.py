@@ -95,7 +95,9 @@ def _context_limit(info: object) -> int | None:
     return next(iter(values)) if len(values) == 1 else None
 
 
-def _payload(request: GenerationRequest, *, stream: bool) -> dict[str, object]:
+def _payload(
+    request: GenerationRequest, *, stream: bool, think: bool | None
+) -> dict[str, object]:
     body: dict[str, object] = {
         "model": request.model_id,
         "messages": [
@@ -104,6 +106,9 @@ def _payload(request: GenerationRequest, *, stream: bool) -> dict[str, object]:
         ],
         "stream": stream,
     }
+    # Reasoning text Ollama returns in message.thinking is never mapped out.
+    if think is not None:
+        body["think"] = think
     options: dict[str, object] = {}
     if request.temperature is not None:
         options["temperature"] = request.temperature
@@ -180,6 +185,7 @@ class OllamaProvider(ModelProvider):
     Injected clients remain caller-owned; injected transports belong to the owned
     client. No requests or workers start at construction. Stream consumers that
     stop early must call aclose() on the iterator or close this provider.
+    think=None sends no thinking control (model default); True/False is sent as-is.
     """
 
     def __init__(
@@ -190,8 +196,12 @@ class OllamaProvider(ModelProvider):
         operation_timeout: float = 300,
         client: httpx.AsyncClient | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        think: bool | None = None,
     ) -> None:
         super().__init__("ollama")
+        if think is not None and type(think) is not bool:
+            raise ValueError("Ollama think must be True, False or None")
+        self._think = think
         self.base_url = _base_url(base_url)
         self._timeout = timeout or httpx.Timeout(connect=3, read=120, write=10, pool=5)
         for value in (*self._timeout.as_dict().values(), operation_timeout):
@@ -322,7 +332,11 @@ class OllamaProvider(ModelProvider):
         operation = self._register(request.operation_id)
         try:
             record = _record(
-                await self._json("POST", "api/chat", _payload(request, stream=False)),
+                await self._json(
+                    "POST",
+                    "api/chat",
+                    _payload(request, stream=False, think=self._think),
+                ),
                 request,
             )
             if not record.done:
@@ -343,7 +357,7 @@ class OllamaProvider(ModelProvider):
                 wire_request = self._client.build_request(
                     "POST",
                     self.base_url.join("api/chat"),
-                    json=_payload(request, stream=True),
+                    json=_payload(request, stream=True, think=self._think),
                     timeout=self._timeout,
                 )
                 response = await self._client.send(
