@@ -687,12 +687,14 @@ def test_default_tier_table_matches_master_spec_with_t0_last() -> None:
 
 
 def test_prompt_set_is_versioned_with_role_markers() -> None:
-    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v1"
+    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v2"
     systems = (
         prompts.DIRECT_SYSTEM,
         prompts.PLANNING_SYSTEM,
         prompts.ASSIGNMENT_SYSTEM,
         prompts.SPECIALIST_SYSTEM,
+        prompts.DOCUMENT_SPECIALIST_SYSTEM,
+        prompts.DOCUMENT_ANSWER_SYSTEM,
         prompts.FINAL_ANSWER_SYSTEM,
         prompts.VERIFICATION_SYSTEM,
     )
@@ -701,7 +703,10 @@ def test_prompt_set_is_versioned_with_role_markers() -> None:
 
 
 def test_new_modules_stay_provider_neutral() -> None:
-    for name in ("prompts", "responders", "runtime"):
+    # PHX-046 (ADR-082): only the runtime and tool steps may reach the filesystem
+    # tool and its registry; every other ban holds for every module.
+    tool_modules = {"phoenix.tools.filesystem", "phoenix.tools.registry"}
+    for name in ("prompts", "responders", "runtime", "tool_steps"):
         tree = ast.parse((ROOT / f"phoenix/agents/{name}.py").read_text("utf-8"))
         imported = {
             node.module or ""
@@ -720,6 +725,7 @@ def test_new_modules_stay_provider_neutral() -> None:
             or module.startswith(
                 ("phoenix.tools", "phoenix.persistence", "phoenix.api")
             )
+            and not (name in ("runtime", "tool_steps") and module in tool_modules)
             for module in imported
         ), name
 

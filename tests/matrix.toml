@@ -29,7 +29,7 @@ timeout = 1200
 [[gate]]
 # pyproject.toml is guard-pinned, so scripts/ get their own strict mypy gate.
 id = "mypy-scripts"
-command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py"]
+command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py"]
 timeout = 600
 
 [[gate]]
@@ -235,6 +235,16 @@ path = "tests/test_phoenix_orchestrator.py"
 categories = ["unit"]
 
 [[file]]
+path = "tests/test_phoenix_mission_e2e.py"
+categories = ["integration", "end_to_end", "permissions", "tools", "prompt_injection", "permission_bypass", "forged_tool_results"]
+# PHX-046 full missions (real orchestrator/AIZEN/router/task graph/handoff/LEVI/lifecycle,
+# ToolRegistry/PermissionEngine/FilesystemTool on tmp_path, migrated SQLite audit; scripted model)
+# end_to_end: test_session_grant_completes_with_verified_tool_evidence
+# permission_bypass: test_model_text_cannot_grant_or_request_more
+# prompt_injection: test_injected_file_instructions_stay_inert_tool_output
+# forged_tool_results: test_forged_tool_result_fails_levi_without_model_verifier
+
+[[file]]
 path = "tests/test_phoenix_runtime.py"
 categories = ["unit", "integration", "routing"]
 # PHX-029 offline mission runtime; integration: test_complex_mission_plans_routes_verifies_and_completes
@@ -368,7 +378,4 @@ categories = ["unit", "frontend"]
 # frontend: 'React SSR renders the semantic branded shell and selected home navigation'
 
 # ---- Declared gaps (reported as GAP; never PASS). Fill in follow-up tickets.
-
-[[gap]]
-category = "end_to_end"
-reason = "No test drives a user request through PhoenixOrchestrator -> AIZEN/task graph -> permissioned tools -> LEVI verification to a verified result; existing flows stop at subsystem boundaries."
+# None at present: PHX-046 cleared end_to_end (tests/test_phoenix_mission_e2e.py).

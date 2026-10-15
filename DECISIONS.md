@@ -3472,3 +3472,106 @@ questions with the recommended option:
 
 No new dependencies. Tests are offline: a scripted provider, plus a real
 OllamaProvider over `httpx.MockTransport` for the `think` wire check.
+
+## ADR-082 — Permissioned read-only filesystem steps in the PHOENIX mission runtime
+
+Status: Accepted (prompt text `phoenix-prompts-v2` approved by the owner 2026-10-15)
+Date: 2026-10-15
+Ticket: PHX-046
+
+This extends ADR-081. It supersedes ADR-081's "new modules only" and "no tools"
+limits for `phoenix/agents/prompts.py` and `phoenix/agents/runtime.py` only.
+Owner decisions (2026-10-15):
+
+- **Structure.** `prompts.py` and `runtime.py` change; the tool logic lives in
+  the new `phoenix/agents/tool_steps.py`; `responders.py` stays byte-identical.
+  Every other existing `phoenix/` file is unchanged.
+- **Re-pin.** `tests/test_prompt_injection_defenses.py` freezes every
+  `phoenix/` path in `origin/main`. Following the PHX-017 precedent (ADR-080),
+  `phoenix/agents/prompts.py` and `phoenix/agents/runtime.py` leave the
+  `origin/main` baseline and are pinned to the PHX-046 implementation commit
+  `95c5afad908933ea92ab61c6c2e5b86fdd04e0e0` (`PHX_046_COMMIT` /
+  `PHX_046_PATHS`), so any further change still fails. A pin
+  cannot name its own commit, so the work lands as two commits: the
+  implementation, then the pin. The PR must merge with a merge commit so the
+  pinned SHA stays reachable from main.
+- **Prompts.** `phoenix-prompts-v2`, scoped to tool steps:
+  - the planner may include steps that read one workspace file, list one
+    directory or inspect one file's metadata, and still excludes writes,
+    deletes, other tools and approvals;
+  - `DOMAIN_DESCRIPTIONS["documents"]` is added;
+  - new roles `document_specialist` (proposes exactly one
+    `{"tool_request": {"operation": ..., "relative_path": ...}}`) and
+    `document_answer` (answers the step from the guarded `tool_output` item);
+  - document-step expected output and completion rule;
+  - the final-answer prompt may use workspace evidence reported in verified step
+    outputs and still forbids claiming tool runs, changes or approvals itself.
+
+  The verifier, direct, assignment and text specialist prompts are unchanged.
+  Every system prompt keeps a stable `PHOENIX ROLE:` first line. The planner
+  prompt is shared, so a runtime without a filesystem tool may still see a
+  file-reading plan step; it can only be assigned to a text domain there, and
+  the text specialist prompt forbids claiming file access.
+- **Allowlist.** `filesystem.read_text`, `filesystem.list_directory` and
+  `filesystem.stat` only (all P1). `documents` (`document_analyst`, provisional
+  T1 then T0 per ADR-081) joins the assignment allowlist only when
+  `PhoenixRuntime` is constructed with a `FilesystemTool`, whose explicit root
+  is the workspace. Document steps route with `PermissionRisk.P1` and carry the
+  three tool IDs as the handoff `permission_scope`. FilesystemTool requires all
+  seven filesystem definitions, so the runtime itself enforces the three-op
+  allowlist and also rejects any `describe()` result whose risk is not P1.
+- **One tool call per step.** The document specialist proposes once; PHOENIX
+  builds the `FilesystemCall` (reads bounded to `max_output_chars` bytes,
+  listings to 50 entries) and the `PermissionRequest` (actor
+  `document_analyst`, the fixed `DOCUMENT_TOOL_REASON`, a fresh request ID, the
+  task ID and the caller's session ID). A second request, extra fields or a
+  request in the answer turn is never executed. `FilesystemTool.execute` runs
+  via `asyncio.to_thread`.
+- **Grants.** `PhoenixRuntime.run(request, path, *, grants=(), session_id=None)`.
+  Only caller grants are used, never model text (INV-003). Because ONCE grants
+  need the runtime's request ID and TASK grants its task ID, only SESSION
+  (matching the caller's `session_id`) and PERSISTENT P1 grants for
+  `document_analyst` with the exact `DOCUMENT_TOOL_REASON` are accepted; any
+  other grant is a `PhoenixRuntimeError` before the mission starts.
+- **Waiting is non-terminal.** `APPROVAL_REQUIRED` moves the task
+  `RUNNING → WAITING_PERMISSION` and ends the mission as the new
+  `MissionKind.WAITING_PERMISSION`, carrying `pending_permission` (the
+  unattempted `PermissionRequest`, including the absolute resource path). The
+  task stays in WAITING_PERMISSION; there is no approval loop, and a rerun with a
+  grant is a new mission.
+- **Failures.** New `MissionFailureCode` values: `tool_rejected` (an unlisted,
+  mutating or unknown operation, an invalid or escaping path, or a non-P1
+  intent; nothing is executed) and `tool_failed` (a FilesystemTool FAILURE, or
+  output over the configured limit). An invalid `tool_request` shape is the
+  existing `responder_output` code. No retries.
+- **Untrusted output.** Tool output reaches models only through
+  `PromptInjectionGuard` as a `TOOL_OUTPUT` item (INV-017); plan objectives and
+  earlier outputs stay `MODEL_OUTPUT` items.
+- **LEVI.** For document steps a wrapper around `ModelVerificationResponder`
+  emits `deterministic.tool_evidence` first: the result's call ID and the
+  decision's request ID correlate with what PHOENIX issued, the decision is
+  ALLOWED by a matching caller grant, the tool is on the allowlist and P1, and
+  the result is `attempted=True`, `effect_applied=False`, status SUCCESS. If it
+  fails, the model verifier is not consulted and the mission fails
+  `verification_failed` (INV-008). A truncated listing (PARTIAL_SUCCESS) is
+  never answered: the runtime ends the mission `tool_failed` before the answer
+  turn, and this check would reject it anyway.
+- **Duplicate grants.** Caller grants with a repeated ID or effective scope are
+  rejected before the mission starts, mirroring PermissionEngine's own rule.
+- **Audit.** P1 has no mandatory audit (INV-007 covers P3/P4), so the runtime
+  writes no rows; the end-to-end test asserts zero rows on a migrated database.
+- **Trace.** `MissionTrace.tool_calls` holds `ToolCallRecord` entries (step,
+  call and request IDs, tool, operation, decision status, tool status,
+  attempted, effect, output hash and length). Traces never hold file content.
+- **Neutrality.** Only `runtime.py` and `tool_steps.py` may import
+  `phoenix.tools.filesystem` and `phoenix.tools.registry`; every other ban
+  (Ollama, Colibri, httpx, logging, persistence, API) still holds.
+- **Live smoke.** `scripts/phoenix_mission_smoke.py` runs one harmless mission
+  against local Ollama on the owner's go-ahead. It records only hashes, lengths,
+  status and timings, is strictly type-checked by the `mypy-scripts` gate, and
+  is not a CI gate.
+
+Limitations: the model verifier judges the document answer without seeing the
+file; correlation and authority are checked deterministically, faithfulness to
+the file is not. A cancelled tool step stops waiting, but the bounded read-only
+thread may still finish in the background. No new dependencies.
