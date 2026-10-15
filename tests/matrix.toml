@@ -27,9 +27,9 @@ command = ["uv", "run", "--locked", "--no-sync", "mypy"]
 timeout = 1200
 
 [[gate]]
-# pyproject.toml is guard-pinned, so the runner gets its own strict mypy gate.
-id = "mypy-matrix-runner"
-command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py"]
+# pyproject.toml is guard-pinned, so scripts/ get their own strict mypy gate.
+id = "mypy-scripts"
+command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py"]
 timeout = 600
 
 [[gate]]
@@ -165,6 +165,12 @@ path = "tests/test_filesystem_tool.py"
 categories = ["unit", "integration", "tools", "permissions", "path_traversal", "permission_bypass", "prompt_injection", "forged_tool_results"]
 # path_traversal: test_real_symlink_escape_rejected, test_real_windows_junction_escape_rejected
 # permission_bypass: test_approved_file_a_cannot_execute_file_b
+
+[[file]]
+path = "tests/test_fyp_benchmark.py"
+categories = ["unit", "integration"]
+# PHX-091 FYP runner; integration: test_full_run_with_fake_provider (real
+# BenchmarkRunner + ModelLifecycleManager driving the fixed task set)
 
 [[file]]
 path = "tests/test_hardware.py"

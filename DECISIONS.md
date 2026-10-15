@@ -3227,3 +3227,42 @@ New external dependencies are CI-only: GitHub Actions and the actions
 0.12.10), `actions/setup-node@v4` and `actions/upload-artifact@v4`. There are no
 new runtime, test or package dependencies. `tauri:build` is not part of the
 matrix; the native release build stays a manual, evidence-backed step.
+
+## ADR-079 — FYP benchmark suite: runnable baseline, explicit NOT RUNNABLE rows
+
+Status: Accepted
+Date: 2026-10-15
+Ticket: PHX-091
+
+The docs/24 FYP comparison has three configurations: a single local model,
+PHOENIX multi-agent orchestration, and PHOENIX with adaptive routing and the deep
+tier. Only the first can run today. PhoenixOrchestrator, AizenPlanner and
+LeviVerifier accept injected responders only, and Colibri is not installed.
+
+Owner decisions:
+
+- Build a fixed, versioned task set and run the single-model baseline now.
+  `benchmarks/fyp/tasks-v1.toml` has 16 harmless cases in 7 capabilities and uses
+  deterministic exact/contains scoring only, with no LLM judge.
+- Report configurations (2) and (3), and the docs/24 metrics they would provide,
+  as NOT_RUNNABLE with reasons until model-backed responders exist. Nothing is
+  estimated.
+- `scripts/fyp_benchmark.py` reuses the unchanged PHX-016 BenchmarkRunner,
+  ModelLifecycleManager and OllamaProvider (ADR-029 privacy: output
+  hashes/lengths only).
+- The baseline uses the MASTER_SPEC tiers qwen3.5:2b/4b/9b and qwen2.5-coder:7b.
+  With owner approval the Ollama store was copied to `D:\Phoenix\models`, user
+  OLLAMA_MODELS points there, and the models were pulled (16.64 GB).
+
+Finding: Qwen3.5 reasons ("thinks") by default. Ollama returns that reasoning
+in a separate field, and OllamaProvider sends no `think` control. With the
+harness's 64–128-token budgets every answer was empty: 0 characters and 0%
+accuracy on the 2B model. A direct API check shows `think:false` answering in
+about 0.3 s, `/no_think` having no effect, and a 2048-token budget completing
+both the reasoning and the answer. The suite therefore runs through the real
+provider with a 2048-token budget and a 180 s per-trial timeout, so it measures
+current PHOENIX behaviour with thinking on.
+
+Adding thinking control to OllamaProvider is a separate product ticket. After
+it lands, the baseline is re-run with thinking off as an additional row; the
+v1 task set does not change.

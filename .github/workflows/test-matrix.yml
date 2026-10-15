@@ -52,4 +52,6 @@ jobs:
         with:
           name: test-matrix-results
           path: .test-matrix/
+          # .test-matrix/ is a dot-directory; upload-artifact skips hidden paths by default.
+          include-hidden-files: true
           if-no-files-found: warn

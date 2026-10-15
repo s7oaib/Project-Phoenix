@@ -49,6 +49,21 @@ Compare:
 
 Use a fixed, versioned benchmark task set.
 
+### FYP benchmark suite (PHX-091)
+
+`python scripts/fyp_benchmark.py` runs the fixed task set
+`benchmarks/fyp/tasks-v1.toml` (`phoenix-fyp` 1.0.0) against each single-model
+baseline tier through the PHX-016 harness. It writes
+`.fyp-bench/fyp-benchmark-results.json` (schema-versioned) and a Markdown
+summary.
+
+- Configurations (2) and (3) are reported as NOT RUNNABLE until model-backed
+  PHOENIX responders exist.
+- Every metric above is reported either as measured or as NOT RUNNABLE with a
+  reason (ADR-079).
+- Changing any case requires a new task-set version.
+- Use `--dry-run` to validate the task set without models.
+
 ## Automated test matrix (PHX-090)
 
 `python scripts/test_matrix.py` runs every required gate declared in
