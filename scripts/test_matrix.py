@@ -235,6 +235,12 @@ def run_gate(gate: Gate, out: Path) -> GateResult:
     return result
 
 
+def log_tail(log: Path, lines: int = 80) -> str:
+    """Last lines of a gate log, prefixed for readability in CI output."""
+    text = log.read_text(encoding="utf-8", errors="replace").splitlines()
+    return "\n".join(f"matrix|  {line}" for line in text[-lines:])
+
+
 def parse_node_spec(stdout: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     for key in ("tests", "pass", "fail", "skipped"):
@@ -398,6 +404,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"matrix: running {gate.id} ...", flush=True)
         result = run_gate(gate, out)
         print(f"matrix: {gate.id} {result.status} ({result.duration_s}s)", flush=True)
+        if result.status != "PASS":
+            # CI consoles are often the only place a failure is visible.
+            print(log_tail(Path(result.log)), flush=True)
         gate_results.append(result)
     status_after = _git("status", "--porcelain")
 
