@@ -897,7 +897,9 @@ def test_json_final_answer_passes_but_json_intermediate_step_fails() -> None:
 @pytest.mark.parametrize("role", ["direct", "planner", "specialist"])
 def test_lone_surrogate_output_is_a_coded_failure(role: str) -> None:
     provider = ScriptedProvider()
-    provider.replies[role] = "bad \ud800 text"
+    # Non-hex marker: it can never occur inside a random UUID in the trace (the
+    # earlier "bad" marker made this test flaky).
+    provider.replies[role] = "zqxleak \ud800 text"
     path = OrchestrationPath.DIRECT if role == "direct" else OrchestrationPath.COMPLEX
     result = mission(provider, path)
     assert (result.failure_code, result.responder_error) == (
@@ -905,8 +907,8 @@ def test_lone_surrogate_output_is_a_coded_failure(role: str) -> None:
         ResponderErrorCode.INVALID_TEXT,
     )
     record = result.trace.generations[-1]
-    assert (record.role, record.output_chars) == (role, len("bad \ud800 text"))
-    assert "bad" not in result.model_dump_json()
+    assert (record.role, record.output_chars) == (role, len("zqxleak \ud800 text"))
+    assert "zqxleak" not in result.model_dump_json()
 
 
 def test_planning_timeout_fails_and_cancels_provider_operation() -> None:
