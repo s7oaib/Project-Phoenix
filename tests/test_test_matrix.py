@@ -210,6 +210,39 @@ def test_out_placeholder_expanded(tmp_path: Path) -> None:
     assert f"{tmp_path}/x" in Path(result.log).read_text(encoding="utf-8")
 
 
+def test_log_tail_limits_and_prefixes(tmp_path: Path) -> None:
+    log = tmp_path / "gate.log"
+    log.write_text("\n".join(f"line{i}" for i in range(200)), encoding="utf-8")
+    tail = tm.log_tail(log, 3).splitlines()
+    assert tail == ["matrix|  line197", "matrix|  line198", "matrix|  line199"]
+
+
+def test_failing_gate_output_reaches_console(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    py = sys.executable.replace("\\", "/")
+    code = "import sys; print('FAILED tests/x.py::t - boom'); sys.exit(1)"
+    gate = f'[[gate]]\nid = "bad"\ncommand = ["{py}", "-c", "{code}"]\n'
+    manifest = _manifest(tmp_path, gate + _covering_real())
+    args = ["--manifest", str(manifest), "--out", str(tmp_path / "o"), "--allow-dirty"]
+    assert tm.main(args) == 1
+    assert "matrix|  FAILED tests/x.py::t - boom" in capsys.readouterr().out
+
+
+def _covering_real() -> str:
+    """Manifest body mapping every real test file, so validation passes."""
+    real = tm.load_manifest(tm.MANIFEST)
+    files = "".join(
+        f'[[file]]\npath = "{p}"\ncategories = {json.dumps(list(cats))}\n'
+        for p, cats in real.files.items()
+    )
+    gaps = "".join(
+        f"[[gap]]\ncategory = {json.dumps(c)}\nreason = {json.dumps(r)}\n"
+        for c, r in real.gaps.items()
+    )
+    return files + gaps + '[[manual]]\nid = "m"\ndescription = "d"\nevidence = "e"\n'
+
+
 def test_repository_manifest_is_complete() -> None:
     """Every real test file is mapped and every docs/24 category is covered or a gap."""
     manifest = tm.load_manifest(tm.MANIFEST)
