@@ -1,7 +1,9 @@
 # PHX-046 — Permissioned tool steps in the PHOENIX mission runtime
 
-Status: TODO (scope approved with PHX-029 on 2026-10-15, Q1/Q10/Q13; starts after PHX-029 merges)
+Status: IN_PROGRESS (implemented; `phoenix-prompts-v2` text awaits owner approval in the PR)
 Phase: 4 — Tools, Permissions & Security (integration)
+Branch: `feature/PHX-046-permissioned-tool-steps` (local commits only)
+Base: main `be40f1b` (includes PHX-029)
 
 ## Objective
 
@@ -38,6 +40,22 @@ PermissionEngine. Then add the `end_to_end` test that clears the PHX-090 matrix 
 - Map the file as `integration, end_to_end, permissions, tools, prompt_injection, permission_bypass, forged_tool_results`, and **delete the `[[gap]] end_to_end` block** in `tests/matrix.toml`.
 - Live smoke: `scripts/phoenix_mission_smoke.py`, run by the owner and recorded externally. It is not a CI gate.
 
+## Owner decisions (2026-10-15)
+
+Recorded in ADR-082.
+
+| # | Topic | Decision |
+|---|---|---|
+| 1 | Structure | Edit `phoenix/agents/prompts.py` and `runtime.py`; tool logic in the new `phoenix/agents/tool_steps.py`; `responders.py` stays byte-identical. Re-pin the two edited files to the PHX-046 implementation commit (`PHX_046_COMMIT` / `PHX_046_PATHS`, mirroring PHX-017), as two commits: implementation, then the pin. Merge with a merge commit. |
+| 2 | Prompts | `phoenix-prompts-v2`, scoped to tool-step roles: the planner may include workspace file-reading steps; `DOMAIN_DESCRIPTIONS["documents"]`; new roles `document_specialist` and `document_answer`; document-step expected output and completion rule; the final answer may use file evidence. Verifier unchanged. v1 safety language kept; every prompt keeps a `PHOENIX ROLE:` first line. The owner approves the exact text in the PR. |
+| 3 | Tool calls per step | Exactly one (`read_text`, `list_directory` or `stat`). A second request, or one in the answer turn, is not executed. |
+| 4 | Grants | `PhoenixRuntime.run(request, path, *, grants=(), session_id=None)`; SESSION or PERSISTENT P1 grants for `document_analyst` with the fixed `DOCUMENT_TOOL_REASON`. Grants come only from the caller. |
+| 5 | Waiting | New `MissionKind.WAITING_PERMISSION` with `pending_permission: PermissionRequest` (absolute resource). The task moves `RUNNING → WAITING_PERMISSION` and stays there (non-terminal); a rerun with a grant is a new mission. Traces keep IDs, statuses and hashes only. |
+| 6 | Errors | New `tool_rejected` (unlisted, P2+ or P4 operation, or non-P1 `describe()`) and `tool_failed` (FilesystemTool FAILURE); an invalid `tool_request` shape is `responder_output`. No retries. |
+| 7 | Audit | P3/P4 policy: no P1 rows from the runtime; the end-to-end test asserts zero rows. `MissionTrace.tool_calls` holds `ToolCallRecord` entries. |
+| 8 | Neutrality | `phoenix.tools.filesystem` and `phoenix.tools.registry` allowed only in `runtime.py` and `tool_steps.py`; all other bans kept. |
+| 9 | Live smoke | `scripts/phoenix_mission_smoke.py` (owner-run, hashes/lengths/status/timings only, not a CI gate), added to the `mypy-scripts` gate. |
+
 ## Non-goals
 
 - Write, delete or other P2+ tools.
@@ -49,4 +67,14 @@ PermissionEngine. Then add the `end_to_end` test that clears the PHX-090 matrix 
 
 ## Completion evidence
 
-To be filled at completion.
+- **Changed files.**
+  - `phoenix/agents/prompts.py` (v2), `phoenix/agents/runtime.py`, new `phoenix/agents/tool_steps.py`;
+  - `tests/test_phoenix_runtime.py` (v2 version, neutrality rule), new `tests/test_phoenix_mission_e2e.py`;
+  - `tests/test_prompt_injection_defenses.py` (PHX-046 pin, commit 2);
+  - `tests/matrix.toml` (e2e mapping, `[[gap]] end_to_end` removed, smoke script in `mypy-scripts`);
+  - new `scripts/phoenix_mission_smoke.py`;
+  - `DECISIONS.md` (ADR-082), `FEATURE_TICKETS.md`, `docs/24_TEST_EVALUATION.md`, this ticket.
+- **`responders.py`** is byte-identical to `origin/main`.
+- **Targeted tests** (offline, scripted model): `tests/test_phoenix_runtime.py` 54 passed; `tests/test_phoenix_mission_e2e.py` 36 passed. Cases: SESSION and PERSISTENT grants (read, list, stat) complete with `deterministic.tool_evidence` passing; no grant, another session or another file → `waiting_permission`, nothing attempted, file content absent from every prompt, zero audit rows; delete/write/create/unknown operations and path traversal → `tool_rejected` with `execute` never called; injected file instructions stay inside the guarded `TOOL_OUTPUT` item and a follow-up `tool_request` in the answer turn is not executed; grant claims, extra fields and second requests in model text → schema/not-JSON rejection; forged call ID, request ID or grant ID → `verification_failed` without the model verifier; missing or oversized file → `tool_failed`; cancellation during the tool call; one heavy generation at a time; `documents` disallowed without a filesystem tool; non-document grants rejected.
+- **No live model calls.** The smoke script was only run with `--dry-run`; the live run waits for the owner.
+- **Prompt approval.** The `phoenix-prompts-v2` text awaits owner approval in the PR.

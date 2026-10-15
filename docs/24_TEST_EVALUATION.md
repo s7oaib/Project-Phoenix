@@ -88,6 +88,11 @@ gate under `.test-matrix/logs/`.
   for example `api_contract` or `path_traversal`.
 - A category with no automated tests must be declared as a `[[gap]]` with a
   reason. Gaps are reported as GAP and never count as PASS.
+- `end_to_end` is covered by `tests/test_phoenix_mission_e2e.py` (PHX-046,
+  ADR-082): full PHOENIX missions with permissioned read-only filesystem steps,
+  real orchestration, permission, tool and audit components, and a scripted
+  model. Its `[[gap]]` is removed. The owner-run live counterpart,
+  `scripts/phoenix_mission_smoke.py`, is not a CI gate.
 - Native WebView2 acceptance and live model or device runs are `[[manual]]` rows
   with evidence references. They are reported as MANUAL, never as automated PASS.
 - The run fails on any gate failure or timeout, missing tool, unmapped or missing

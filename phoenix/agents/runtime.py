@@ -2,9 +2,13 @@
 
 PhoenixRuntime is PHOENIX's own runtime (INV-001), not a second orchestrator: it
 composes PhoenixOrchestrator, AIZEN, the router, task graph, handoffs and LEVI
-without changing them. PHX-029 steps are text-only. No tools, permissions, events,
-persistence, recovery or fail-safe behavior exist here. Every failure is explicit
-(INV-021); COMPLETED requires every required LEVI verification to pass (INV-008).
+without changing them. Steps are text-only unless the caller supplies a
+FilesystemTool: then PHX-046 document steps may make one read-only P1 call through
+ToolRegistry and PermissionEngine, with caller grants only (see tool_steps). No
+events, persistence, recovery or fail-safe behavior exist here. Every failure is
+explicit (INV-021); COMPLETED requires every required LEVI verification to pass
+(INV-008). WAITING_PERMISSION is a non-terminal outcome: the task stays there,
+and a rerun with a grant is a new mission.
 
 Task state is task-level: intermediate step verification runs while RUNNING, and
 VERIFYING is the final-answer verification phase. Callers refresh capability
@@ -69,8 +73,23 @@ from phoenix.agents.task_graph import (
     TaskStateMachine,
     TaskStepDefinition,
 )
+from phoenix.agents.tool_steps import (
+    DOCUMENT_TOOL_IDS,
+    DocumentStepRunner,
+    ToolCallRecord,
+    ToolEvidence,
+    ToolEvidenceVerificationResponder,
+    ToolPermissionRequired,
+    ToolStepFailed,
+    ToolStepRejected,
+    document_grants,
+)
+
+# Re-exported for callers that build document-step grants (PHX-046).
+from phoenix.agents.tool_steps import DOCUMENT_TOOL_REASON as DOCUMENT_TOOL_REASON
 from phoenix.agents.verifier import (
     LeviVerifier,
+    VerificationResponder,
     VerificationVerdict,
     verification_requirement_satisfied,
 )
@@ -83,12 +102,15 @@ from phoenix.models.provider import (
     ProviderUnavailableError,
 )
 from phoenix.models.registry import CapabilityRequirements, ModelCapabilityRegistry
+from phoenix.security.permissions import PermissionGrant, PermissionRequest
 from phoenix.security.prompt_injection import (
     PromptInjectionError,
     PromptInjectionGuard,
 )
+from phoenix.tools.filesystem import FilesystemTool
 
-# Text-only specialist domains for PHX-029; PHX-046 adds tool-capable domains.
+# Text-only specialist domains (PHX-029). PHX-046 adds DOCUMENTS only when the
+# runtime holds a FilesystemTool.
 TEXT_DOMAINS: tuple[RoutingDomain, ...] = (
     RoutingDomain.INTELLIGENCE,
     RoutingDomain.SCENARIO_ANALYSIS,
@@ -189,6 +211,7 @@ class MissionKind(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    WAITING_PERMISSION = "waiting_permission"
 
 
 class MissionFailureCode(StrEnum):
@@ -199,6 +222,8 @@ class MissionFailureCode(StrEnum):
     NO_ELIGIBLE_MODEL = "no_eligible_model"
     VERIFICATION_FAILED = "verification_failed"
     TIMEOUT = "timeout"
+    TOOL_REJECTED = "tool_rejected"
+    TOOL_FAILED = "tool_failed"
 
 
 class StepVerification(_Value):
@@ -218,10 +243,15 @@ class MissionTrace(_Value):
     provider_health: tuple[ProviderRouteHealth, ...] = ()
     generations: tuple[GenerationRecord, ...] = ()
     verifications: tuple[StepVerification, ...] = ()
+    tool_calls: tuple[ToolCallRecord, ...] = ()
 
 
 class MissionResult(_Value):
-    """PHOENIX's user-facing outcome; only COMPLETED carries answer text."""
+    """PHOENIX's user-facing outcome; only COMPLETED carries answer text.
+
+    WAITING_PERMISSION carries the unattempted PermissionRequest (fixed reason,
+    absolute resource) for the caller to decide on; never file content.
+    """
 
     request_id: Identifier
     orchestrator_id: Literal["phoenix"] = "phoenix"
@@ -229,6 +259,7 @@ class MissionResult(_Value):
     text: str | None = Field(default=None, strict=True)
     failure_code: MissionFailureCode | None = None
     responder_error: ResponderErrorCode | None = None
+    pending_permission: PermissionRequest | None = None
     trace: MissionTrace
 
     @model_validator(mode="after")
@@ -241,6 +272,10 @@ class MissionResult(_Value):
             self.responder_error is not None
         ):
             raise ValueError("Responder error requires a responder_output failure")
+        if (self.kind == MissionKind.WAITING_PERMISSION) != (
+            self.pending_permission is not None
+        ):
+            raise ValueError("Only waiting missions carry a pending permission")
         return self
 
 
@@ -269,6 +304,7 @@ class _Evidence:
     health: tuple[ProviderRouteHealth, ...] = ()
     generations: list[GenerationRecord] = field(default_factory=list)
     verifications: list[StepVerification] = field(default_factory=list)
+    tool_calls: list[ToolCallRecord] = field(default_factory=list)
 
     def settle(self, state: TaskState) -> None:
         # An illegal edge here is a runtime defect: raise rather than skip it.
@@ -283,6 +319,7 @@ class _Evidence:
         text: str | None = None,
         failure: MissionFailureCode | None = None,
         responder_error: ResponderErrorCode | None = None,
+        pending: PermissionRequest | None = None,
     ) -> MissionResult:
         machine = self.machine
         return MissionResult(
@@ -291,6 +328,7 @@ class _Evidence:
             text=text,
             failure_code=failure,
             responder_error=responder_error,
+            pending_permission=pending,
             trace=MissionTrace(
                 prompt_set_version=prompts.PROMPT_SET_VERSION,
                 path=self.path,
@@ -304,6 +342,7 @@ class _Evidence:
                 provider_health=self.health,
                 generations=tuple(self.generations),
                 verifications=tuple(self.verifications),
+                tool_calls=tuple(self.tool_calls),
             ),
         )
 
@@ -319,6 +358,9 @@ class PhoenixRuntime:
     and assignment, AIZEN, LEVI), e.g. adapters constructed with thinking off
     (ADR-080); specialists always use providers. Each structured provider must
     share an ID with a default provider, whose health stands for the backend.
+
+    filesystem_tool optionally enables read-only document steps under its
+    explicit workspace root. Their grants come only from run()'s caller.
     """
 
     def __init__(
@@ -331,6 +373,7 @@ class PhoenixRuntime:
         agent_registry: AgentRegistry | None = None,
         tier_table: ModelTierTable | None = None,
         limits: RuntimeLimits | None = None,
+        filesystem_tool: FilesystemTool | None = None,
     ) -> None:
         registry = (
             build_default_agent_registry() if agent_registry is None else agent_registry
@@ -353,6 +396,17 @@ class PhoenixRuntime:
         self._handoffs = HandoffBuilder(self._agents)
         self._verifier = LeviVerifier(self._agents)
         self._guard = PromptInjectionGuard(self._agents)
+        self._documents: DocumentStepRunner | None = None
+        self._domains = TEXT_DOMAINS
+        if filesystem_tool is not None:
+            if type(filesystem_tool) is not FilesystemTool:
+                raise PhoenixRuntimeError("Expected a FilesystemTool")
+            self._documents = DocumentStepRunner(
+                filesystem_tool,
+                self._guard,
+                max_read_bytes=self._limits.max_output_chars,
+            )
+            self._domains = (*TEXT_DOMAINS, RoutingDomain.DOCUMENTS)
         self._active: dict[str, _Mission] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -371,13 +425,26 @@ class PhoenixRuntime:
         self._loop = loop
 
     async def run(
-        self, request: PhoenixRequest, path: OrchestrationPath
+        self,
+        request: PhoenixRequest,
+        path: OrchestrationPath,
+        *,
+        grants: Sequence[PermissionGrant] = (),
+        session_id: str | None = None,
     ) -> MissionResult:
+        """grants and session_id are caller (user) evidence for document steps."""
         self._bind_loop()
         if type(request) is not PhoenixRequest:
             raise PhoenixRuntimeError("Expected a PhoenixRequest")
         request = PhoenixRequest.model_validate(request)
         directive = _path.validate_python(path)
+        try:
+            accepted = document_grants(grants)
+            session = (
+                None if session_id is None else _identifier.validate_python(session_id)
+            )
+        except ValueError:
+            raise PhoenixRuntimeError("Invalid caller permission evidence") from None
         if request.request_id in self._active:
             raise DuplicateMissionError("Request ID is already an active mission")
         task = asyncio.current_task()
@@ -393,7 +460,7 @@ class PhoenixRuntime:
                 if directive == OrchestrationPath.DIRECT:
                     text = await self._direct(request, evidence)
                 else:
-                    text = await self._complex(request, evidence)
+                    text = await self._complex(request, evidence, accepted, session)
             return evidence.result(request, MissionKind.COMPLETED, text=text)
         except asyncio.CancelledError:
             evidence.settle(TaskState.CANCELLED)
@@ -406,6 +473,12 @@ class PhoenixRuntime:
                 evidence,
                 MissionFailureCode.RESPONDER_OUTPUT,
                 responder_error=error.code,
+            )
+        except ToolPermissionRequired as pending:
+            # Non-terminal: the task waits; a rerun with a grant is a new mission.
+            evidence.settle(TaskState.WAITING_PERMISSION)
+            return evidence.result(
+                request, MissionKind.WAITING_PERMISSION, pending=pending.request
             )
         except Exception as error:
             code = _failure_code(error)
@@ -504,6 +577,7 @@ class PhoenixRuntime:
     def _route(
         self, domain: RoutingDomain, health: Mapping[str, ProviderHealthStatus]
     ) -> RouteDecision:
+        documents = domain == RoutingDomain.DOCUMENTS
         return self._router.route(
             RoutingRequest(
                 domain=domain,
@@ -520,7 +594,7 @@ class PhoenixRuntime:
                     for identity, status in health.items()
                 ),
                 requirements=CapabilityRequirements(),
-                permission_risk=PermissionRisk.P0,
+                permission_risk=PermissionRisk.P1 if documents else PermissionRisk.P0,
             )
         )
 
@@ -533,7 +607,13 @@ class PhoenixRuntime:
         assert result.text is not None  # COMPLETED is the only direct outcome.
         return result.text
 
-    async def _complex(self, request: PhoenixRequest, evidence: _Evidence) -> str:
+    async def _complex(
+        self,
+        request: PhoenixRequest,
+        evidence: _Evidence,
+        grants: tuple[PermissionGrant, ...],
+        session_id: str | None,
+    ) -> str:
         limits = self._limits
         handover = await self._orchestrator.execute(request, OrchestrationPath.COMPLEX)
         if handover.kind != PhoenixResultKind.PLANNING_REQUIRED:
@@ -554,7 +634,7 @@ class PhoenixRuntime:
             assignments = await ModelStepAssignmentResponder(
                 self._control("phoenix", health, evidence),
                 self._guard,
-                allowed_domains=TEXT_DOMAINS,
+                allowed_domains=self._domains,
             ).assign(plan)
 
         routes = {
@@ -563,6 +643,11 @@ class PhoenixRuntime:
         }
         routes[FINAL_STEP_ID] = self._route(RoutingDomain.USER_INTERACTION, health)
         plan_ids = tuple(step.step_id for step in plan.steps)
+        documents = {
+            step_id
+            for step_id, route in routes.items()
+            if route.domain == RoutingDomain.DOCUMENTS
+        }
         steps = [
             TaskStepDefinition(
                 step_id=step.step_id,
@@ -570,9 +655,13 @@ class PhoenixRuntime:
                 objective=step.objective,
                 depends_on=plan_ids[index - 1 : index],
                 input_refs=plan_ids[index - 1 : index],
-                expected_output=prompts.STEP_EXPECTED_OUTPUT,
+                expected_output=prompts.DOCUMENT_STEP_EXPECTED_OUTPUT
+                if step.step_id in documents
+                else prompts.STEP_EXPECTED_OUTPUT,
                 timeout_seconds=limits.step_timeout_seconds,
-                completion_rule=prompts.STEP_COMPLETION_RULE,
+                completion_rule=prompts.DOCUMENT_STEP_COMPLETION_RULE
+                if step.step_id in documents
+                else prompts.STEP_COMPLETION_RULE,
             )
             for index, step in enumerate(plan.steps)
         ]
@@ -610,30 +699,46 @@ class PhoenixRuntime:
                 source_agent_id="phoenix",
                 expected_output_schema=step.expected_output,
                 verification_required=True,
+                permission_scope=DOCUMENT_TOOL_IDS if step_id in documents else (),
             )
+            binding = self._binding(decision.agent_id, producer, evidence)
+            prior = tuple((ref, outputs[ref]) for ref in step.input_refs)
+            tool_evidence: ToolEvidence | None = None
             async with asyncio.timeout(step.timeout_seconds):
-                candidate = await ModelSpecialistResponder(
-                    self._binding(decision.agent_id, producer, evidence),
-                    self._guard,
-                    final=final,
-                ).perform(
-                    handoff,
-                    user_request=request.text,
-                    evidence=tuple((ref, outputs[ref]) for ref in step.input_refs),
-                )
+                if step_id in documents:
+                    assert self._documents is not None  # allowlisted only with a tool
+                    candidate, tool_evidence = await self._documents.perform(
+                        binding,
+                        handoff,
+                        user_request=request.text,
+                        evidence=prior,
+                        grants=grants,
+                        session_id=session_id,
+                        record=evidence.tool_calls.append,
+                    )
+                else:
+                    candidate = await ModelSpecialistResponder(
+                        binding, self._guard, final=final
+                    ).perform(handoff, user_request=request.text, evidence=prior)
             if final:
                 machine.transition(TaskState.VERIFYING)
+            levi = ModelVerificationResponder(
+                self._control("verifier", health, evidence, avoid=producer),
+                self._guard,
+                original_request=request.text,
+                plain_text_required=not final,
+            )
+            responder: VerificationResponder = (
+                levi
+                if tool_evidence is None
+                else ToolEvidenceVerificationResponder(levi, tool_evidence, grants)
+            )
             async with asyncio.timeout(limits.verification_timeout_seconds):
                 verification = await self._verifier.verify(
                     graph=graph,
                     handoff=handoff,
                     candidate_output=candidate,
-                    responder=ModelVerificationResponder(
-                        self._control("verifier", health, evidence, avoid=producer),
-                        self._guard,
-                        original_request=request.text,
-                        plain_text_required=not final,
-                    ),
+                    responder=responder,
                 )
             evidence.verifications.append(
                 StepVerification(
@@ -675,4 +780,8 @@ def _failure_code(error: Exception) -> MissionFailureCode | None:
         return MissionFailureCode.NO_ELIGIBLE_MODEL
     if isinstance(error, _VerificationFailed):
         return MissionFailureCode.VERIFICATION_FAILED
+    if isinstance(error, ToolStepRejected):
+        return MissionFailureCode.TOOL_REJECTED
+    if isinstance(error, ToolStepFailed):
+        return MissionFailureCode.TOOL_FAILED
     return None
