@@ -235,6 +235,12 @@ path = "tests/test_phoenix_orchestrator.py"
 categories = ["unit"]
 
 [[file]]
+path = "tests/test_phoenix_runtime.py"
+categories = ["unit", "integration", "routing"]
+# PHX-029 offline mission runtime; integration: test_complex_mission_plans_routes_verifies_and_completes
+# (real orchestrator/AIZEN/router/task graph/handoff/LEVI/lifecycle, scripted model)
+
+[[file]]
 path = "tests/test_prompt_injection_defenses.py"
 categories = ["unit", "integration", "tools", "permissions", "prompt_injection", "permission_bypass", "secret_leakage", "forged_tool_results"]
 # prompt_injection: test_representative_detection_and_original_preservation

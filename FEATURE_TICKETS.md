@@ -32,6 +32,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-026 LEVI verification — DONE
 - PHX-027 MAHORAGA recovery — DONE
 - PHX-028 KAIDO fail-safe — DONE
+- PHX-029 Model-backed orchestration runtime — DONE
 
 ## Phase 3 — Memory & RAG
 - PHX-030 Memory schema — DONE
@@ -48,6 +49,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-043 Filesystem tool — DONE
 - PHX-044 Terminal tool — DONE
 - PHX-045 Secrets boundary — DONE
+- PHX-046 Permissioned tool steps in mission runtime — TODO
 
 ## Phase 5 — Computer & Web
 - PHX-050 Playwright browser tool — DONE
