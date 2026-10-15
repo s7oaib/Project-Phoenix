@@ -3287,6 +3287,22 @@ BLAZE-6 evidence.
 - **Product code:** `phoenix/` is unchanged.
 - **Next step:** both thinking modes must be re-run with the GPU enabled.
 
+Correction (2026-10-15): "the models were pulled" to `D:\Phoenix\models` above
+is inaccurate.
+- **Where they went:** the Ollama desktop app ignores `OLLAMA_MODELS` and uses
+  its own model-location setting, so the pulls went to the C: store. The missing
+  files were later copied to D: and verified.
+- **Context setting:** the app also passes its own context-length setting
+  (262,144), which overrides `OLLAMA_CONTEXT_LENGTH`. At that size, Ollama
+  0.40.4 (auto-updated from 0.35.1) left only 9 of 25 qwen3.5:2b layers on the
+  GPU.
+- **How the GPU baselines run:** with the desktop app closed, on a headless
+  `ollama serve` using `OLLAMA_CONTEXT_LENGTH=16384` (MASTER_SPEC "normal
+  context") and `OLLAMA_MODELS=D:\Phoenix\models`, on CUDA.
+- **Placement:** 2b and 4b fully on the GPU; 9b 53% and coder-7b 73% (6 GB
+  VRAM limit).
+- **Recorded per run:** placement and the Ollama version.
+
 ## ADR-080 — Explicit Ollama thinking control at provider construction
 
 Status: Accepted

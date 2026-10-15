@@ -85,6 +85,17 @@ It also runs the configurations that can run today. The others are reported expl
 - The existing Ollama store (50 files, 22.2 GB) was copied to `D:\Phoenix\models` and verified file by file. The C: originals are untouched.
 - User `OLLAMA_MODELS` was set, Ollama restarted, and all 7 existing local models stayed visible.
 - qwen3.5:2b/4b/9b, qwen2.5-coder:7b and embeddinggemma:300m were pulled.
+- **Correction (2026-10-15):** the pulls actually landed in the default C: store
+  (`%USERPROFILE%\.ollama\models`, then 37.3 GB), not on D:.
+  - **Cause:** the Ollama desktop app ignores the `OLLAMA_MODELS` environment
+    variable and uses its own model-location setting.
+  - **Why it went unnoticed:** the setup check only confirmed that the 7
+    pre-existing models were visible, and those exist in both stores.
+  - **Fix:** the missing files were copied C: → D: (copy-only, verified with 0
+    size mismatches), so `D:\Phoenix\models` now holds every model.
+  - **Remaining:** the desktop app still uses C: until its model location is
+    changed in its settings. The C: copies are untouched and can be deleted
+    after that.
 
 **Thinking finding** (ADR-079): through OllamaProvider, qwen3.5:2b returned empty answers on all 16 cases at a 128-token budget, with 0% accuracy. A direct API check confirmed the cause, Qwen3.5's default thinking. Defaults are therefore a 2048-token budget and a 180 s timeout. A follow-up ticket for provider thinking control has been drafted separately.
 
