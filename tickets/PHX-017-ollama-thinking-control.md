@@ -1,7 +1,7 @@
 # PHX-017 — Ollama thinking control
 
 ## Status
-IN_PROGRESS
+DONE
 
 ## Phase
 1 — Model Runtime (follow-up found in Phase 9 / PHX-091)
@@ -170,3 +170,39 @@ reported separately from deterministic correctness.
 
 ## Completion evidence
 Report changed files, commands/tests, results, decisions, assumptions, and known limitations.
+
+### Verified completion — 2026-10-15
+
+- Commits: `b7d9651` (implementation, ticket, ADR-080, index), `26dfdc7`
+  (merge of main 64d3cda; ADR-079/ADR-080 ordering conflict resolved),
+  `ad7ed2d` (guard re-pin), then this evidence commit (docs only).
+- Changed: `phoenix/models/ollama.py` (`think` construction option, strict
+  bool/None validation, top-level `think` only when not `None`),
+  `tests/test_ollama_provider.py` (+20 cases, 128 total), the two guard tests
+  (one-path re-pin to `b7d96518d58ee7466d441cbe3b17c4eaad0866cf`),
+  `DECISIONS.md` (ADR-080 with re-pin amendment), `FEATURE_TICKETS.md`, this
+  ticket. No new test file, so `tests/matrix.toml` is unchanged. No dependency,
+  contract, schema, event or frontend change.
+- `python scripts/test_matrix.py` at `ad7ed2d`, clean tree: PASS, 13/13 gates
+  (uv-sync, ruff check/format, mypy, mypy-scripts, pytest 15769 passed / 0
+  failed / 16 skipped, npm test 181/181, typecheck, frontend build, tauri:info,
+  cargo check, cargo test, uv build).
+- Guards: both pass. A probe edit to `ollama.py` fails both, so the re-pin keeps
+  protection; every other protected path still compares with `origin/main`.
+- Live check (Ollama 0.35.1, AC power, nothing else running on the GPU,
+  2026-10-15T06:31Z, temperature 0, `num_predict` 64, fixed harmless prompt):
+  `qwen3.5:2b` `think=False` generate → `PHOENIX_READY`, stop, 6 output tokens;
+  stream → `PHOENIX_READY`, stop, one final chunk; default (`None`) → `''`,
+  length, 64 output tokens (unchanged behaviour); `qwen2.5:1.5b` `think=False` →
+  `PHOENIX_READY`, stop; `think=True` → `ModelProviderError` (HTTP 400). Ollama
+  had stopped after the overnight shutdown; it was restarted through its normal
+  tray app. No pulls.
+- Invariants: INV-012 kept (no provider detail in the neutral contract or agent
+  definitions); INV-021 kept (unsupported thinking and empty content stay
+  explicit); INV-023 kept (live checks ran one at a time, with no other GPU
+  work). Reasoning text never leaves the adapter. Model output still grants no
+  authority.
+- Limitations: thinking control is per provider instance, not per request; it
+  applies to Ollama only. gpt-oss style thinking levels are not supported. The
+  early live probes at about 01:25 IST overlapped the stopped PHX-091 run (see
+  its NOTE.md).

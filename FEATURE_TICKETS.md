@@ -20,7 +20,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-014 EmbeddingGemma integration — DONE
 - PHX-015 Colibri provider adapter — DONE
 - PHX-016 Local model benchmark harness — DONE
-- PHX-017 Ollama thinking control — IN_PROGRESS
+- PHX-017 Ollama thinking control — DONE
 
 ## Phase 2 — Orchestration
 - PHX-020 Agent registry — DONE
