@@ -1295,7 +1295,10 @@ def test_list_symlink_does_not_dereference(
     original_stat = Path.stat
 
     def checked(self: Path, *args: object, **kwargs: object) -> os.stat_result:
-        assert self != root / "link" and self != outside
+        # Path.lstat() is stat(follow_symlinks=False) on Python 3.11. Only a
+        # following stat of the link, or any stat of its target, dereferences.
+        follows = kwargs.get("follow_symlinks", True)
+        assert self != outside and not (follows and self == root / "link")
         return original_stat(self, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(Path, "stat", checked)
