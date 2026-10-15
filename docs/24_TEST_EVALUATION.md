@@ -65,6 +65,10 @@ behaviour.
   reason (ADR-079).
 - Changing any case requires a new task-set version.
 - Use `--dry-run` to validate the task set without models.
+- Before and after each tier, the runner records where Ollama placed the model
+  (GPU, partial or CPU, from `/api/ps`). It refuses CPU-only runs unless
+  `--allow-cpu` is passed, because Ollama falls back to CPU silently when the
+  GPU is unavailable.
 
 ## Automated test matrix (PHX-090)
 

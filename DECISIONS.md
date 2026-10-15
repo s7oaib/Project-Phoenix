@@ -3274,6 +3274,19 @@ thinking-off row was run on 2026-10-15 with the v1 task set and the same budget
 and timeout. Its evidence is in the PHX-091 ticket. The thinking-on baseline
 is still the default and is still owed.
 
+Correction (2026-10-15): that thinking-off row ran CPU-only and is invalid as
+BLAZE-6 evidence.
+- **Cause:** the RTX 3050 was disconnected from the bus (Device Manager Code 45),
+  and Ollama reported `library=cpu`, `total_vram="0 B"`. `nvidia-smi`'s
+  "insufficient permissions" error was a symptom, not the cause.
+- **Guard:** Ollama falls back to CPU silently. `scripts/fyp_benchmark.py` now
+  reads each tier's placement from Ollama `/api/ps` (`size_vram` vs `size`)
+  before and after the run and records it in each row and the summary.
+- **Policy:** it refuses CPU-only placement unless `--allow-cpu` is passed, and
+  marks a row `invalid_cpu_fallback` if the GPU is lost mid-run.
+- **Product code:** `phoenix/` is unchanged.
+- **Next step:** both thinking modes must be re-run with the GPU enabled.
+
 ## ADR-080 — Explicit Ollama thinking control at provider construction
 
 Status: Accepted

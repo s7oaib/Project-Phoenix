@@ -92,7 +92,22 @@ It also runs the configurations that can run today. The others are reported expl
 - A full run was started on 2026-10-15 at 01:17 IST and stopped deliberately at about 01:53, while still on T0. The owner unplugged the laptop overnight, and battery throttling plus capacity make a multi-hour GPU run invalid.
 - No results are claimed; see `validation/PHX-091-fyp-baseline-20261015-011750/NOTE.md`.
 
-**Thinking-off row: RUN 2026-10-15** (owner request, after PHX-017):
+**Thinking-off row: RUN 2026-10-15, then INVALIDATED (CPU-only, not BLAZE-6 evidence).**
+
+> **Correction (2026-10-15):** this run used no GPU.
+> - **Windows:** the RTX 3050 was disconnected from the bus (Device Manager Code 45, `CM_PROB_PHANTOM`; only the Intel iGPU was present).
+> - **Ollama:** at its 12:00 IST start it reported `inference compute ... library=cpu` and `total_vram="0 B"`. Last night at 00:44 and 00:50 it reported CUDA on the RTX 3050 with 6.0 GiB.
+> - **`nvidia-smi`:** its "insufficient permissions" error was a symptom of the missing device, not a permissions problem.
+>
+> **Validity:**
+> - All timings below (TTFT, latency, tok/s) are CPU-only and invalid for BLAZE-6.
+> - The accuracy column is kept for reference only. Placement affects speed, and is not expected to affect greedy answers, but this is unverified.
+>
+> **Guard:** the runner now probes Ollama placement (`/api/ps`, `size_vram` vs `size`) before and after each tier. It refuses CPU-only placement unless `--allow-cpu` is passed, so this cannot recur silently.
+>
+> **Re-run:** both rows must be re-run with the GPU enabled.
+
+Original record (owner request, after PHX-017):
 - `scripts/fyp_benchmark.py` gained `--think {default,on,off}` (default keeps
   today's behaviour), recorded as `provider_options` in the results and as a
   `Thinking:` line in the summary. Five more fake-provider tests (15 total).
@@ -115,9 +130,11 @@ It also runs the configurations that can run today. The others are reported expl
   `untrusted-count-data`; 2b also `instruction-word-count`,
   `reasoning-schedule` and `untrusted-count-data`; coder also
   `untrusted-count-data`.
-- VRAM is unknown for this run: `nvidia-smi` refused with "insufficient
-  permissions" (also outside the agent sandbox), so per ADR-029 it is recorded
-  as unavailable, not zero. The docs/24 metric table still lists `ram_vram` as
-  MEASURED because that row is static; RAM was measured.
+- VRAM is unknown for this run. `nvidia-smi` refused with "insufficient
+  permissions", which the correction above explains: the GPU was absent, so the
+  model ran fully on CPU.
 
-**Remaining to close this ticket:** run `python scripts/fyp_benchmark.py` on AC power with no other model or GPU work, and record the results as evidence.
+**Remaining to close this ticket:**
+1. Enable the RTX 3050 (Lenovo GPU working mode set to Hybrid or Discrete) and confirm that `nvidia-smi` works and Ollama reports CUDA.
+2. On AC power with no other model or GPU work, run `python scripts/fyp_benchmark.py --think off` and `python scripts/fyp_benchmark.py`, without `--allow-cpu`.
+3. Record both runs as evidence.

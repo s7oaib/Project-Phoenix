@@ -193,6 +193,43 @@ def metric_rows() -> list[dict[str, str]]:
 
 THINK = {"default": None, "on": True, "off": False}
 
+# Where Ollama actually placed a model, from /api/ps (size_vram vs size). A missing
+# or disabled GPU makes Ollama fall back to CPU silently, so this is recorded per
+# tier and CPU-only runs are refused unless --allow-cpu (ADR-079 amendment).
+ComputeProbe = Callable[[str], dict[str, Any] | None]
+OLLAMA_URL = "http://127.0.0.1:11434"
+
+
+class CpuOnlyError(RuntimeError):
+    """A tier would run without GPU offload and --allow-cpu was not given."""
+
+
+def compute_from_ps(entry: dict[str, Any]) -> dict[str, Any]:
+    size = int(entry.get("size") or 0)
+    vram = int(entry.get("size_vram") or 0)
+    fraction = vram / size if size else 0.0
+    device = "gpu" if size and vram >= size else "partial" if vram else "cpu"
+    return {
+        "device": device,
+        "size_bytes": size,
+        "size_vram_bytes": vram,
+        "gpu_offload_fraction": round(fraction, 4),
+    }
+
+
+def ollama_compute(model: str, base_url: str = OLLAMA_URL) -> dict[str, Any] | None:
+    """Load ``model`` (empty prompt, no generation) and report its placement."""
+    import httpx
+
+    with httpx.Client(base_url=base_url, timeout=600) as client:
+        client.post(
+            "/api/generate", json={"model": model, "prompt": ""}
+        ).raise_for_status()
+        for entry in client.get("/api/ps").raise_for_status().json().get("models", []):
+            if model in (entry.get("name"), entry.get("model")):
+                return compute_from_ps(entry)
+    return None
+
 
 def _ollama_factory(
     think: bool | None = None,
@@ -211,20 +248,40 @@ async def run_suite(
     runner_factory: Callable[
         [ModelLifecycleManager], BenchmarkRunner
     ] = BenchmarkRunner,
+    compute_probe: ComputeProbe | None = None,
+    allow_cpu: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     manager = ModelLifecycleManager()
     rows: list[dict[str, Any]] = []
     reports: list[dict[str, Any]] = []
     async with provider_factory() as provider:
         for tier, model in tiers:
-            print(f"fyp: running {tier} {model} ...", flush=True)
+            before = await _probe(compute_probe, model)
+            if before["device"] == "cpu" and not allow_cpu:
+                raise CpuOnlyError(
+                    f"{tier} {model} would run on CPU only ({before}); enable the "
+                    "GPU or pass --allow-cpu to record a CPU-only row deliberately"
+                )
+            print(f"fyp: running {tier} {model} on {before['device']} ...", flush=True)
             report = await runner_factory(manager).run(
                 provider, model, suite=suite, config=config
             )
-            print(f"fyp: {tier} {model} {report.status.value}", flush=True)
-            rows.append(baseline_row(tier, report, categories))
+            after = await _probe(compute_probe, model)
+            row = baseline_row(tier, report, categories)
+            row["compute"] = {"before": before, "after": after}
+            if after["device"] == "cpu" and before["device"] != "cpu" and not allow_cpu:
+                row["status"] = "invalid_cpu_fallback"  # GPU lost mid-run
+            print(f"fyp: {tier} {model} {row['status']}", flush=True)
+            rows.append(row)
             reports.append(report.model_dump(mode="json"))
     return rows, reports
+
+
+async def _probe(probe: ComputeProbe | None, model: str) -> dict[str, Any]:
+    if probe is None:
+        return {"device": "not_probed"}
+    found = await asyncio.to_thread(probe, model)
+    return found if found is not None else {"device": "cpu", "reason": "not loaded"}
 
 
 def write_summary(results: dict[str, Any], path: Path) -> None:
@@ -239,15 +296,15 @@ def write_summary(results: dict[str, Any], path: Path) -> None:
         "",
         "## Configuration 1 — single local model baseline",
         "",
-        "| Tier | Model | Status | Accuracy | Success | TTFT median ms | "
+        "| Tier | Model | Device | Status | Accuracy | Success | TTFT median ms | "
         "Latency median ms | tok/s median | Max VRAM MiB |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in results["configurations"]["baseline"]:
         s = row["summary"]
         vram = row["max_gpu_used_mib"]
         lines.append(
-            f"| {row['tier']} | {row['model_id']} | {row['status']} | "
+            f"| {row['tier']} | {row['model_id']} | {_device(row)} | {row['status']} | "
             f"{_pct(s['score_accuracy'])} | {_pct(s['success_rate'])} | "
             f"{_num(s['ttft_ms']['median'])} | {_num(s['latency_ms']['median'])} | "
             f"{_num(s['tokens_per_second']['median'])} | "
@@ -273,6 +330,17 @@ def write_summary(results: dict[str, Any], path: Path) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _device(row: dict[str, Any]) -> str:
+    before = row.get("compute", {}).get("before", {})
+    after = row.get("compute", {}).get("after", {})
+    device = str(before.get("device", "not_probed"))
+    if "gpu_offload_fraction" in before:
+        device += f" {before['gpu_offload_fraction']:.0%}"
+    if after.get("device") not in (None, before.get("device")):
+        device += f" → {after['device']}"
+    return device
+
+
 def _pct(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.0%}"
 
@@ -282,7 +350,9 @@ def _num(value: float | None) -> str:
 
 
 def main(
-    argv: list[str] | None = None, provider_factory: ProviderFactory | None = None
+    argv: list[str] | None = None,
+    provider_factory: ProviderFactory | None = None,
+    compute_probe: ComputeProbe | None = None,
 ) -> int:
     parser = argparse.ArgumentParser(description="PHOENIX FYP benchmark suite")
     parser.add_argument("--tasks", type=Path, default=DEFAULT_TASKS)
@@ -295,6 +365,9 @@ def main(
     parser.add_argument("--max-output-tokens", type=int, default=2048)
     parser.add_argument("--think", choices=tuple(THINK), default="default")
     parser.add_argument("--timeout", type=float, default=180)
+    parser.add_argument(
+        "--allow-cpu", action="store_true", help="record CPU-only rows deliberately"
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -317,15 +390,23 @@ def main(
     out.mkdir(parents=True, exist_ok=True)
     started = datetime.now(UTC).isoformat()
     think = THINK[args.think]
-    rows, reports = asyncio.run(
-        run_suite(
-            suite,
-            categories,
-            tiers,
-            config,
-            provider_factory or (lambda: _ollama_factory(think)),
+    # Live runs always probe placement; injected providers (tests) probe only if given.
+    probe = compute_probe or (ollama_compute if provider_factory is None else None)
+    try:
+        rows, reports = asyncio.run(
+            run_suite(
+                suite,
+                categories,
+                tiers,
+                config,
+                provider_factory or (lambda: _ollama_factory(think)),
+                compute_probe=probe,
+                allow_cpu=args.allow_cpu,
+            )
         )
-    )
+    except CpuOnlyError as error:
+        print(f"fyp: refused - {error}", file=sys.stderr)
+        return 2
     results: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "tool": "phoenix-fyp-benchmark",
@@ -340,6 +421,7 @@ def main(
         },
         "config": config.model_dump(mode="json"),
         "provider_options": {"think_mode": args.think, "think": think},
+        "compute_policy": {"allow_cpu": args.allow_cpu, "probe": probe is not None},
         "host": {"platform": platform.platform(), "python": sys.version.split()[0]},
         "configurations": {
             "baseline": rows,
