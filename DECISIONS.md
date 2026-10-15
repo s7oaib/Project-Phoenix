@@ -3303,6 +3303,24 @@ is inaccurate.
   VRAM limit).
 - **Recorded per run:** placement and the Ollama version.
 
+Amendment (2026-10-15, closure): the GPU baselines ran in both thinking modes.
+Their evidence is in the PHX-091 ticket.
+- **Overlap rerun:** the thinking-on T1 and T2 rows came from a clean rerun,
+  because the first run overlapped an unrelated CPU-heavy test-matrix run. The
+  rerun reproduced accuracy and failures exactly.
+- **Metric limitation, accepted rather than fixed:** with thinking on, the
+  PHX-016 harness's `tokens_per_second` counts hidden thinking tokens but
+  divides only by the visible-text interval, so it is inflated and not
+  comparable. TTFT means time to the first visible answer token, which includes
+  reasoning time.
+- **Reporting:** FYP reports must use output tokens ÷ total latency for
+  thinking-on throughput.
+- **Harness:** it stays frozen. Changing the metric belongs to a harness ticket
+  if the owner wants it.
+- **Closure:** PHX-091 closes on configuration (1). Configurations (2) and (3)
+  move to the PHX-091 continuation after PHX-029 and PHX-046. The owner chose,
+  on 2026-10-15, to install Colibri for configuration (3).
+
 ## ADR-080 — Explicit Ollama thinking control at provider construction
 
 Status: Accepted

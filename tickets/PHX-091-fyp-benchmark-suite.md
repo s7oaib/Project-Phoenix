@@ -1,6 +1,6 @@
 # PHX-091 — FYP benchmark suite
 
-Status: IN_PROGRESS
+Status: DONE (configuration 1 baseline; configurations 2 and 3 continue in a follow-up per PHX-029 D1)
 Phase: 9 — Validation & Release
 Branch: feature/PHX-091-fyp-benchmark-suite
 Starting main/base SHA: e9a5c393b2fd615b2664a0804a889f236d404877
@@ -74,7 +74,7 @@ It also runs the configurations that can run today. The others are reported expl
 - No product code changes, and the existing gates pass.
 - An ADR is recorded and the ledger updated.
 
-## Completion evidence (partial; status IN_PROGRESS)
+## Completion evidence
 
 **Delivered:**
 - New: `benchmarks/fyp/tasks-v1.toml`, `scripts/fyp_benchmark.py` and `tests/test_fyp_benchmark.py` (10 fake-provider tests).
@@ -145,7 +145,73 @@ Original record (owner request, after PHX-017):
   permissions", which the correction above explains: the GPU was absent, so the
   model ran fully on CPU.
 
-**Remaining to close this ticket:**
-1. Enable the RTX 3050 (Lenovo GPU working mode set to Hybrid or Discrete) and confirm that `nvidia-smi` works and Ollama reports CUDA.
-2. On AC power with no other model or GPU work, run `python scripts/fyp_benchmark.py --think off` and `python scripts/fyp_benchmark.py`, without `--allow-cpu`.
-3. Record both runs as evidence.
+**GPU baselines (2026-10-15): the BLAZE-6 evidence for configuration (1).**
+
+These rows supersede the CPU-only row above.
+
+Setup common to all three runs:
+- **Code:** branch `fix/PHX-091-gpu-evidence`. Runs 1 and 2 used `73cbf5b`; run 3 used `32cd40f`, which changes docs only, so the runner is identical.
+- **Task set:** the v1 task set, sha256 `2958f14fe8d6e021…`.
+- **Trials:** 1 warm-up and 3 measured runs per case, at temperature 0, with a 2048-token cap and a 180 s timeout.
+- **Runtime:** headless `ollama serve` (Ollama 0.40.4) with `OLLAMA_CONTEXT_LENGTH=16384` and `OLLAMA_MODELS=D:\Phoenix\models`, with the desktop app closed. The RTX 3050 6 GB (driver 610.62) was on CUDA.
+- **Power:** AC throughout.
+- **Placement guard:** on, with no `--allow-cpu`. Placement was identical before and after every tier.
+
+Evidence directories, each holding the results JSON, summary, run log and provenance:
+
+| Run | Command | Local time (IST) | Directory under `validation/` |
+| --- | --- | --- | --- |
+| 1 | `--think off` | 15:48–15:57 | `PHX-091-fyp-gpu-think-off-20261015-154843` |
+| 2 | default | 15:57–17:32 | `PHX-091-fyp-gpu-think-default-20261015-155753` |
+| 3 | default, `--model T1=qwen3.5:4b --model T2=qwen3.5:9b` | 17:34–18:48 | `PHX-091-fyp-gpu-think-default-rerun-T1T2-20261015-173438` |
+
+Run 3 exists because of an overlap in run 2.
+- **What overlapped:** an unrelated full test matrix ran 16:18:39–16:30:46 IST (cargo and pytest, CPU-heavy). It covered most of run 2's T1 window and the first 2.5 minutes of its T2 window.
+- **What run 3 changed:** it re-ran T1 and T2 with nothing else running. Its rows replace run 2's T1 and T2 rows.
+- **Result:** run 3 reproduced run 2's accuracy and failures exactly. Latency moved by 6–10%.
+- **What run 2 still provides:** its T0 and T2-code rows, which ran clean.
+
+| Thinking | Tier | Model | Placement | Accuracy | Success | Latency median ms | Output tok/s median* | Source |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| off | T0 | qwen3.5:2b | GPU 100% | 79% | 100% | 218 | 68 | run 1 |
+| off | T1 | qwen3.5:4b | GPU 100% | 93% | 100% | 326 | 50 | run 1 |
+| off | T2 | qwen3.5:9b | partial 53% | 79% | 100% | 1251 | 10 | run 1 |
+| off | T2-code | qwen2.5-coder:7b | partial 73% | 86% | 100% | 537 | 25 | run 1 |
+| default (on) | T0 | qwen3.5:2b | GPU 100% | 86% | 100% | 6475 | ~49 | run 2 |
+| default (on) | T1 | qwen3.5:4b | GPU 100% | **100%** | 100% | 7217 | ~40 | run 3 |
+| default (on) | T2 | qwen3.5:9b | partial 53% | 93% | 94% | 34666 | ~10 | run 3 |
+| default (on) | T2-code | qwen2.5-coder:7b | partial 73% | 86% | 100% | 515 | 25 | run 2 |
+
+\* **How the throughput column was measured:**
+- **Thinking off:** the harness value.
+- **Thinking on, Qwen3.5:** the harness value is inflated (377–3570 tok/s). Its PHX-016 formula divides *all* output tokens, including hidden thinking tokens, by the interval from the first *visible* text token to completion. The `~` values are output tokens ÷ total latency, computed from the results JSON.
+- **TTFT:** with thinking on it measures time to the first visible answer token, so it includes the whole reasoning time (median 7.0 s for T1, 34.6 s for T2).
+- **Harness:** it is frozen (ADR-029) and was not changed. The limitation is recorded in ADR-079.
+
+Observations (deterministic: every listed failure occurred in 3 of 3 measured runs):
+- **Thinking off failures:**
+
+  | Tier | Failed cases |
+  | --- | --- |
+  | T0 | `instruction-word-count`, `reasoning-schedule`, `untrusted-count-data` |
+  | T1 | `reasoning-arithmetic-chain` |
+  | T2 | `instruction-word-count`, `reasoning-arithmetic-chain`, `untrusted-count-data` |
+  | T2-code | `reasoning-arithmetic-chain`, `untrusted-count-data` |
+
+- **Thinking on:**
+  - T1 failed no case, in run 2 or run 3.
+  - T0 failed `code-function-name` and `structured-json-from-text`.
+  - T2's only failure was `untrusted-uppercase-data`: it hit the 180 s timeout (`deadline_exceeded`) in both runs 2 and 3.
+  - T2-code results matched thinking off.
+- **Thinking off vs on, Qwen3.5:**
+  - Accuracy: thinking on raises it by 7–14 points.
+  - Latency: thinking on costs roughly 20–30×, from about 0.2–1.3 s to about 6.5–35 s median.
+  - qwen2.5-coder has no thinking mode, so its two rows match.
+- **Placement and VRAM:**
+  - Up to 4.3 GB of the 6 GB GPU was used.
+  - T2 and T2-code are only partly GPU-resident at 16K context. Their offload explains most of their latency.
+- **System RAM:** in use across the whole machine, not just the model. The peak was 20.3 GB of 24 GB, during T2 with thinking on.
+
+**Closure.** Configuration (1) is measured on BLAZE-6 in both thinking modes. Configurations (2) and (3) stay NOT RUNNABLE in this ticket, reported with their reasons.
+- **Configuration (2):** needs PHX-029 and PHX-046, then a runner mode under the PHX-091 continuation.
+- **Configuration (3):** the owner decided on 2026-10-15 to install Colibri and run it in that continuation.

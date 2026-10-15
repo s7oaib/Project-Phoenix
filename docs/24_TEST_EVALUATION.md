@@ -69,6 +69,10 @@ behaviour.
   (GPU, partial or CPU, from `/api/ps`). It refuses CPU-only runs unless
   `--allow-cpu` is passed, because Ollama falls back to CPU silently when the
   GPU is unavailable.
+- With thinking on, the harness `tokens_per_second` is inflated and TTFT
+  includes reasoning time. The harness counts hidden thinking tokens but
+  measures only the visible-text interval. Report thinking-on throughput as
+  output tokens ÷ total latency instead (ADR-079).
 
 ## Automated test matrix (PHX-090)
 
