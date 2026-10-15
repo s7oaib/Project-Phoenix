@@ -3553,8 +3553,11 @@ Owner decisions (2026-10-15):
   ALLOWED by a matching caller grant, the tool is on the allowlist and P1, and
   the result is `attempted=True`, `effect_applied=False`, status SUCCESS. If it
   fails, the model verifier is not consulted and the mission fails
-  `verification_failed` (INV-008). A truncated listing (PARTIAL_SUCCESS) fails
-  this check.
+  `verification_failed` (INV-008). A truncated listing (PARTIAL_SUCCESS) is
+  never answered: the runtime ends the mission `tool_failed` before the answer
+  turn, and this check would reject it anyway.
+- **Duplicate grants.** Caller grants with a repeated ID or effective scope are
+  rejected before the mission starts, mirroring PermissionEngine's own rule.
 - **Audit.** P1 has no mandatory audit (INV-007 covers P3/P4), so the runtime
   writes no rows; the end-to-end test asserts zero rows on a migrated database.
 - **Trace.** `MissionTrace.tool_calls` holds `ToolCallRecord` entries (step,

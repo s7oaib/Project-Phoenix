@@ -52,3 +52,7 @@ coverage/
 .claude-flow/
 .DS_Store
 Thumbs.db
+
+# Local benchmark and live smoke output (PHX-091, PHX-046)
+.fyp-bench/
+.phoenix-smoke/

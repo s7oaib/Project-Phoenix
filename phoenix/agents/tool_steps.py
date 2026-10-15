@@ -120,6 +120,21 @@ def document_grants(grants: object) -> tuple[PermissionGrant, ...]:
         ):
             raise ValueError("Grant is outside the document step scope")
         accepted.append(grant)
+    # Mirror PermissionEngine's uniqueness rule so duplicates fail before the
+    # mission starts instead of inside the tool call.
+    ids = [grant.grant_id for grant in accepted]
+    scopes = [
+        (
+            grant.tool_id,
+            grant.action,
+            grant.resource,
+            grant.duration,
+            grant.session_id,
+        )
+        for grant in accepted
+    ]
+    if len(set(ids)) != len(ids) or len(set(scopes)) != len(scopes):
+        raise ValueError("Duplicate grant ID or effective scope")
     return tuple(accepted)
 
 
@@ -332,7 +347,8 @@ class DocumentStepRunner:
             raise ToolPermissionRequired(request)
         if status != PermissionStatus.ALLOWED:
             raise ToolStepRejected("Permission was not granted")
-        if content is None:
+        if content is None or result.status != ToolResultStatus.SUCCESS:
+            # FAILURE, or a truncated PARTIAL_SUCCESS listing LEVI would reject.
             raise ToolStepFailed("Workspace request failed")
         field, text = content
         if len(text) > binding.max_output_chars:

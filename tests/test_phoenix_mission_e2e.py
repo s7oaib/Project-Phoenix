@@ -716,6 +716,40 @@ def test_filesystem_failure_is_explicit_tool_failed(
     assert stack.audit_rows() == 0
 
 
+@pytest.mark.parametrize("second_id", ["Grant.Notes", "Grant.Other"])
+def test_duplicate_grants_fail_before_the_mission_starts(
+    stack: Stack, second_id: str
+) -> None:
+    # Same ID, or a different ID with the same effective scope: PermissionEngine
+    # rejects both, so the runtime must reject them up front, not mid-mission.
+    grants = (stack.grant(), stack.grant(grant_id=second_id))
+    with pytest.raises(PhoenixRuntimeError):
+        mission(stack, grants)
+    assert stack.provider.requests == []
+
+
+def test_truncated_listing_is_tool_failed_before_the_answer_turn(
+    stack: Stack,
+) -> None:
+    folder = stack.root / "many"
+    folder.mkdir()
+    for index in range(60):
+        (folder / f"f{index:02}.txt").write_text("x", encoding="utf-8")
+    stack.provider.replies["document_specialist"] = tool_request(
+        "list_directory", "many"
+    )
+    grant = stack.grant("list_directory", "many")
+    result = mission(stack, (grant,))
+    assert (result.kind, result.failure_code) == (
+        MissionKind.FAILED,
+        MissionFailureCode.TOOL_FAILED,
+    )
+    (record,) = result.trace.tool_calls
+    assert record.tool_status == ToolResultStatus.PARTIAL_SUCCESS
+    assert "document_answer" not in stack.provider.roles()
+    assert stack.audit_rows() == 0
+
+
 def test_cancellation_during_a_tool_step(
     stack: Stack, monkeypatch: pytest.MonkeyPatch
 ) -> None:
