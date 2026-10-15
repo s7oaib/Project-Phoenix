@@ -369,3 +369,113 @@ def test_dry_run_needs_no_provider(capsys: pytest.CaptureFixture[str]) -> None:
     assert fyp.main(["--dry-run"]) == 0
     out = capsys.readouterr().out
     assert "phoenix-fyp 1.0.0: 16 cases" in out and "T2=qwen3.5:9b" in out
+
+
+@pytest.mark.parametrize(
+    ("size", "vram", "device", "fraction"),
+    [
+        (100, 100, "gpu", 1.0),
+        (100, 60, "partial", 0.6),
+        (100, 0, "cpu", 0.0),
+        (0, 0, "cpu", 0.0),
+    ],
+)
+def test_compute_from_ps_classifies_placement(
+    size: int, vram: int, device: str, fraction: float
+) -> None:
+    result = fyp.compute_from_ps({"name": "m", "size": size, "size_vram": vram})
+    assert (result["device"], result["gpu_offload_fraction"]) == (device, fraction)
+
+
+def _cli(tmp_path: Path, probe: Any, *extra: str) -> tuple[int, Path]:
+    out = tmp_path / "out"
+    code = fyp.main(
+        ["--out", str(out), "--model", "T1=fixture-model", "--warmup", "0"]
+        + ["--runs", "1", *extra],
+        provider_factory=lambda: AnswerProvider(_correct_answers()),
+        compute_probe=probe,
+    )
+    return code, out
+
+
+def _placement(device: str) -> dict[str, Any]:
+    vram = {"gpu": 100, "partial": 50, "cpu": 0}[device]
+    placement: dict[str, Any] = fyp.compute_from_ps({"size": 100, "size_vram": vram})
+    return placement
+
+
+def test_gpu_placement_recorded_in_results_and_summary(tmp_path: Path) -> None:
+    code, out = _cli(tmp_path, lambda model: _placement("gpu"))
+    assert code == 0
+    results = json.loads((out / "fyp-benchmark-results.json").read_text("utf-8"))
+    row = results["configurations"]["baseline"][0]
+    assert row["compute"]["before"]["device"] == "gpu"
+    assert row["compute"]["after"]["device"] == "gpu"
+    assert results["compute_policy"] == {"allow_cpu": False, "probe": True}
+    summary = (out / "fyp-benchmark-summary.md").read_text("utf-8")
+    assert "| T1 | fixture-model | gpu 100% | success |" in summary
+
+
+def test_cpu_only_is_refused_before_any_benchmark_work(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[str] = []
+    provider = AnswerProvider(_correct_answers())
+
+    def cpu_probe(model: str) -> dict[str, Any]:
+        calls.append(model)
+        return _placement("cpu")
+
+    code = fyp.main(
+        [
+            "--out",
+            str(tmp_path / "o"),
+            "--model",
+            "T1=m",
+            "--warmup",
+            "0",
+            "--runs",
+            "1",
+        ],
+        provider_factory=lambda: provider,
+        compute_probe=cpu_probe,
+    )
+    assert code == 2 and calls == ["m"]
+    assert provider.models == []  # the harness never started (no capabilities call)
+    assert not (tmp_path / "o" / "fyp-benchmark-results.json").exists()
+    assert "--allow-cpu" in capsys.readouterr().err
+
+
+def test_allow_cpu_records_cpu_rows_deliberately(tmp_path: Path) -> None:
+    code, out = _cli(tmp_path, lambda model: _placement("cpu"), "--allow-cpu")
+    assert code == 0
+    results = json.loads((out / "fyp-benchmark-results.json").read_text("utf-8"))
+    assert results["compute_policy"]["allow_cpu"] is True
+    assert results["configurations"]["baseline"][0]["compute"]["before"]["device"] == (
+        "cpu"
+    )
+
+
+def test_gpu_lost_mid_run_invalidates_row(tmp_path: Path) -> None:
+    placements = iter(["gpu", "cpu"])
+    code, out = _cli(tmp_path, lambda model: _placement(next(placements)))
+    assert code == 1
+    results = json.loads((out / "fyp-benchmark-results.json").read_text("utf-8"))
+    assert results["configurations"]["baseline"][0]["status"] == "invalid_cpu_fallback"
+    summary = (out / "fyp-benchmark-summary.md").read_text("utf-8")
+    assert "gpu 100% → cpu" in summary
+
+
+def test_unloaded_model_counts_as_cpu(tmp_path: Path) -> None:
+    code, _ = _cli(tmp_path, lambda model: None)
+    assert code == 2
+
+
+def test_injected_provider_without_probe_is_not_probed(tmp_path: Path) -> None:
+    code, out = _cli(tmp_path, None)
+    assert code == 0
+    results = json.loads((out / "fyp-benchmark-results.json").read_text("utf-8"))
+    assert results["compute_policy"]["probe"] is False
+    assert results["configurations"]["baseline"][0]["compute"]["before"] == {
+        "device": "not_probed"
+    }

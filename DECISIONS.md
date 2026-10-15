@@ -3274,6 +3274,53 @@ thinking-off row was run on 2026-10-15 with the v1 task set and the same budget
 and timeout. Its evidence is in the PHX-091 ticket. The thinking-on baseline
 is still the default and is still owed.
 
+Correction (2026-10-15): that thinking-off row ran CPU-only and is invalid as
+BLAZE-6 evidence.
+- **Cause:** the RTX 3050 was disconnected from the bus (Device Manager Code 45),
+  and Ollama reported `library=cpu`, `total_vram="0 B"`. `nvidia-smi`'s
+  "insufficient permissions" error was a symptom, not the cause.
+- **Guard:** Ollama falls back to CPU silently. `scripts/fyp_benchmark.py` now
+  reads each tier's placement from Ollama `/api/ps` (`size_vram` vs `size`)
+  before and after the run and records it in each row and the summary.
+- **Policy:** it refuses CPU-only placement unless `--allow-cpu` is passed, and
+  marks a row `invalid_cpu_fallback` if the GPU is lost mid-run.
+- **Product code:** `phoenix/` is unchanged.
+- **Next step:** both thinking modes must be re-run with the GPU enabled.
+
+Correction (2026-10-15): "the models were pulled" to `D:\Phoenix\models` above
+is inaccurate.
+- **Where they went:** the Ollama desktop app ignores `OLLAMA_MODELS` and uses
+  its own model-location setting, so the pulls went to the C: store. The missing
+  files were later copied to D: and verified.
+- **Context setting:** the app also passes its own context-length setting
+  (262,144), which overrides `OLLAMA_CONTEXT_LENGTH`. At that size, Ollama
+  0.40.4 (auto-updated from 0.35.1) left only 9 of 25 qwen3.5:2b layers on the
+  GPU.
+- **How the GPU baselines run:** with the desktop app closed, on a headless
+  `ollama serve` using `OLLAMA_CONTEXT_LENGTH=16384` (MASTER_SPEC "normal
+  context") and `OLLAMA_MODELS=D:\Phoenix\models`, on CUDA.
+- **Placement:** 2b and 4b fully on the GPU; 9b 53% and coder-7b 73% (6 GB
+  VRAM limit).
+- **Recorded per run:** placement and the Ollama version.
+
+Amendment (2026-10-15, closure): the GPU baselines ran in both thinking modes.
+Their evidence is in the PHX-091 ticket.
+- **Overlap rerun:** the thinking-on T1 and T2 rows came from a clean rerun,
+  because the first run overlapped an unrelated CPU-heavy test-matrix run. The
+  rerun reproduced accuracy and failures exactly.
+- **Metric limitation, accepted rather than fixed:** with thinking on, the
+  PHX-016 harness's `tokens_per_second` counts hidden thinking tokens but
+  divides only by the visible-text interval, so it is inflated and not
+  comparable. TTFT means time to the first visible answer token, which includes
+  reasoning time.
+- **Reporting:** FYP reports must use output tokens ÷ total latency for
+  thinking-on throughput.
+- **Harness:** it stays frozen. Changing the metric belongs to a harness ticket
+  if the owner wants it.
+- **Closure:** PHX-091 closes on configuration (1). Configurations (2) and (3)
+  move to the PHX-091 continuation after PHX-029 and PHX-046. The owner chose,
+  on 2026-10-15, to install Colibri for configuration (3).
+
 ## ADR-080 — Explicit Ollama thinking control at provider construction
 
 Status: Accepted
