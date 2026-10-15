@@ -3362,3 +3362,113 @@ that one file is now pinned to the PHX-017 implementation commit
 Every other protected file stays pinned to `origin/main`. This follows the PR #61
 re-pin (commit 52ec305). It requires the PR to land with a merge commit, so
 that SHA stays reachable from main.
+
+## ADR-081 — Model-backed orchestration runtime over frozen contracts
+
+Status: Accepted
+Date: 2026-10-15
+Ticket: PHX-029
+
+Before this decision, PhoenixOrchestrator, AizenPlanner and LeviVerifier accepted
+injected responders only. Nothing in `phoenix/agents` called `ModelProvider`, so the
+complex path stopped at `PLANNING_REQUIRED`. The owner answered all 13 PHX-029
+questions with the recommended option:
+
+- **Scope.** Three tickets.
+  - PHX-029: text-only responders and runtime.
+  - PHX-046: P1 read-only filesystem steps and the `end_to_end` test that clears
+    the PHX-090 gap.
+  - PHX-091: a configuration (2) runner.
+- **Location.** New modules only: `phoenix/agents/prompts.py`, `responders.py`
+  and `runtime.py`.
+  - Every existing `phoenix/` file stays byte-identical, so the protected-source
+    guards are untouched.
+  - `PhoenixRuntime` is PHOENIX's runtime (`orchestrator_id="phoenix"`), not a
+    second orchestrator (INV-001). It uses PhoenixOrchestrator for DIRECT and for
+    the COMPLEX hand-over.
+- **Path.** The caller supplies DIRECT or COMPLEX. Triage is deferred.
+- **Routing.**
+  - A PHOENIX assignment generation picks each step's domain from an allowlist
+    (v1: intelligence, scenario_analysis, build_engineering). AIZEN keeps no
+    routing authority.
+  - Specialists go through AgentModelRouter.
+  - Control roles (phoenix, strategist, verifier), which the router deliberately
+    excludes, use `ControlRoleModelSelector`. It applies the same rules: HEALTHY
+    provider, capability match, first eligible in caller order.
+  - The tier table is provisional data (docs/05 freeze gate):
+    - phoenix → T1 qwen3.5:4b;
+    - strategist and verifier → T2 qwen3.5:9b;
+    - build_engineer → T2-code qwen2.5-coder:7b;
+    - others → T1;
+    - T0 qwen3.5:2b is always the last fallback.
+  - No resource monitor exists yet, so registered candidates count as resource
+    eligible.
+- **Structured output.** Parsed from text. The response must be exactly one JSON
+  object, with at most one code fence, and strict `extra="forbid"` wire models
+  validate it. The following are rejected with closed codes:
+  - truncated output (`finish_reason="length"`) or empty output;
+  - oversized output;
+  - output that is not valid UTF-8 (`invalid_text`, for example a lone
+    surrogate).
+
+  The raise happens outside any handler, so no exception carries the raw text.
+  Responders, not models, assign every ID. No provider change.
+- **Thinking.** `think:false` applies to the structured roles: PHOENIX direct and
+  assignment, AIZEN planning and LEVI verification.
+  - Following ADR-080, which allows two providers, `PhoenixRuntime` takes optional
+    `structured_providers` (for example `OllamaProvider(think=False)`) that share
+    IDs with the default providers.
+  - Specialist and final-answer steps keep the provider default.
+  - Health is probed on the default instance.
+- **Prompts.** Versioned constants (`phoenix-prompts-v1`). The coding agent
+  drafted them; the owner approved the exact `phoenix-prompts-v1` text on
+  2026-10-15. Any change after release bumps the version. The review fixes
+  below changed the prompts before release or approval, so v1 was kept rather
+  than bumped.
+- **Plan objectives are guarded (owner decision "Guard them", 2026-10-15).**
+  AIZEN objectives are model output. They reach the assignment, specialist and
+  verifier prompts only through `PromptInjectionGuard` as `MODEL_OUTPUT` items.
+  Fixed runtime text tells the model to complete, or verify against, the planned
+  objective shown in the data block. Only runtime constants and the user's own
+  request appear as raw prompt text.
+- **Verification.**
+  - Every step, including a final `user_interaction` answer step, is verified with
+    `verification_required=True`. Self-handoff is forbidden, so the final answer
+    cannot be a PHOENIX step.
+  - LEVI's responder emits deterministic checks first, so the all-checks verdict
+    cannot be overridden (INV-008). When any of them fails, the model is not
+    consulted. The checks are:
+    - the output is within the size limit;
+    - for intermediate steps only, the output is plain text, not JSON.
+  - The final answer is exempt from the plain-text check, because it must follow
+    whatever format the request asks for, including JSON (the PHX-091 structured
+    cases).
+  - LEVI prefers a model other than the producer's.
+- **DIRECT path.** It has no LEVI verification and no task graph. It is bounded
+  only by the mission deadline. Simple answers are PHOENIX direct output (as
+  PHX-021 already allowed), not verified results.
+- **Task state.** The canonical table has no VERIFYING → RUNNING edge, and states
+  are task-level. Intermediate step verification therefore runs while RUNNING, and
+  VERIFYING is the final-answer verification phase:
+  CREATED → PLANNING → READY → RUNNING → VERIFYING → COMPLETED.
+- **Failures.** Explicit, with no hidden retries. Provider, responder-output,
+  prompt-boundary, routing, verification and timeout failures each end as FAILED
+  with a closed code; unknown exceptions propagate. `cancel()` yields CANCELLED,
+  and outside cancellation propagates. Settling a failure or cancellation onto
+  the task state machine never skips an illegal edge silently: it raises
+  `TaskStateTransitionError` as a defect. MAHORAGA and KAIDO stay deferred. The codes
+  are shaped to become their trigger evidence later.
+- **Events.** None; the 32-type vocabulary is unchanged. `MissionTrace` records:
+  - state history;
+  - provider health;
+  - per-generation role, model, tokens, duration, and output hash and length;
+  - LEVI verdicts.
+
+  It never records prompts or outputs.
+- **Leases.** Every generation holds the global heavy lease (INV-023), and
+  cancellation is forwarded to the provider. The PHX-016 BenchmarkRunner cannot
+  wrap a mission, because it would deadlock on the single lease, so PHX-091
+  configuration (2) needs its own loop.
+
+No new dependencies. Tests are offline: a scripted provider, plus a real
+OllamaProvider over `httpx.MockTransport` for the `think` wire check.
