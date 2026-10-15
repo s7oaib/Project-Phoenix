@@ -1710,6 +1710,10 @@ def test_static_no_execution_or_concrete_dependency(path: str) -> None:
 # PHX-017 commit.
 PHX_017_COMMIT = "b7d96518d58ee7466d441cbe3b17c4eaad0866cf"
 PHX_017_PATHS = ("phoenix/models/ollama.py",)
+# PHX-046 (ADR-082) intentionally changed these; they stay pinned, at the
+# PHX-046 implementation commit.
+PHX_046_COMMIT = "95c5afad908933ea92ab61c6c2e5b86fdd04e0e0"
+PHX_046_PATHS = ("phoenix/agents/prompts.py", "phoenix/agents/runtime.py")
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -1723,9 +1727,11 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         # PHX-080 owns these shell paths; workspace tests verify their UI/security.
         and path not in {"apps/desktop/src/App.tsx", "apps/desktop/src/styles.css"}
         and path not in PHX_017_PATHS
+        and path not in PHX_046_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
+    baselines += [(PHX_046_COMMIT, path) for path in PHX_046_PATHS]
     for commit, path in baselines:
         actual = subprocess.check_output(
             ["git", "hash-object", "--path=" + path, path], cwd=ROOT

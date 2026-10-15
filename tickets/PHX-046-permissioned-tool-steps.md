@@ -70,7 +70,7 @@ Recorded in ADR-082.
 - **Changed files.**
   - `phoenix/agents/prompts.py` (v2), `phoenix/agents/runtime.py`, new `phoenix/agents/tool_steps.py`;
   - `tests/test_phoenix_runtime.py` (v2 version, neutrality rule), new `tests/test_phoenix_mission_e2e.py`;
-  - `tests/test_prompt_injection_defenses.py` (PHX-046 pin, commit 2);
+  - `tests/test_prompt_injection_defenses.py` (second commit: `PHX_046_COMMIT` pins `prompts.py` and `runtime.py` to the implementation commit `95c5afad908933ea92ab61c6c2e5b86fdd04e0e0`; merge with a merge commit);
   - `tests/matrix.toml` (e2e mapping, `[[gap]] end_to_end` removed, smoke script in `mypy-scripts`);
   - new `scripts/phoenix_mission_smoke.py`;
   - `DECISIONS.md` (ADR-082), `FEATURE_TICKETS.md`, `docs/24_TEST_EVALUATION.md`, this ticket.

@@ -3490,7 +3490,8 @@ Owner decisions (2026-10-15):
   `phoenix/` path in `origin/main`. Following the PHX-017 precedent (ADR-080),
   `phoenix/agents/prompts.py` and `phoenix/agents/runtime.py` leave the
   `origin/main` baseline and are pinned to the PHX-046 implementation commit
-  (`PHX_046_COMMIT` / `PHX_046_PATHS`), so any further change still fails. A pin
+  `95c5afad908933ea92ab61c6c2e5b86fdd04e0e0` (`PHX_046_COMMIT` /
+  `PHX_046_PATHS`), so any further change still fails. A pin
   cannot name its own commit, so the work lands as two commits: the
   implementation, then the pin. The PR must merge with a merge commit so the
   pinned SHA stays reachable from main.
