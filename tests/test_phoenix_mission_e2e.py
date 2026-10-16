@@ -117,6 +117,7 @@ class ScriptedProvider(ModelProvider):
             "verifier": PASS,
             "document_verifier": PASS,
             "final_verifier": PASS,
+            "step_verifier": PASS,
         }
         self.requests: list[GenerationRequest] = []
         self.cancelled: list[str] = []
@@ -393,7 +394,7 @@ def test_session_grant_completes_with_verified_tool_evidence(
         "document_answer",
         "document_verifier",
         "specialist",
-        "verifier",
+        "step_verifier",
         "final_answer",
         "final_verifier",
     ]
@@ -457,10 +458,19 @@ def test_session_grant_completes_with_verified_tool_evidence(
     assert (
         item_of(levi, "candidate")["text"] == "The notes give the codename PELICAN-7."
     )
-    # Intermediate text steps are verified without tool or step outputs.
-    (text_prompt,) = stack.provider.prompts_for("verifier")
-    _, text_levi = boundary(text_prompt)
-    assert [i["content_id"] for i in text_levi["items"]] == ["objective", "candidate"]
+    # The text step s2 is verified against s1's verified output (guarded model
+    # output, as s2 itself saw it), never against the tool output.
+    (text_prompt,) = stack.provider.prompts_for("step_verifier")
+    text_head, text_levi = boundary(text_prompt)
+    _, s2_turn = boundary(stack.provider.prompt("specialist"))
+    assert [i["content_id"] for i in text_levi["items"]] == [
+        "objective",
+        "s1",
+        "candidate",
+    ]
+    assert item_of(text_levi, "s1") == item_of(s2_turn, "s1")
+    assert item_of(text_levi, "s1")["origin"] == "model_output"
+    assert "PELICAN" not in text_head
     assert "SENTINEL" not in text_prompt
     # The final answer is verified against the verified step outputs, as guarded
     # MODEL_OUTPUT items identical to those the final-answer turn saw.
@@ -1058,7 +1068,7 @@ def test_document_turns_use_the_structured_provider(stack: Stack) -> None:
         "document_specialist",
         "document_answer",
         "document_verifier",
-        "verifier",
+        "step_verifier",
         "final_verifier",
     ]
     assert stack.provider.roles() == ["specialist", "final_answer"]
@@ -1165,9 +1175,19 @@ def test_document_roles_keep_the_structured_token_cap(stack: Stack) -> None:
         "document_answer": 2048,
         "document_verifier": 2048,
         "specialist": 4096,
-        "verifier": 2048,
+        "step_verifier": 2048,
         "final_answer": 4096,
         "final_verifier": 2048,
     }
     models = {g.role: g.model_id for g in result.trace.generations}
     assert models["assignment"] == "qwen3.5:9b"
+
+
+def test_document_verifier_drops_unknown_check_keys(stack: Stack) -> None:
+    # PHX-047 (ADR-083): extra keys in a check are dropped unread (the strict
+    # top level is covered by the runtime tests and the injection test above).
+    check = {"criterion": "c", "passed": True, "evidence_summary": "e"}
+    stack.provider.replies["document_verifier"] = json.dumps(
+        {"checks": [check | {"completed_step_objective": True}]}
+    )
+    assert mission(stack, (stack.grant(),)).kind == MissionKind.COMPLETED

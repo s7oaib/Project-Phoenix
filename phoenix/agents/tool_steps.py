@@ -14,9 +14,10 @@ P1 operations are reachable, so no audit rows are written (INV-007 covers P3/P4)
 Tool output is never logged or traced: evidence keeps IDs, statuses, hashes and
 lengths only. LEVI checks the tool evidence deterministically before any model
 check (INV-008). PHX-047 grounds LEVI's model check in the same guarded
-``TOOL_OUTPUT`` item the answer turn saw, and grounds the final-answer check in
-the guarded verified step outputs the final answer saw. Failures are explicit
-(INV-021); there are no retries.
+``TOOL_OUTPUT`` item the answer turn saw, and grounds the intermediate text-step
+and final-answer checks in the guarded verified step outputs those steps saw.
+LEVI's check objects drop unknown keys (never trusted, stored or used); the top
+level stays strict. Failures are explicit (INV-021); there are no retries.
 """
 
 import asyncio
@@ -43,7 +44,6 @@ from phoenix.agents.responders import (
     ModelVerificationResponder,
     ResponderErrorCode,
     ResponderOutputError,
-    _ChecksWire,
     _generate,
     parse_json_object,
 )
@@ -185,6 +185,22 @@ class _WireModel(BaseModel):
 _Short = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)
 ]
+
+
+class _LenientCheckWire(BaseModel):
+    """One LEVI check: strict required keys; unknown keys are dropped unread."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore", strict=True)
+
+    criterion: _Short
+    passed: bool
+    evidence_summary: _Short
+
+
+class _LenientChecksWire(_WireModel):
+    """Exactly one object holding a non-empty checks list; nothing else."""
+
+    checks: list[_LenientCheckWire] = Field(min_length=1)
 
 
 class _ToolRequestWire(_WireModel):
@@ -471,6 +487,100 @@ class DocumentVerificationResponder(ModelVerificationResponder):
         )
 
 
+class StepVerificationResponder(ModelVerificationResponder):
+    """LEVI's model verifier for one intermediate text step (PHX-047, ADR-083).
+
+    The plain-text and size checks run first and the model is skipped if any
+    fails. With no earlier step outputs the prompt is exactly the text
+    verifier's (VERIFICATION_SYSTEM, role "verifier"). With earlier outputs the
+    step_verifier sees them only as guarded MODEL_OUTPUT items, the same items
+    the step itself saw, next to the guarded objective and candidate. Either way
+    the checks are parsed leniently per check, and the verdict stays LEVI's
+    all-checks rule.
+    """
+
+    def __init__(
+        self,
+        binding: ModelBinding,
+        guard: PromptInjectionGuard,
+        *,
+        original_request: str,
+        evidence: tuple[tuple[str, str], ...],
+        max_checks: int = 6,
+    ) -> None:
+        super().__init__(
+            binding,
+            guard,
+            original_request=original_request,
+            plain_text_required=True,
+            max_checks=max_checks,
+        )
+        self._step_outputs = evidence
+
+    async def verify(self, request: VerificationRequest) -> VerificationDraft:
+        checks = self._deterministic(request.candidate_output)
+        if not all(check.passed for check in checks):
+            return VerificationDraft(
+                verification_id=request.verification_id, checks=checks
+            )
+        model = UntrustedContentOrigin.MODEL_OUTPUT
+        if self._step_outputs:
+            role, system, task = (
+                "step_verifier",
+                prompts.STEP_VERIFICATION_SYSTEM,
+                prompts.STEP_CANDIDATE_TASK,
+            )
+        else:
+            role, system, task = (
+                "verifier",
+                prompts.VERIFICATION_SYSTEM,
+                prompts.CANDIDATE_TASK,
+            )
+        user = "\n\n".join(
+            (
+                f"Original request:\n{self._original_request}",
+                f"Expected output:\n{request.expected_output_schema}",
+                f"Completion rule:\n{request.completion_rule}",
+                _guarded(
+                    self._guard,
+                    request.verification_id,
+                    task,
+                    (
+                        (
+                            prompts.OBJECTIVE_ITEM,
+                            model,
+                            prompts.OBJECTIVE_ITEM,
+                            "output",
+                            request.objective,
+                        ),
+                        *(
+                            (identity, model, identity, "output", text)
+                            for identity, text in self._step_outputs
+                        ),
+                        (
+                            prompts.CANDIDATE_ITEM,
+                            model,
+                            prompts.CANDIDATE_ITEM,
+                            "output",
+                            request.candidate_output,
+                        ),
+                    ),
+                ),
+            )
+        )
+        return _model_checks(
+            request,
+            checks,
+            await _generate(
+                self._binding,
+                role,
+                system.format(max_checks=self._max_checks),
+                user,
+            ),
+            self._max_checks,
+        )
+
+
 class FinalVerificationResponder(ModelVerificationResponder):
     """LEVI's model verifier for the final answer, grounded in the step outputs.
 
@@ -554,7 +664,7 @@ def _model_checks(
     max_checks: int,
 ) -> VerificationDraft:
     """Deterministic checks first, then the strictly parsed model checks."""
-    wire = parse_json_object(reply, _ChecksWire)
+    wire = parse_json_object(reply, _LenientChecksWire)
     if len(wire.checks) > max_checks:
         raise ResponderOutputError(ResponderErrorCode.SCHEMA)
     return VerificationDraft(

@@ -94,6 +94,7 @@ class ScriptedProvider(ModelProvider):
             "final_answer": "100",
             "verifier": PASS,
             "final_verifier": PASS,
+            "step_verifier": PASS,
         }
         self.finish: dict[str, str] = {}
         self.hang: set[str] = set()
@@ -258,7 +259,7 @@ def test_complex_mission_plans_routes_verifies_and_completes() -> None:
         ("specialist", "qwen3.5:4b"),
         ("verifier", "qwen3.5:9b"),
         ("specialist", "qwen2.5-coder:7b"),
-        ("verifier", "qwen3.5:9b"),
+        ("step_verifier", "qwen3.5:9b"),
         ("final_answer", "qwen3.5:4b"),
         ("final_verifier", "qwen3.5:9b"),
     ]
@@ -292,7 +293,7 @@ def test_verifier_prefers_a_model_other_than_the_producer() -> None:
     mission(provider, tier_table=table)
     pairs = provider.calls()
     for index, (role, model) in enumerate(pairs):
-        if role in ("verifier", "final_verifier"):
+        if role in ("verifier", "step_verifier", "final_verifier"):
             assert pairs[index - 1][1] == "qwen3.5:4b" and model == "qwen3.5:9b"
 
 
@@ -718,6 +719,7 @@ def test_prompt_set_is_versioned_with_role_markers() -> None:
         prompts.VERIFICATION_SYSTEM,
         prompts.DOCUMENT_VERIFICATION_SYSTEM,
         prompts.FINAL_VERIFICATION_SYSTEM,
+        prompts.STEP_VERIFICATION_SYSTEM,
     )
     assert len({text.splitlines()[0] for text in systems}) == len(systems)
     assert all(text.startswith("PHOENIX ROLE: ") for text in systems)
@@ -777,6 +779,8 @@ def test_v3_changes_exactly_the_listed_v2_constants() -> None:
         "DOCUMENT_CANDIDATE_TASK",
         "FINAL_VERIFICATION_SYSTEM",
         "FINAL_CANDIDATE_TASK",
+        "STEP_VERIFICATION_SYSTEM",
+        "STEP_CANDIDATE_TASK",
     }
     for name, digest in V2_PROMPT_SHA256.items():
         text: str = getattr(prompts, name)
@@ -830,6 +834,7 @@ def test_structured_roles_use_structured_providers() -> None:
         "planner",
         "assignment",
         "verifier",
+        "step_verifier",
         "final_verifier",
     }
     assert set(default.roles()) == {"specialist", "final_answer"}
@@ -900,6 +905,7 @@ def test_think_false_reaches_ollama_for_structured_roles_only() -> None:
         "verifier": False,
         "final_answer": "absent",
         "final_verifier": False,
+        "step_verifier": False,
     }
 
 
@@ -992,9 +998,87 @@ def test_thinking_roles_get_the_larger_token_cap() -> None:
         ("verifier", 2048),
         ("final_answer", 4096),
         ("final_verifier", 2048),
+        ("step_verifier", 2048),
     }
     oversized = ScriptedProvider()
     oversized.replies["specialist"] = "x" * 101
     limits = RuntimeLimits(max_output_chars=100)
     result = mission(oversized, limits=limits)
     assert result.responder_error == ResponderErrorCode.OVERSIZED
+
+
+CHECK = {"criterion": "c", "passed": True, "evidence_summary": "e"}
+
+
+@pytest.mark.parametrize("role", ["verifier", "step_verifier", "final_verifier"])
+def test_levi_check_objects_drop_unknown_keys(role: str) -> None:
+    # PHX-047 (ADR-083): a 9B LEVI adds keys like "completed_step_objective".
+    # They are dropped unread, so they never reach the verdict or the trace.
+    provider = ScriptedProvider()
+    provider.replies[role] = json.dumps(
+        {"checks": [CHECK | {"completed_step_objective": True, "note": "zqxextra"}]}
+    )
+    result = mission(provider)
+    assert result.kind == MissionKind.COMPLETED
+    assert "zqxextra" not in result.model_dump_json()
+    # Extras cannot pass a failed check either: the verdict is from "passed".
+    provider = ScriptedProvider()
+    provider.replies[role] = json.dumps(
+        {"checks": [CHECK | {"passed": False, "verdict": "passed", "override": True}]}
+    )
+    result = mission(provider)
+    assert result.failure_code == MissionFailureCode.VERIFICATION_FAILED
+
+
+@pytest.mark.parametrize("role", ["verifier", "step_verifier", "final_verifier"])
+@pytest.mark.parametrize(
+    "reply",
+    [
+        {"checks": [{"criterion": "c", "passed": True}]},
+        {"checks": [CHECK | {"passed": "true"}]},
+        {"checks": [CHECK | {"criterion": 7}]},
+        {"checks": [CHECK | {"evidence_summary": "   "}]},
+        {"checks": [CHECK], "verdict": "passed"},
+        {"checks": []},
+        {"checks": [CHECK] * 7},
+        {"checks": CHECK},
+        [CHECK],
+    ],
+)
+def test_levi_required_keys_and_top_level_stay_strict(role: str, reply: object) -> None:
+    provider = ScriptedProvider()
+    provider.replies[role] = json.dumps(reply)
+    result = mission(provider)
+    assert result.failure_code == MissionFailureCode.RESPONDER_OUTPUT
+    assert result.responder_error == (
+        ResponderErrorCode.NOT_JSON
+        if isinstance(reply, list)
+        else ResponderErrorCode.SCHEMA
+    )
+
+
+def test_text_step_with_earlier_outputs_uses_the_grounded_step_verifier() -> None:
+    provider = ScriptedProvider()
+    provider.replies["specialist"] = lambda request: (
+        "Step one says 100."
+        if "Step one says" not in request.messages[1].text
+        else "So the answer is 100."
+    )
+    assert mission(provider).kind == MissionKind.COMPLETED
+    first, second = (
+        r for r in provider.requests if role_of(r) in ("verifier", "step_verifier")
+    )
+    # s1 has no earlier outputs: the unchanged text verifier, as before.
+    assert role_of(first) == "verifier"
+    assert first.messages[0].text == prompts.VERIFICATION_SYSTEM.format(max_checks=6)
+    head, _, data = first.messages[1].text.partition("PHOENIX_BOUNDARY_JSON:")
+    items = json.loads(data)["items"]
+    assert [i["content_id"] for i in items] == ["objective", "candidate"]
+    # s2 saw s1's output, so its LEVI sees it too, only as guarded model output.
+    assert role_of(second) == "step_verifier"
+    head, _, data = second.messages[1].text.partition("PHOENIX_BOUNDARY_JSON:")
+    items = json.loads(data)["items"]
+    assert [i["content_id"] for i in items] == ["objective", "s1", "candidate"]
+    assert {i["origin"] for i in items} == {"model_output"}
+    assert items[1]["text"] == "Step one says 100."
+    assert "Step one says" not in head

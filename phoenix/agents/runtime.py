@@ -51,7 +51,6 @@ from phoenix.agents.responders import (
     ModelPlanningResponder,
     ModelSpecialistResponder,
     ModelStepAssignmentResponder,
-    ModelVerificationResponder,
     ResponderErrorCode,
     ResponderOutputError,
 )
@@ -78,6 +77,7 @@ from phoenix.agents.tool_steps import (
     DocumentStepRunner,
     DocumentVerificationResponder,
     FinalVerificationResponder,
+    StepVerificationResponder,
     ToolCallRecord,
     ToolEvidence,
     ToolEvidenceVerificationResponder,
@@ -754,11 +754,12 @@ class PhoenixRuntime:
                     evidence=prior,
                 )
             elif tool_evidence is None:
-                responder = ModelVerificationResponder(
+                # PHX-047: grounded in the earlier outputs this step saw, if any.
+                responder = StepVerificationResponder(
                     verifier,
                     self._guard,
                     original_request=request.text,
-                    plain_text_required=True,
+                    evidence=prior,
                 )
             else:
                 # PHX-047: LEVI's model sees the guarded tool output it verifies.

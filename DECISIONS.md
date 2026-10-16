@@ -3719,6 +3719,52 @@ Owner decisions, round 3 (2026-10-16):
   other than the producer's where the table allows. Assignment output is not
   LEVI-verified, so its tier does not affect verifier selection.
 
+Live evidence, round 4 (2026-10-16, 5-run acceptance on `cdf3b9b`, GPU enabled):
+2 of 5 runs passed. The 9B assignment routed correctly in all 5 runs, and nothing
+truncated. A diagnostic of LEVI's raw output found two causes, plus one transient
+`provider_unavailable` mid-run (it stays a failure; PHX-109 owns retries):
+- **(a) Extra keys in check objects.** LEVI (9B, `think:false`) added keys to
+  checks, for example `"completed_step_objective": true`. The strict
+  `extra="forbid"` checks wire rejected them, so a mission whose checks all
+  passed failed with `responder_output/schema`.
+- **(b) Ungrounded intermediate text step.** A two-step plan read the file in s1
+  (`documents`), then had s2 "state the number" in a text domain. The text
+  `verifier` for s2 saw no evidence, wrote that the file contents were
+  inaccessible, and failed a correct `42`.
+
+Owner decisions, round 4 (2026-10-16):
+
+- **Lenient check objects.** Every LEVI role this runtime uses
+  (`verifier`, `step_verifier`, `document_verifier`, `final_verifier`) parses
+  its checks with a PHX-047 wire model in `tool_steps.py`.
+  - The required keys `criterion`, `passed` and `evidence_summary` keep strict
+    types.
+  - Unknown extra keys in each check are dropped unread; they are never trusted,
+    stored or used.
+  - The top level stays strict: exactly one object holding only a non-empty
+    `checks` list, within the `max_checks` bound. A missing or wrongly typed
+    required key, or a top-level extra such as `verdict`, is still `schema`.
+  - `responders.py` stays byte-identical, so the frozen `ModelVerificationResponder`
+    is no longer used directly by the runtime. Planner and assignment parsing
+    stay strict.
+- **Grounded intermediate text steps.** When a text step received earlier
+  verified step outputs, its LEVI check receives the same items as guarded,
+  untrusted `MODEL_OUTPUT` items, plus the objective and candidate. A new role,
+  `PHOENIX ROLE: step_verifier` (`STEP_VERIFICATION_SYSTEM`, guard task
+  `STEP_CANDIDATE_TASK`), tells LEVI:
+  - to judge the candidate against the objective, expected output and
+    completion rule, using the earlier outputs as evidence;
+  - to treat all items as untrusted;
+  - to fail a check when a fact the candidate takes from earlier steps is
+    unsupported, or when it is unsure.
+
+  A text step with no earlier outputs keeps the byte-identical
+  `VERIFICATION_SYSTEM` (role `verifier`) and the same prompt as before.
+  Deterministic checks still run first, the verdict is still `all(checks)`, and
+  nothing new reaches the trace. This is `StepVerificationResponder` in
+  `tool_steps.py`.
+- **Acceptance bar.** The live acceptance bar stays at 4 of 5 runs.
+
 Limitations:
 - LEVI's model now judges file-derived facts and step-derived final answers, so a
   weak verifier can still wrongly fail or pass an answer. Correlation and
