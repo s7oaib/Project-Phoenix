@@ -1,6 +1,6 @@
 # PHX-101 — Local API security
 
-Status: IN_PROGRESS (implemented on a local branch; awaiting owner review of this ticket and the diff)
+Status: DONE (owner confirmed recommendations R1–R10 on 2026-10-16)
 Phase: 10 — Product Integration (milestone M1, backend)
 Branch: `feature/PHX-101-local-api-security` (local commits only; created from the PHX-100 tip)
 Base: `feature/PHX-100-backend-composition-root`
@@ -36,7 +36,7 @@ The backend binds 127.0.0.1 only, and every launch uses a fresh token:
 - **Uvicorn.** It logs no headers. Its access log, which would log paths and queries, is already off (PHX-100 R9), as is proxy-header trust.
 - **No new dependencies.** `hmac`, `secrets`, `base64` and Starlette's datastructures are enough.
 
-## Recommendations (R, pending owner confirmation)
+## Recommendations (R1–R10, confirmed by the owner 2026-10-16)
 
 - **R1 — Token handoff on stdin.**
   - **Delivery.** The launcher reads one line from stdin, waiting at most 10 s and reading at most 1024 characters. The token never appears in argv or the environment, so it is not visible in process listings.

@@ -3655,8 +3655,8 @@ parent-death detection (Q4). No new dependencies.
 
 ## ADR-085 — Local API security: loopback, per-launch token, Host and Origin checks
 
-Status: Accepted in principle (owner decision 2026-10-16); details R1–R10
-pending owner confirmation
+Status: Accepted (owner decision 2026-10-16; the owner confirmed details R1–R10
+on 2026-10-16)
 Date: 2026-10-16
 Ticket: PHX-101
 
