@@ -130,4 +130,24 @@ New `tests/test_api_security.py`, mapped in `tests/matrix.toml` as `unit, integr
 
 ## Completion evidence
 
-See the bottom of this file once implemented.
+- **Changed files.**
+  - New: `phoenix/api/security.py`, `tests/test_api_security.py`, this ticket.
+  - Edited (all new in PHX-100): `phoenix/api/server.py` (`security` is required and installed), `phoenix/api/launcher.py` (stdin token, `create_server(token=...)`), `tests/test_api_server.py` (authenticated client with the bound Host).
+  - Also edited: the two guard files (one more named exclusion, `phoenix/api/security.py`), `tests/matrix.toml`, `DECISIONS.md` (ADR-085), `docs/09_SECURITY.md` ("Local API"), `docs/13_API_CONTRACTS.md`.
+- **Frozen files.** No existing `phoenix/`, `alembic/`, `apps/`, `pyproject.toml` or `uv.lock` file changed. There are no new dependencies and no CORS middleware.
+- **Targeted checks.**
+  - `pytest tests/test_api_security.py tests/test_api_server.py tests/test_api.py tests/test_persistence.py` plus the three frozen-file guard tests: 135 passed.
+  - `ruff check`, `ruff format --check` and `mypy --strict` on `phoenix/api`, `tests/test_api_server.py` and `tests/test_api_security.py`: clean.
+  - `python scripts/test_matrix.py --validate-only`: OK. `git diff --check`: clean.
+- **Full matrix.** `python scripts/test_matrix.py` ran on clean commit `fee2623`. That commit differs from this branch only in the PHX-100 ticket's evidence text, which moved under the rebase onto `3325486`. All 13 gates PASS:
+  - uv-sync, ruff-check, ruff-format, mypy, mypy-scripts;
+  - pytest: 15,991 passed, 0 failed, 16 skipped;
+  - npm-test: 181/181;
+  - typecheck, frontend-build, tauri-info, cargo-check, cargo-test, uv-build.
+
+  Every docs/24 category is PASS, with no gaps.
+- **Live startup smoke (20:09 IST, local Ollama, health and model listing only).**
+  - The token was piped on stdin and the ready line appeared after 2.3 s.
+  - `GET /ready` with the token returned 200 `ready`; without the token, `GET /health` returned 401.
+  - The token appeared nowhere in stderr.
+- **Limitations.** Q1–Q3 above remain open. Real uvicorn cannot serve WebSockets until a WebSocket library is added (PHX-100 Q3); the WebSocket path is proven only through the in-process test client.
