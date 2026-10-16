@@ -103,7 +103,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 ## Phase 10 — Product Integration
 - PHX-100 Backend composition root and entrypoint — DONE
 - PHX-101 Local API security — DONE
-- PHX-102 Mission persistence and runner — IN_PROGRESS
+- PHX-102 Mission persistence and runner — DONE
 - PHX-103 Runtime events and WS — TODO
 - PHX-104 REST API v1 — TODO
 - PHX-105 Request triage — TODO

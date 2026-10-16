@@ -1,6 +1,6 @@
 # PHX-102 — Mission persistence and runner
 
-Status: IN_PROGRESS (implemented and review-fixed; recommendations R1–R15 await owner confirmation)
+Status: DONE (the owner confirmed recommendations R1–R15 on 2026-10-17)
 Phase: 10 — Product Integration (milestone M1, backend)
 Branch: `feature/PHX-102-mission-persistence-runner` (local commits only; no push, no PR)
 Base: main `d85021b` (includes PHX-047, PHX-100 and PHX-101)
@@ -33,7 +33,7 @@ Make missions durable and orderly. A user message becomes a queued mission, one 
 - About 30 test files pin the Alembic head, and three pin the full table list.
 - The backend runtime has no FilesystemTool until PHX-108, so in production `waiting_permission` cannot occur yet; the tests use a runtime with a workspace.
 
-## Recommendations (R1–R15, awaiting owner confirmation)
+## Recommendations (R1–R15, confirmed by the owner 2026-10-17)
 
 - **R1 — Placement.** Rows and `MissionStore` in `phoenix/persistence/missions.py`; `MissionService` in `phoenix/api/missions.py`. `phoenix/agents` may not import persistence (ADR-082 neutrality). The service imports no FastAPI, so the transport stays thin.
 - **R2 — Table names.** `missions`, not docs/12's `tasks`, matching the runtime's vocabulary (PHX-104 may still expose `/tasks`). Six tables: `conversations`, `messages`, `missions`, `mission_traces`, `permission_requests`, `permission_grants`. Not created: `sessions`, `task_steps`, `task_dependencies`, `tool_calls` (tool calls live in the trace JSON).

@@ -3947,8 +3947,8 @@ no in-process token rotation (Q3). No new dependencies.
 
 ## ADR-086 — Persisted missions, FIFO runner and user-decided grants
 
-Status: Proposed (owner decisions 2026-10-16 and 2026-10-17; recommendations
-R1–R15 in `tickets/PHX-102-mission-persistence-runner.md` await confirmation)
+Status: Accepted (owner decisions 2026-10-16 and 2026-10-17; the owner confirmed
+recommendations R1–R15 in `tickets/PHX-102-mission-persistence-runner.md` on 2026-10-17)
 Date: 2026-10-17
 Ticket: PHX-102
 
