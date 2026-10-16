@@ -3578,7 +3578,7 @@ thread may still finish in the background. No new dependencies.
 
 ## ADR-084 — Backend composition root and loopback entrypoint
 
-Status: Proposed (PHX-100; recommendations R1–R9 pending owner confirmation)
+Status: Accepted (PHX-100; the owner confirmed recommendations R1–R9 on 2026-10-16)
 Date: 2026-10-16
 Ticket: PHX-100
 

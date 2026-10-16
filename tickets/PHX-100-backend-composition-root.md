@@ -1,6 +1,6 @@
 # PHX-100 — Backend composition root and entrypoint
 
-Status: IN_PROGRESS (implemented on a local branch; awaiting owner review of this ticket and the diff)
+Status: DONE (owner confirmed recommendations R1–R9 on 2026-10-16)
 Phase: 10 — Product Integration (milestone M1, backend)
 Branch: `feature/PHX-100-backend-composition-root` (local commits only; no push, no PR)
 Base: main `47bb91e` (includes PHX-046)
@@ -55,7 +55,7 @@ Later tickets add the API (PHX-104), events (PHX-103), the mission runner (PHX-1
   - fakes and temporary SQLite in tests;
   - ADR-084.
 
-## Recommendations (R, pending owner confirmation)
+## Recommendations (R1–R9, confirmed by the owner 2026-10-16)
 
 - **R1 — Migrate at startup.** The lifespan runs `alembic upgrade head` on the configured SQLite database before building services. A desktop app has no separate operator step, and migrations are versioned and forward-only (INV-020). If the migration fails, startup fails, so no ready line is printed.
 - **R2 — Default port 0.** `--port` defaults to `0`, an OS-assigned free port reported in the ready line. Port 8000 is avoided because Colibri uses it. `AppSettings.api_host` and `AppSettings.api_port` are **not** read by the entrypoint: the file is frozen and its 8000 default collides with Colibri. The CLI flags are authoritative.
