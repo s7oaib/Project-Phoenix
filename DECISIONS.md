@@ -4007,7 +4007,7 @@ Design:
 - **Frozen files.** `phoenix/api/server.py` (wiring) and `alembic/env.py` (row
   registration, as PHX-042 did) change. Following ADR-082/083, both leave the
   `origin/main` baseline and are pinned to the PHX-102 implementation commit
-  (`PHX_102_COMMIT` / `PHX_102_PATHS`), landed as an implementation commit then
+  (`PHX_102_COMMIT` / `PHX_102_PATHS`, `9ccc5d4522c513832f85da49c44a236284aab7b7`), landed as an implementation commit then
   a pin commit; the PR must merge with a merge commit. The two `git diff
   origin/main` guards exclude the new modules, the migration and `env.py` by
   name. Head expectations move to `0006_missions` and revision counts to 6;

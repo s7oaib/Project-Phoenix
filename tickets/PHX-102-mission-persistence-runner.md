@@ -65,7 +65,7 @@ HTTP routes (PHX-104); events (PHX-103); request triage (PHX-105); a workspace F
 
 ## Frozen-file handling
 
-- `phoenix/api/server.py` and `alembic/env.py` change. They are pinned to the PHX-102 implementation commit in `tests/test_prompt_injection_defenses.py` (`PHX_102_COMMIT` / `PHX_102_PATHS`): implementation commit, then pin commit. The PR must merge with a merge commit.
+- `phoenix/api/server.py` and `alembic/env.py` change. They are pinned to the PHX-102 implementation commit in `tests/test_prompt_injection_defenses.py` (`PHX_102_COMMIT` / `PHX_102_PATHS`, `9ccc5d4522c513832f85da49c44a236284aab7b7`): implementation commit, then pin commit. The PR must merge with a merge commit.
 - The same guard's head expectation changes to `0006_missions`, with a comment; nothing else in it changes.
 - `tests/test_screenshot_vision_loop.py` and `tests/test_windows_ui_automation.py` exclude the two new modules, the migration and `alembic/env.py` by name, and expect head `0006_missions`.
 - `tests/test_retrieval_context.py` (PHX-050 byte guard on `env.py`) allows exactly the new registration block.
