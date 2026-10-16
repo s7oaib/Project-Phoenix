@@ -1479,6 +1479,13 @@ def test_source_architecture_and_immutability() -> None:
         "phoenix/tools/registry.py",
         ":(exclude)apps/desktop/src/App.tsx",
         ":(exclude)apps/desktop/src/styles.css",
+        # PHX-100 (ADR-084) adds these new modules; every file that existed in
+        # phoenix/api stays protected.
+        ":(exclude)phoenix/api/server.py",
+        ":(exclude)phoenix/api/launcher.py",
+        ":(exclude)phoenix/api/__main__.py",
+        # PHX-101 (ADR-085) adds the local API security module.
+        ":(exclude)phoenix/api/security.py",
     ]
     assert not subprocess.check_output(
         ["git", "diff", "origin/main", "--", *paths], cwd=ROOT
