@@ -102,6 +102,9 @@ class _Current:
     cancel: _Reason | None = None
 
 
+_INTERNAL_ERROR = Settlement(status=MissionStatus.FAILED, failure_code=INTERNAL_ERROR)
+
+
 def _utcnow() -> datetime:
     return datetime.now(UTC)
 
@@ -141,6 +144,8 @@ class MissionService:
         self._recovered: tuple[str, ...] = ()
         self._purge_failures = 0
         self._record_failures = 0
+        self._skipped_grants = 0
+        self._writers = 0  # submit/approve/run_again calls between check and enqueue
 
     @property
     def session_id(self) -> str:
@@ -160,6 +165,11 @@ class MissionService:
     def record_failures(self) -> int:
         """Outcomes the store could not record; observable, not hidden."""
         return self._record_failures
+
+    @property
+    def skipped_grants(self) -> int:
+        """Stored grant rows that were not valid grants and were not passed."""
+        return self._skipped_grants
 
     @property
     def running_mission_id(self) -> str | None:
@@ -212,6 +222,15 @@ class MissionService:
             if pending:
                 active.cancel()
             await asyncio.gather(active, return_exceptions=True)
+        # A submit, approve or run_again that passed its check before stopping
+        # may still be writing a queued row; let it finish (bounded) so the
+        # sweep below catches it. It is not enqueued (see _write_and_enqueue).
+        try:
+            async with asyncio.timeout(self._grace):
+                while self._writers:
+                    await asyncio.sleep(0.01)
+        except TimeoutError:
+            pass  # a later write stays queued until the next start recovers it
         # Anything still queued or running (e.g. a run cut off above) is interrupted.
         await self._record_interrupted(ACTIVE_STATUSES)
         self._state = "stopped"
@@ -232,9 +251,10 @@ class MissionService:
             # wait() never cancels the mission task if this loop is cancelled.
             await asyncio.wait({task})
             self._active = None
-            if not task.cancelled() and task.exception() is not None:
-                # The store failed to record; the row stays running until the
-                # next start marks it interrupted. Counted, and the queue goes on.
+            if task.cancelled() or task.exception() is not None:
+                # The outcome could not be recorded; a row left active is
+                # marked interrupted by stop() or the next start. Counted, and
+                # the queue goes on.
                 self._record_failures += 1
 
     async def _purge_loop(self) -> None:
@@ -249,36 +269,56 @@ class MissionService:
         current = _Current(mission_id)
         self._current = current  # set before claiming so cancel can see it
         try:
-            claimed = await self._io(self._store.claim, mission_id, self._now())
+            try:
+                claimed = await self._io(self._store.claim, mission_id, self._now())
+            except Exception:
+                # Never lose a dequeued mission: it fails explicitly (R15).
+                await self._record(self._store.fail_queued, mission_id)
+                return
             if claimed is None:
                 return  # cancelled or deleted while queued
-            grants = self._usable(
-                await self._io(self._store.active_grants, self._session_id)
-            )
-            if current.cancel is not None:
-                outcome = self._cancelled(current, None)
-            else:
-                # No await between this check and run() registering the
-                # mission, so a cancel either is seen here or reaches run().
-                try:
+            try:
+                found = await self._io(self._store.active_grants, self._session_id)
+                self._skipped_grants += found.skipped
+                grants = self._usable(found.grants)
+                if current.cancel is not None:
+                    outcome = self._cancelled(current, None)
+                else:
+                    # No await between this check and run() registering the
+                    # mission, so a cancel either is seen here or reaches run().
                     result = await self._runtime.run(
                         PhoenixRequest(request_id=mission_id, text=claimed.text),
                         OrchestrationPath(claimed.path),
                         grants=grants,
                         session_id=self._session_id,
                     )
-                except Exception:
-                    # A runtime defect or contract error: explicit, not success.
-                    outcome = Settlement(
-                        status=MissionStatus.FAILED, failure_code=INTERNAL_ERROR
-                    )
-                else:
                     outcome = self._settlement(current, result)
+            except Exception:
+                # A store, runtime or contract defect: explicit, never success.
+                outcome = _INTERNAL_ERROR
             # The run is over: a cancel from here on finds nothing to cancel.
             self._current = None
-            await self._io(self._store.settle, mission_id, outcome, self._now())
+            try:
+                await self._io(self._store.settle, mission_id, outcome, self._now())
+            except Exception:
+                if outcome is _INTERNAL_ERROR:
+                    raise  # counted by the run loop
+                # e.g. an unstorable trace: still record an explicit failure.
+                await self._record(self._settle_failed, mission_id)
         finally:
             self._current = None
+
+    def _settle_failed(self, mission_id: str, failure_code: str, now: datetime) -> bool:
+        return self._store.settle(mission_id, _INTERNAL_ERROR, now)
+
+    async def _record(
+        self, function: Callable[[str, str, datetime], bool], mission_id: str
+    ) -> None:
+        """Best-effort internal_error record; a failure is counted, not raised."""
+        try:
+            await self._io(function, mission_id, INTERNAL_ERROR, self._now())
+        except Exception:
+            self._record_failures += 1
 
     @staticmethod
     def _usable(stored: tuple[PermissionGrant, ...]) -> tuple[PermissionGrant, ...]:
@@ -344,27 +384,25 @@ class MissionService:
             request = PhoenixRequest(request_id=mission_id, text=text)
         except (ValueError, ValidationError):
             raise InvalidRequestError("Invalid mission text or path") from None
-        try:
-            await self._io(
-                self._store.submit,
-                conversation_id=conversation_id,
-                mission_id=mission_id,
-                message_id=str(uuid4()),
-                text=request.text,
-                path=directive.value,
-                now=self._now(),
-            )
-        except RecordNotFoundError:
-            raise NotFoundError("Unknown conversation") from None
-        self._queue.put_nowait(mission_id)
+        await self._write_and_enqueue(
+            mission_id,
+            self._store.submit,
+            conversation_id=conversation_id,
+            mission_id=mission_id,
+            message_id=str(uuid4()),
+            text=request.text,
+            path=directive.value,
+            now=self._now(),
+        )
         return mission_id
 
     async def run_again(self, mission_id: str) -> str:
         """Queue a linked re-run of an interrupted mission; returns the new ID."""
         self._require_running()
         new_id = str(uuid4())
-        await self._guarded(self._store.rerun, mission_id, new_id, self._now())
-        self._queue.put_nowait(new_id)
+        await self._write_and_enqueue(
+            new_id, self._store.rerun, mission_id, new_id, self._now()
+        )
         return new_id
 
     async def cancel(self, mission_id: str) -> CancelOutcome:
@@ -423,9 +461,13 @@ class MissionService:
         return await self._io(self._store.list_pending_requests)
 
     async def list_grants(
-        self, *, include_revoked: bool = False
+        self, *, include_inactive: bool = False
     ) -> tuple[GrantRecord, ...]:
-        return await self._io(self._store.list_grants, include_revoked=include_revoked)
+        """Grants this launch can use; include_inactive adds EXPIRED (earlier
+        launches' SESSION grants) and REVOKED ones, each with its status."""
+        return await self._io(
+            self._store.list_grants, self._session_id, include_inactive=include_inactive
+        )
 
     async def approve(self, request_id: str, duration: GrantDuration | str) -> str:
         """The user approved: store the grant, supersede, queue the re-run.
@@ -469,8 +511,9 @@ class MissionService:
                 "Request is outside the document grant scope"
             ) from None
         new_id = str(uuid4())
-        await self._guarded(self._store.approve, request_id, grant, new_id)
-        self._queue.put_nowait(new_id)
+        await self._write_and_enqueue(
+            new_id, self._store.approve, request_id, grant, new_id
+        )
         return new_id
 
     async def deny(self, request_id: str) -> None:
@@ -478,8 +521,34 @@ class MissionService:
         await self._guarded(self._store.deny, request_id, self._now())
 
     async def revoke(self, grant_id: str) -> bool:
-        """Revoke a grant; later runs no longer receive it. False if already."""
+        """Revoke a grant; later runs no longer receive it. False if already.
+
+        Grants are read once when a mission starts, so a mission already
+        running keeps the grants it started with.
+        """
         return await self._guarded(self._store.revoke, grant_id, self._now())
+
+    async def _write_and_enqueue(
+        self,
+        queued_id: str,
+        function: Callable[_P, object],
+        /,
+        *args: _P.args,
+        **kwargs: _P.kwargs,
+    ) -> None:
+        """Write a queued row, then enqueue it only if still running.
+
+        Once stop() begins nothing new is enqueued; stop() waits for writes in
+        flight and its final sweep marks their rows interrupted.
+        """
+        self._require_running()
+        self._writers += 1
+        try:
+            await self._guarded(function, *args, **kwargs)
+        finally:
+            self._writers -= 1
+        if self._state == "running":
+            self._queue.put_nowait(queued_id)
 
     async def _guarded(
         self, function: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs

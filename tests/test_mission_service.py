@@ -63,6 +63,7 @@ from phoenix.models.registry import ModelCapabilityRegistry
 from phoenix.persistence.base import Base
 from phoenix.persistence.memory import MemoryRow
 from phoenix.persistence.missions import (
+    GrantStatus,
     MissionRecord,
     MissionStatus,
     MissionStore,
@@ -582,7 +583,8 @@ def test_approve_stores_grant_and_linked_rerun_completes(
         "complex",
     )
     store = harness.store()
-    (record,) = store.list_grants()
+    (record,) = store.list_grants(service.session_id)
+    assert record.status == GrantStatus.ACTIVE
     grant = record.grant
     request = original.permission_request.request
     assert (
@@ -694,9 +696,14 @@ def test_session_grant_is_not_used_by_another_session(harness: Harness) -> None:
     assert run(first_launch()) == "launch-a"
     record = run(second_launch())
     assert record.status == MissionStatus.WAITING_PERMISSION
-    (grant,) = harness.store().list_grants()
-    assert grant.grant.session_id == "launch-a"
-    assert harness.store().active_grants("launch-b") == ()
+    store = harness.store()
+    # Another launch's SESSION grant is reported expired, not active.
+    assert store.list_grants("launch-b") == ()
+    (grant,) = store.list_grants("launch-b", include_inactive=True)
+    assert (grant.grant.session_id, grant.status) == ("launch-a", GrantStatus.EXPIRED)
+    (active,) = store.list_grants("launch-a")
+    assert active.status == GrantStatus.ACTIVE
+    assert store.active_grants("launch-b").grants == ()
 
 
 def test_persistent_grant_survives_restart_until_revoked(harness: Harness) -> None:
@@ -729,9 +736,9 @@ def test_persistent_grant_survives_restart_until_revoked(harness: Harness) -> No
     before, after = run(later(grant_id))
     assert before == MissionStatus.COMPLETED
     assert after == MissionStatus.WAITING_PERMISSION  # a revoked grant is not used
-    assert harness.store().list_grants() == ()
-    (revoked,) = harness.store().list_grants(include_revoked=True)
-    assert revoked.revoked_at is not None
+    assert harness.store().list_grants("any") == ()
+    (revoked,) = harness.store().list_grants("any", include_inactive=True)
+    assert revoked.revoked_at is not None and revoked.status == GrantStatus.REVOKED
 
 
 def test_stored_grants_outside_document_scope_are_not_passed(
@@ -1048,7 +1055,7 @@ def test_retention_purge_deletes_old_history_and_keeps_grants(
     }
     assert harness.count("mission_traces") == 2
     assert harness.count("permission_requests") == 1
-    assert [g.grant.grant_id for g in store.list_grants()] == ["ancient"]
+    assert [g.grant.grant_id for g in store.list_grants("any")] == ["ancient"]
     assert "old question" not in harness.dump() and "old answer" not in harness.dump()
 
 
@@ -1394,3 +1401,182 @@ def test_backend_lifespan_starts_and_stops_the_mission_service(
         (running, "failed", "interrupted"),
         (queued, "failed", "interrupted"),
     ]
+
+
+# ---- review fixes (D1-D3, shutdown writes)
+
+
+def test_invalid_stored_grant_row_is_skipped_not_blocking(harness: Harness) -> None:
+    add_grant(harness, "valid-but-elsewhere", datetime.now(UTC) - timedelta(days=1))
+    with harness.engine.begin() as connection:
+        connection.execute(
+            text("UPDATE permission_grants SET reason = '' WHERE id = :g"),
+            {"g": "valid-but-elsewhere"},
+        )
+
+    async def scenario() -> tuple[list[MissionRecord], int, int]:
+        service = harness.service()
+        await service.start()
+        conversation = await service.create_conversation()
+        ids = [await service.submit(conversation, f"q{i}", "direct") for i in range(2)]
+        records = [await settled(service, i) for i in ids]
+        await service.stop()
+        return records, service.skipped_grants, service.record_failures
+
+    records, skipped, failures = run(scenario())
+    assert [r.status for r in records] == [MissionStatus.COMPLETED] * 2
+    assert (skipped, failures) == (2, 0)  # counted once per run
+    found = harness.store().active_grants("any")
+    assert (found.grants, found.skipped) == ((), 1)
+    assert harness.store().list_grants("any", include_inactive=True) == ()
+
+
+def test_store_error_after_claim_fails_mission_and_queue_continues(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = MissionStore.active_grants
+    calls: list[int] = []
+
+    def flaky(self: MissionStore, session_id: str) -> Any:
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("database hiccup")
+        return original(self, session_id)
+
+    monkeypatch.setattr(MissionStore, "active_grants", flaky)
+
+    async def scenario() -> tuple[MissionRecord, MissionRecord, int]:
+        service = harness.service()
+        await service.start()
+        conversation = await service.create_conversation()
+        first = await service.submit(conversation, "first", "direct")
+        second = await service.submit(conversation, "second", "direct")
+        records = await settled(service, first), await settled(service, second)
+        await service.stop()
+        return records[0], records[1], service.record_failures
+
+    first, second, failures = run(scenario())
+    assert (first.status, first.failure_code) == (
+        MissionStatus.FAILED,
+        "internal_error",
+    )
+    assert second.status == MissionStatus.COMPLETED and failures == 0
+    assert harness.provider.direct_texts == ["second"]
+
+
+def test_claim_error_fails_the_dequeued_mission(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = MissionStore.claim
+    calls: list[str] = []
+
+    def flaky(self: MissionStore, mission_id: str, now: datetime) -> Any:
+        calls.append(mission_id)
+        if len(calls) == 1:
+            raise RuntimeError("database hiccup")
+        return original(self, mission_id, now)
+
+    monkeypatch.setattr(MissionStore, "claim", flaky)
+
+    async def scenario() -> tuple[MissionRecord, MissionRecord]:
+        service = harness.service()
+        await service.start()
+        conversation = await service.create_conversation()
+        first = await service.submit(conversation, "first", "direct")
+        second = await service.submit(conversation, "second", "direct")
+        records = await settled(service, first), await settled(service, second)
+        await service.stop()
+        return records
+
+    first, second = run(scenario())
+    assert (first.status, first.failure_code) == (
+        MissionStatus.FAILED,
+        "internal_error",
+    )
+    assert first.started_at is None
+    assert second.status == MissionStatus.COMPLETED
+
+
+def test_run_again_is_refused_once_a_rerun_exists(harness: Harness) -> None:
+    store = harness.store()
+    now = datetime.now(UTC)
+    store.create_conversation("c", now)
+    for mission_id in ("a", "b"):
+        store.submit(
+            conversation_id="c",
+            mission_id=mission_id,
+            message_id=f"{mission_id}-msg",
+            text=f"left over {mission_id}",
+            path="direct",
+            now=now,
+        )
+
+    async def scenario() -> tuple[list[object], list[object]]:
+        harness.provider.gate = asyncio.Event()
+        service = harness.service()
+        await service.start()  # both become interrupted
+        first = await service.run_again("a")
+        with pytest.raises(InvalidMissionStateError):
+            await service.run_again("a")  # a double click
+        racing = await asyncio.gather(
+            service.run_again("b"), service.run_again("b"), return_exceptions=True
+        )
+        harness.provider.gate.set()
+        await settled(service, first)
+        await service.stop()
+        return [first], list(racing)
+
+    _, racing = run(scenario())
+    assert sum(isinstance(r, str) for r in racing) == 1
+    assert sum(isinstance(r, InvalidMissionStateError) for r in racing) == 1
+    reruns = [m for m in harness.store().list_missions() if m.rerun_of is not None]
+    assert sorted(m.rerun_of or "" for m in reruns) == ["a", "b"]
+
+
+def test_write_in_flight_during_stop_is_swept_not_enqueued(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = MissionStore.submit
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow(self: MissionStore, **kwargs: Any) -> None:
+        entered.set()
+        release.wait(10)
+        original(self, **kwargs)
+
+    async def scenario() -> tuple[str, MissionRecord]:
+        service = harness.service()
+        await service.start()
+        conversation = await service.create_conversation()
+        monkeypatch.setattr(MissionStore, "submit", slow)
+        pending = asyncio.create_task(service.submit(conversation, "late", "direct"))
+        await until(entered.is_set)
+        stopping = asyncio.create_task(service.stop())
+        await asyncio.sleep(0.05)
+        release.set()
+        mission_id = await pending
+        await stopping
+        return mission_id, await service.get_mission(mission_id)
+
+    mission_id, record = run(scenario())
+    assert (record.status, record.failure_code) == (MissionStatus.FAILED, "interrupted")
+    assert harness.provider.direct_texts == []
+
+
+def test_list_missions_uses_a_fixed_number_of_queries(harness: Harness) -> None:
+    now = datetime.now(UTC)
+    store = harness.store()
+    for prefix in ("p", "q", "r"):
+        seed_history(store, prefix, now)
+    statements: list[str] = []
+
+    @event.listens_for(harness.engine, "before_cursor_execute")
+    def count(*args: Any) -> None:
+        statements.append(str(args[2]))
+
+    records = store.list_missions()
+    selects = [s for s in statements if s.lstrip().upper().startswith("SELECT")]
+    assert len(records) == 6 and len(selects) == 2
+    assert sum(r.permission_request is not None for r in records) == 3
+    event.remove(harness.engine, "before_cursor_execute", count)

@@ -3948,7 +3948,7 @@ no in-process token rotation (Q3). No new dependencies.
 ## ADR-086 — Persisted missions, FIFO runner and user-decided grants
 
 Status: Proposed (owner decisions 2026-10-16 and 2026-10-17; recommendations
-R1–R14 in `tickets/PHX-102-mission-persistence-runner.md` await confirmation)
+R1–R15 in `tickets/PHX-102-mission-persistence-runner.md` await confirmation)
 Date: 2026-10-17
 Ticket: PHX-102
 
@@ -4013,5 +4013,22 @@ Design:
   name. Head expectations move to `0006_missions` and revision counts to 6;
   table-list expectations gain the six tables; the PHX-050 `env.py` byte guard
   allows exactly the one new registration block.
+- **Review fixes (2026-10-17).** Stored grant rows that are not valid grants
+  are skipped and counted (`skipped_grants`), never raised. Any failure after
+  a claim records `failed/internal_error` and the queue continues; a failed
+  claim records the dequeued mission `failed/internal_error` too (R15).
+  `run_again` is refused once a re-run of that mission exists. Once `stop()`
+  begins nothing new is enqueued, and it waits (bounded) for writes in flight
+  before its final interrupt sweep. `list_grants` returns this launch's usable
+  grants; with `include_inactive` it adds earlier launches' SESSION grants as
+  `expired` and revoked grants as `revoked`.
+- **Revoke timing.** Grants are read once when a mission starts, so revoking
+  does not affect a mission that is already running; it applies from the next
+  mission.
+- **Follow-up: SQLite foreign keys.** Production does not set
+  `PRAGMA foreign_keys=ON`. The store deletes in foreign-key order and the
+  tests run with foreign keys enforced, so purge and delete leave no orphans.
+  Enabling the pragma belongs to a separate ticket: `database.py` is frozen and
+  the change also affects `document_chunks`.
 
 No routes (PHX-104) and no events (PHX-103). No new dependencies.

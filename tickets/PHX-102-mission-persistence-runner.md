@@ -1,6 +1,6 @@
 # PHX-102 — Mission persistence and runner
 
-Status: IN_PROGRESS (implemented; recommendations R1–R14 await owner confirmation)
+Status: IN_PROGRESS (implemented and review-fixed; recommendations R1–R15 await owner confirmation)
 Phase: 10 — Product Integration (milestone M1, backend)
 Branch: `feature/PHX-102-mission-persistence-runner` (local commits only; no push, no PR)
 Base: main `d85021b` (includes PHX-047, PHX-100 and PHX-101)
@@ -33,7 +33,7 @@ Make missions durable and orderly. A user message becomes a queued mission, one 
 - About 30 test files pin the Alembic head, and three pin the full table list.
 - The backend runtime has no FilesystemTool until PHX-108, so in production `waiting_permission` cannot occur yet; the tests use a runtime with a workspace.
 
-## Recommendations (R1–R14, awaiting owner confirmation)
+## Recommendations (R1–R15, awaiting owner confirmation)
 
 - **R1 — Placement.** Rows and `MissionStore` in `phoenix/persistence/missions.py`; `MissionService` in `phoenix/api/missions.py`. `phoenix/agents` may not import persistence (ADR-082 neutrality). The service imports no FastAPI, so the transport stays thin.
 - **R2 — Table names.** `missions`, not docs/12's `tasks`, matching the runtime's vocabulary (PHX-104 may still expose `/tasks`). Six tables: `conversations`, `messages`, `missions`, `mission_traces`, `permission_requests`, `permission_grants`. Not created: `sessions`, `task_steps`, `task_dependencies`, `tool_calls` (tool calls live in the trace JSON).
@@ -43,12 +43,13 @@ Make missions durable and orderly. A user message becomes a queued mission, one 
 - **R6 — Retention rule.** Age is measured per record from `created_at`, cut off at 30 days. A purge deletes settled missions older than the cutoff (with their trace and permission request), then messages older than the cutoff that no remaining mission references, then old conversations left empty. Queued and running missions are never purged; a re-run keeps its original (older) user message until the re-run itself expires.
 - **R7 — Purge interval.** On start, then every 3600 s (`purge_interval_seconds`). A failing periodic purge is counted (`purge_failures`) and the loop continues.
 - **R8 — Delete and clear.** `delete_conversation` cancels that conversation's running mission and deletes its queued ones, so nothing is recorded for them afterwards. `clear_all` deletes all chat history and keeps grants; revoking is separate.
-- **R9 — Run again.** Only `failed/interrupted` missions can run again. The new mission is queued with `rerun_of`; the original keeps its status (it is not marked superseded).
+- **R9 — Run again.** Only `failed/interrupted` missions can run again, and only once: a second call is refused while a mission with `rerun_of` = the original exists (checked atomically). The new mission is queued with `rerun_of`; the original keeps its status (it is not marked superseded).
 - **R10 — Approval scope.** The grant is built from the stored request plus the ToolRegistry risk level and must pass `document_grants` (P1, `document_analyst`, fixed reason, the three read-only tools); anything else is refused. Only a `pending` request on a `waiting_permission` mission can be approved or denied. An identical active grant is reused rather than duplicated. Waiting missions survive a restart; approving one after relaunch uses the new launch's session for "this session".
-- **R11 — Grants per run.** Unrevoked PERSISTENT grants plus SESSION grants for this launch's session ID, each re-validated with `document_grants`; invalid or duplicate-scope grants are skipped rather than failing the mission.
+- **R11 — Grants per run.** Unrevoked PERSISTENT grants plus SESSION grants for this launch's session ID, each re-validated with `document_grants`; invalid or duplicate-scope grants, and stored rows that are not valid grants at all, are skipped (counted in `skipped_grants`) rather than failing the mission. Grants are read once per run, so a revoke does not affect a mission that is already running.
 - **R12 — Cancel semantics.** Queued: `cancelled` immediately. Running: `cancelling`, and the runner records `cancelled`. Waiting for permission: not cancellable (use deny). Settled: not cancellable.
-- **R13 — Grant revocation and provenance.** Revocation sets `revoked_at` (kept for history, never purged). `approved_request_id` has no foreign key because grants outlive the 30-day purge of requests.
-- **R14 — Queue.** The FIFO is in memory and unbounded; queue order is submit order. Production keeps SQLite's default (no `PRAGMA foreign_keys`); the store deletes in foreign-key order, and the tests run with foreign keys enforced.
+- **R13 — Grant revocation, listing and provenance.** Revocation sets `revoked_at` (kept for history, never purged). `list_grants` returns the grants this launch can use; `include_inactive` adds earlier launches' SESSION grants as `expired` and revoked ones as `revoked`. `approved_request_id` has no foreign key because grants outlive the 30-day purge of requests.
+- **R14 — Queue.** The FIFO is in memory and unbounded; queue order is submit order. Once `stop()` begins nothing new is enqueued; it waits (bounded by the grace period) for submit, approve or run-again writes in flight, then sweeps their rows to `interrupted`. Production keeps SQLite's default (no `PRAGMA foreign_keys`); the store deletes in foreign-key order, and the tests run with foreign keys enforced. Enabling the pragma is a separate follow-up ticket (`database.py` is frozen; it also affects `document_chunks`).
+- **R15 — Failures around a run.** If claiming a dequeued mission raises, the mission is recorded `failed/internal_error` (not re-enqueued), so it is never lost. Any failure after a claim (reading grants, the runtime, building the outcome) records `failed/internal_error`; if storing an outcome fails, an `internal_error` record is still attempted. Only when that also fails is the failure counted in `record_failures`, leaving the row for `stop()` or the next start to mark interrupted.
 
 ## Requirements
 
@@ -79,5 +80,5 @@ New `tests/test_mission_service.py`, mapped as `unit, integration, migrations, p
 
 - [x] Migration, store, service and wiring implemented
 - [x] Targeted tests, ruff, format and strict mypy pass
-- [ ] Owner confirms R1–R14
+- [ ] Owner confirms R1–R15
 - [ ] Full matrix on the final committed tree (see report)

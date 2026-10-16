@@ -313,10 +313,22 @@ class MissionRecord(_Record):
     permission_request: PermissionRequestRecord | None
 
 
+class GrantStatus(StrEnum):
+    ACTIVE = "active"
+    EXPIRED = "expired"  # a SESSION grant from an earlier launch
+    REVOKED = "revoked"
+
+
 class GrantRecord(_Record):
     grant: PermissionGrant
     approved_request_id: str
     revoked_at: datetime | None
+    status: GrantStatus
+
+
+class ActiveGrants(_Record):
+    grants: tuple[PermissionGrant, ...]
+    skipped: int  # stored rows that are not valid PermissionGrants
 
 
 class ClaimedMission(_Record):
@@ -440,6 +452,11 @@ class MissionStore:
                 INTERRUPTED,
             ):
                 raise InvalidStateError("Only interrupted missions can run again")
+            # Atomic under the lock: a repeated call never queues a second run.
+            if session.scalars(
+                select(MissionRow.id).where(MissionRow.rerun_of == mission_id)
+            ).first():
+                raise InvalidStateError("Mission was already run again")
             self._queue_rerun(session, original, new_mission_id, now)
 
     @staticmethod
@@ -565,6 +582,23 @@ class MissionStore:
                     MissionRow.status == MissionStatus.QUEUED.value,
                 )
                 .values(status=MissionStatus.CANCELLED.value, finished_at=now)
+            )
+            return _rowcount(changed) == 1
+
+    def fail_queued(self, mission_id: str, failure_code: str, now: datetime) -> bool:
+        """QUEUED -> FAILED with the given code; False if no longer queued."""
+        with self._transaction() as session:
+            changed = session.execute(
+                update(MissionRow)
+                .where(
+                    MissionRow.id == mission_id,
+                    MissionRow.status == MissionStatus.QUEUED.value,
+                )
+                .values(
+                    status=MissionStatus.FAILED.value,
+                    failure_code=failure_code,
+                    finished_at=now,
+                )
             )
             return _rowcount(changed) == 1
 
@@ -695,10 +729,14 @@ class MissionStore:
             grant.revoked_at = max(now, grant.issued_at)
             return True
 
-    def active_grants(self, session_id: str) -> tuple[PermissionGrant, ...]:
-        """Unrevoked persistent grants plus this session's session grants."""
+    def active_grants(self, session_id: str) -> ActiveGrants:
+        """Unrevoked persistent grants plus this session's session grants.
 
-        def query(session: Session) -> tuple[PermissionGrant, ...]:
+        A stored row that is not a valid PermissionGrant is skipped and
+        counted, never raised: one bad row must not block every mission.
+        """
+
+        def query(session: Session) -> ActiveGrants:
             rows = session.scalars(
                 select(PermissionGrantRow)
                 .where(
@@ -711,25 +749,50 @@ class MissionStore:
                 )
                 .order_by(*_order(PermissionGrantRow.issued_at))
             )
-            return tuple(_grant(row) for row in rows)
+            grants = [_valid_grant(row) for row in rows]
+            valid = tuple(grant for grant in grants if grant is not None)
+            return ActiveGrants(grants=valid, skipped=len(grants) - len(valid))
 
         return self._read(query)
 
-    def list_grants(self, *, include_revoked: bool = False) -> tuple[GrantRecord, ...]:
+    def list_grants(
+        self, session_id: str, *, include_inactive: bool = False
+    ) -> tuple[GrantRecord, ...]:
+        """Grants this launch can use.
+
+        With include_inactive, also EXPIRED (SESSION grants of earlier
+        launches) and REVOKED ones. Rows that are not valid grants are skipped.
+        """
+
         def query(session: Session) -> tuple[GrantRecord, ...]:
-            statement = select(PermissionGrantRow).order_by(
-                *_order(PermissionGrantRow.issued_at)
-            )
-            if not include_revoked:
-                statement = statement.where(PermissionGrantRow.revoked_at.is_(None))
-            return tuple(
-                GrantRecord(
-                    grant=_grant(row),
-                    approved_request_id=row.approved_request_id,
-                    revoked_at=row.revoked_at,
+            records: list[GrantRecord] = []
+            for row in session.scalars(
+                select(PermissionGrantRow).order_by(
+                    *_order(PermissionGrantRow.issued_at)
                 )
-                for row in session.scalars(statement)
-            )
+            ):
+                grant = _valid_grant(row)
+                if grant is None:
+                    continue
+                if row.revoked_at is not None:
+                    status = GrantStatus.REVOKED
+                elif (
+                    grant.duration == GrantDuration.SESSION
+                    and grant.session_id != session_id
+                ):
+                    status = GrantStatus.EXPIRED
+                else:
+                    status = GrantStatus.ACTIVE
+                if include_inactive or status == GrantStatus.ACTIVE:
+                    records.append(
+                        GrantRecord(
+                            grant=grant,
+                            approved_request_id=row.approved_request_id,
+                            revoked_at=row.revoked_at,
+                            status=status,
+                        )
+                    )
+            return tuple(records)
 
         return self._read(query)
 
@@ -751,7 +814,18 @@ class MissionStore:
                 statement = statement.where(
                     MissionRow.conversation_id == conversation_id
                 )
-            return tuple(_mission(session, row) for row in session.scalars(statement))
+            rows = list(session.scalars(statement))
+            # One query for every listed mission's request (no N+1).
+            ids = statement.with_only_columns(MissionRow.id).order_by(None)
+            requests = {
+                request.mission_id: request
+                for request in session.scalars(
+                    select(PermissionRequestRow).where(
+                        PermissionRequestRow.mission_id.in_(ids)
+                    )
+                )
+            }
+            return tuple(_record(row, requests.get(row.id)) for row in rows)
 
         return self._read(query)
 
@@ -951,6 +1025,13 @@ def _grant(row: PermissionGrantRow) -> PermissionGrant:
     )
 
 
+def _valid_grant(row: PermissionGrantRow) -> PermissionGrant | None:
+    try:
+        return _grant(row)
+    except ValueError:  # pydantic's ValidationError is a ValueError
+        return None
+
+
 def _request(row: PermissionRequestRow) -> PermissionRequestRecord:
     return PermissionRequestRecord(
         mission_id=row.mission_id,
@@ -974,6 +1055,10 @@ def _mission(session: Session, row: MissionRow) -> MissionRecord:
     request = session.scalars(
         select(PermissionRequestRow).where(PermissionRequestRow.mission_id == row.id)
     ).first()
+    return _record(row, request)
+
+
+def _record(row: MissionRow, request: PermissionRequestRow | None) -> MissionRecord:
     return MissionRecord(
         mission_id=row.id,
         conversation_id=row.conversation_id,
