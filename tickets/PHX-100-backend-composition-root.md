@@ -155,6 +155,14 @@ New `tests/test_api_server.py`, mapped in `tests/matrix.toml` as `unit, integrat
   - Ready line after 2.3 s, with a non-zero OS-assigned port.
   - `GET /ready` returned 200 `ready`: Ollama healthy, `qwen2.5-coder:7b`, `qwen3.5:2b`, `qwen3.5:4b` and `qwen3.5:9b` registered, database at head.
   - CTRL_BREAK gave a graceful uvicorn shutdown with no further stdout. The process exit code was 3 because uvicorn re-raises the captured signal (see limitations).
+- **Independent review follow-up (2026-10-16).** No auth bypass, token leak or bind defect was found. Fixed:
+  - **D1, concurrent startups racing the Alembic upgrade.** The upgrade now runs under an OS-level exclusive lock file in the data directory, with a bounded wait that fails with `MigrationLockTimeout`. Three concurrent subprocess upgrades now all reach head; without the lock, the same test fails 3/3. A second backend instance on one data directory remains possible; PHX-106 owns single-instance enforcement.
+  - `/docs`, `/redoc`, `/openapi.json` and the OAuth2 redirect are removed.
+  - The `ReadinessResponse` and ADR-084 wording now says the PHOENIX version is returned, and that provider URLs and versions are not echoed.
+  - `PhoenixServer.shutdown` always drains, even if mission cancellation raises.
+  - `/ready` keeps at most one database probe in flight.
+
+  Each fix has a test.
 - **Limitations.**
   - Q1–Q4 above remain open.
   - After a signal-driven shutdown, uvicorn re-raises the signal, so on Windows the exit code after CTRL_BREAK is 3. That is the same number as uvicorn's startup-failure code, so PHX-106 must not treat exit code 3 alone as a startup failure; the ready line is the signal.

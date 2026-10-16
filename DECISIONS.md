@@ -3592,7 +3592,13 @@ ADR-083 is reserved by the unmerged PHX-047 branch.
   exclude exactly these three new paths, each by name.
 - **Composition root.** `build_server_app(settings, *, config, provider_factory)`
   returns `create_app()` plus a lifespan and `GET /ready`. The lifespan:
-  - migrates SQLite to the Alembic head (R1);
+  - migrates SQLite to the Alembic head (R1) under an OS-level exclusive lock
+    file in the data directory (`phoenix.migrate.lock`; `msvcrt.locking` on
+    Windows, `fcntl.flock` elsewhere). SQLite DDL is not transactional, so
+    concurrent upgrades could otherwise interleave and leave a half-applied
+    schema. The wait is bounded (`migration_lock_timeout_seconds`, default
+    30 s) and a timeout fails startup explicitly with `MigrationLockTimeout`
+    (INV-021);
   - builds the engine and session factory, the default agent registry, the tier
     table, `ModelCapabilityRegistry` and `ModelLifecycleManager` (capacity 1,
     INV-023);
@@ -3606,18 +3612,26 @@ ADR-083 is reserved by the unmerged PHX-047 branch.
   providers only, and missing models are skipped (R6). No FilesystemTool
   workspace is configured (PHX-108). On exit, the lifespan cancels active
   missions, closes the providers and disposes of the engine. A failed startup
-  closes whatever it had opened.
+  closes whatever it had opened. The lock serializes migrations only: a second
+  backend instance on the same data directory is still possible, and PHX-106
+  owns single-instance enforcement.
+- **Surface.** `/docs`, `/redoc`, `/openapi.json` and the OAuth2 redirect are
+  removed from the server app (`create_app()` itself is frozen and unchanged).
 - **Readiness.** `GET /ready` returns `ready`, `degraded` or `unavailable`,
   with:
   - per-provider IDs and statuses;
   - the registered (provider, model) pairs;
   - `database.at_head`.
 
-  Provider probes and the database check are bounded (default 2 s). Any
+  Provider probes and the database check are bounded (default 2 s). At most
+  one database check is in flight: a timed-out `to_thread` worker keeps
+  running, so later calls share it instead of filling the executor. Any
   provider error, mismatch or timeout reports that provider as `unavailable`,
   and the backend as `degraded` (HTTP 200), not a crash (INV-021, INV-022).
   `unavailable` (HTTP 503) means the services are not built or the database is
-  not at head. No URLs, details, versions or paths are echoed.
+  not at head. Besides statuses and IDs, only the PHOENIX version is
+  returned; provider URLs, provider versions, health details and paths are
+  never echoed.
 - **Entrypoint.** `python -m phoenix.api [--host] [--port] [--data-dir]`:
   - Only `127.0.0.1` or `::1` is accepted; anything else exits with code 2
     before binding.
@@ -3630,9 +3644,10 @@ ADR-083 is reserved by the unmerged PHX-047 branch.
     `{"event":"phoenix.backend.ready","host":...,"port":N,"pid":P,"version":...}`.
   - SIGINT, SIGTERM and CTRL_BREAK shut down through uvicorn. Active missions
     are cancelled before connections drain (R8; INV-019), and the drain is
-    bounded to 10 s.
-- **Config.** `ServerConfig` (new) holds the Ollama base URL and the probe
-  timeouts, because `AppSettings` is frozen (R4).
+    bounded to 10 s. The drain runs even if cancellation raises.
+- **Config.** `ServerConfig` (new) holds the Ollama base URL, the probe
+  timeouts and the migration-lock timeout, because `AppSettings` is frozen
+  (R4).
 
 Open: migrations are not packaged in the wheel (Q1); model registration after
 startup (Q2); real-uvicorn WebSocket support needs a new dependency (Q3);

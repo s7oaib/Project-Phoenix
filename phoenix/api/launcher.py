@@ -146,10 +146,12 @@ class PhoenixServer(uvicorn.Server):
             self.announced_port = port
 
     async def shutdown(self, sockets: list[socket.socket] | None = None) -> None:
-        services = get_services(self._app)
-        if services is not None:
-            await cancel_active_missions(services)
-        await super().shutdown(sockets)
+        try:
+            services = get_services(self._app)
+            if services is not None:
+                await cancel_active_missions(services)
+        finally:
+            await super().shutdown(sockets)  # the drain always runs
 
 
 def create_server(

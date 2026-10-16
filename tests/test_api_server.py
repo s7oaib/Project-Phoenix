@@ -10,28 +10,43 @@ import io
 import json
 import os
 import socket
+import subprocess
+import sys
+import threading
 import time
 from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 from importlib.metadata import version
 from pathlib import Path
 
 import httpx
 import pytest
+import uvicorn
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import inspect
+from sqlalchemy import Engine, inspect
 
 from alembic import command
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
 from phoenix.agents.runtime import MissionKind, PhoenixRuntimeError
 from phoenix.api import launcher
-from phoenix.api.launcher import LaunchOptions, create_server, main, parse_options
+from phoenix.api.launcher import (
+    LaunchOptions,
+    PhoenixServer,
+    create_server,
+    main,
+    parse_options,
+)
 from phoenix.api.server import (
     BackendServices,
+    MigrationLockTimeout,
     ProviderSet,
     ServerConfig,
     build_server_app,
     get_services,
+    migrate_to_head,
     migration_config,
+    migration_lock,
     ollama_providers,
 )
 from phoenix.core.config import AppSettings
@@ -48,9 +63,11 @@ from phoenix.models.provider import (
     ProviderHealth,
     ProviderHealthStatus,
 )
+from phoenix.persistence.database import create_engine_for_settings
 from phoenix.tools.filesystem import filesystem_tool_definitions
 
 HEAD = "0005_audit_events"
+ROOT = Path(__file__).resolve().parents[1]
 SECRET_DETAIL = "internal-detail-http://10.9.8.7:4321/private"
 INSTALLED = ("qwen3.5:4b", "qwen3.5:2b")
 FAST = ServerConfig(probe_timeout_seconds=0.2, startup_timeout_seconds=2)
@@ -157,6 +174,15 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def settings(tmp_path: Path) -> AppSettings:
     return AppSettings(data_dir=tmp_path / "data", _env_file=None)  # type: ignore[call-arg]
+
+
+@contextmanager
+def services_engine(settings: AppSettings) -> Iterator[Engine]:
+    engine = create_engine_for_settings(settings)
+    try:
+        yield engine
+    finally:
+        engine.dispose()
 
 
 def services_of(client: TestClient) -> BackendServices:
@@ -404,6 +430,132 @@ def test_defaults_are_loopback_and_os_assigned_port() -> None:
     options = parse_options([])
     assert options == LaunchOptions(host="127.0.0.1", port=0, data_dir=None)
     assert parse_options(["--host", "::1", "--port", "0"]).host == "::1"
+
+
+MIGRATE_SCRIPT = """
+import pathlib, sys, time
+from phoenix.api.server import ServerConfig, migrate_to_head
+from phoenix.core.config import AppSettings
+from phoenix.persistence.database import create_engine_for_settings
+data, go = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+print("waiting", flush=True)
+deadline = time.monotonic() + 30
+while not go.exists() and time.monotonic() < deadline:
+    time.sleep(0.005)
+settings = AppSettings(data_dir=data, _env_file=None)
+print(",".join(migrate_to_head(settings, ServerConfig())), flush=True)
+"""
+
+
+def test_concurrent_process_migrations_are_serialized(
+    settings: AppSettings, tmp_path: Path
+) -> None:
+    # SQLite DDL is not transactional: unlocked racers fail ("already exists").
+    go = tmp_path / "go"
+    children = [
+        subprocess.Popen(
+            [sys.executable, "-c", MIGRATE_SCRIPT, str(settings.data_dir), str(go)],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(3)
+    ]
+    try:
+        for child in children:
+            assert child.stdout is not None
+            assert child.stdout.readline().strip() == "waiting"
+        go.touch()
+        outcomes = [child.communicate(timeout=120) for child in children]
+    finally:
+        for child in children:
+            if child.poll() is None:  # pragma: no cover - only on failure
+                child.kill()
+    for child, (out, err) in zip(children, outcomes, strict=True):
+        assert child.returncode == 0, err
+        assert out.strip() == HEAD
+    with services_engine(settings) as engine:
+        assert {"memories", "audit_events"} <= set(inspect(engine).get_table_names())
+
+
+def test_migration_lock_wait_is_bounded_and_explicit(settings: AppSettings) -> None:
+    settings.data_dir.mkdir(parents=True)
+    config = ServerConfig(migration_lock_timeout_seconds=0.2)
+    with migration_lock(settings.data_dir, 1):
+        started = time.monotonic()
+        with pytest.raises(MigrationLockTimeout, match="migration lock"):
+            migrate_to_head(settings, config)
+        assert time.monotonic() - started < 5
+    assert not (settings.data_dir / "phoenix.db").exists()
+    assert migrate_to_head(settings, config) == (HEAD,)  # released
+
+
+def test_interactive_docs_and_schema_are_removed(settings: AppSettings) -> None:
+    app = build_server_app(settings, config=FAST, provider_factory=factory())
+    assert app.openapi_url is None and app.docs_url is None and app.redoc_url is None
+    with TestClient(app) as client:
+        for path in ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"):
+            assert client.get(path).status_code == 404
+        assert client.get("/ready").status_code == 200
+
+
+def test_ready_keeps_one_database_probe_in_flight(
+    settings: AppSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import phoenix.api.server as server_module
+
+    release = threading.Event()
+    calls: list[int] = []
+    real = server_module.database_at_head
+
+    def hung(*args: object) -> bool:
+        calls.append(1)
+        release.wait(10)
+        return real(*args)  # type: ignore[arg-type]
+
+    app = build_server_app(settings, config=FAST, provider_factory=factory())
+    try:
+        with TestClient(app) as client:
+            monkeypatch.setattr(server_module, "database_at_head", hung)
+            for _ in range(4):
+                response = client.get("/ready")
+                assert response.status_code == 503
+                assert response.json()["database"] == {"at_head": False}
+            assert len(calls) == 1  # later calls share the hung probe
+            release.set()
+            deadline = time.monotonic() + 5
+            while client.get("/ready").status_code != 200:
+                assert time.monotonic() < deadline
+            assert len(calls) <= 2  # the hung probe's result may be shared
+            settled = len(calls)
+            assert client.get("/ready").status_code == 200
+            assert len(calls) == settled + 1  # a finished probe is replaced
+    finally:
+        release.set()
+
+
+def test_shutdown_drains_even_if_mission_cancel_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    drained: list[bool] = []
+
+    async def failing_cancel(services: object) -> int:
+        raise RuntimeError("cancel failed")
+
+    async def drain(self: uvicorn.Server, sockets: object = None) -> None:
+        drained.append(True)
+
+    monkeypatch.setattr(launcher, "get_services", lambda app: object())
+    monkeypatch.setattr(launcher, "cancel_active_missions", failing_cancel)
+    monkeypatch.setattr(uvicorn.Server, "shutdown", drain)
+    app = FastAPI()
+    server = PhoenixServer(
+        uvicorn.Config(app), app=app, host="127.0.0.1", stdout=io.StringIO()
+    )
+    with pytest.raises(RuntimeError, match="cancel failed"):
+        asyncio.run(server.shutdown())
+    assert drained == [True]
 
 
 @pytest.fixture

@@ -3,18 +3,22 @@
 build_server_app() wraps the transport from create_app() with a lifespan that
 migrates SQLite to head, builds every backend service exactly once, keeps them in
 one typed container on ``app.state.phoenix`` and closes them on exit. The only
-route added is ``GET /ready``. Readiness probes are bounded; a failing provider
-reports as unavailable and the backend as degraded, never as a crash (INV-021,
-INV-022). No filesystem workspace is configured here (PHX-108).
+route added is ``GET /ready``; the interactive docs and OpenAPI schema are
+removed. Migrations run under an exclusive, bounded data-directory lock.
+Readiness probes are bounded, with at most one database check in flight; a
+failing provider reports as unavailable and the backend as degraded, never as a
+crash (INV-021, INV-022). No filesystem workspace is configured here (PHX-108).
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
-from contextlib import AsyncExitStack, asynccontextmanager
+import sys
+import time
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import IO, Literal
 
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
@@ -50,9 +54,32 @@ from phoenix.security.permissions import PermissionPolicy
 from phoenix.tools.filesystem import filesystem_tool_definitions
 from phoenix.tools.registry import ToolRegistry
 
+if sys.platform == "win32":
+    import msvcrt
+
+    def _try_lock(handle: IO[bytes]) -> None:
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+
+    def _unlock(handle: IO[bytes]) -> None:
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+else:
+    import fcntl
+
+    def _try_lock(handle: IO[bytes]) -> None:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _unlock(handle: IO[bytes]) -> None:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = ROOT / "alembic.ini"
 STATE_KEY = "phoenix"
+MIGRATION_LOCK_NAME = "phoenix.migrate.lock"
+_LOCK_POLL_SECONDS = 0.05
 
 
 class ServerConfig(BaseModel):
@@ -65,7 +92,14 @@ class ServerConfig(BaseModel):
     startup_timeout_seconds: float = Field(
         default=10.0, gt=0, le=120, allow_inf_nan=False
     )
+    migration_lock_timeout_seconds: float = Field(
+        default=30.0, gt=0, le=600, allow_inf_nan=False
+    )
     alembic_ini: Path = ALEMBIC_INI
+
+
+class MigrationLockTimeout(TimeoutError):
+    """Another process held the migration lock for the whole bounded wait."""
 
 
 @dataclass(frozen=True)
@@ -87,6 +121,39 @@ def ollama_providers(config: ServerConfig) -> ProviderSet:
     )
 
 
+def _consume(task: "asyncio.Task[bool]") -> None:
+    if not task.cancelled():
+        task.exception()  # retrieved: a late failure is not an unhandled error
+
+
+class DatabaseProbe:
+    """At most one database check in flight.
+
+    A timed-out ``to_thread`` worker keeps running, so a hung check is shared
+    by later readiness calls rather than started again; the executor cannot
+    fill up while the database hangs.
+    """
+
+    def __init__(self, engine: Engine, heads: tuple[str, ...]) -> None:
+        self._engine = engine
+        self._heads = heads
+        self._task: asyncio.Task[bool] | None = None
+
+    async def at_head(self, timeout: float) -> bool:
+        task = self._task
+        if task is None or task.done():
+            task = asyncio.create_task(
+                asyncio.to_thread(database_at_head, self._engine, self._heads)
+            )
+            task.add_done_callback(_consume)
+            self._task = task
+        try:
+            async with asyncio.timeout(timeout):
+                return await asyncio.shield(task)
+        except Exception:
+            return False  # any database failure or timeout is reported, not raised
+
+
 @dataclass(frozen=True)
 class BackendServices:
     """Every service the backend owns; built once per lifespan."""
@@ -95,6 +162,7 @@ class BackendServices:
     engine: Engine
     session_factory: sessionmaker[Session]
     migration_heads: tuple[str, ...]
+    database_probe: DatabaseProbe
     agent_registry: AgentRegistry
     tier_table: ModelTierTable
     capability_registry: ModelCapabilityRegistry
@@ -133,7 +201,11 @@ class DatabaseReadiness(_Contract):
 
 
 class ReadinessResponse(_Contract):
-    """IDs and statuses only: no URLs, versions, details or secrets."""
+    """Statuses and IDs plus the PHOENIX version only.
+
+    Provider URLs, provider versions, health details, paths and secrets are
+    never echoed.
+    """
 
     status: ReadinessStatus
     service: Literal["phoenix-api"]
@@ -159,12 +231,39 @@ def migration_config(settings: AppSettings, config: ServerConfig) -> Config:
     return alembic
 
 
+@contextmanager
+def migration_lock(data_dir: Path, timeout: float) -> Iterator[None]:
+    """OS-level exclusive lock in the data directory, waited for at most timeout.
+
+    SQLite DDL is not transactional, so concurrent upgrades could interleave and
+    leave a half-applied schema. Waiting is bounded and fails explicitly.
+    """
+    deadline = time.monotonic() + timeout
+    with open(data_dir / MIGRATION_LOCK_NAME, "a+b") as handle:
+        while True:
+            try:
+                _try_lock(handle)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise MigrationLockTimeout(
+                        "Another PHOENIX process holds the migration lock;"
+                        f" waited {timeout:g} s"
+                    ) from None
+                time.sleep(_LOCK_POLL_SECONDS)
+        try:
+            yield
+        finally:
+            _unlock(handle)
+
+
 def migrate_to_head(settings: AppSettings, config: ServerConfig) -> tuple[str, ...]:
-    """Create the data directory, upgrade to head and return the head revisions."""
+    """Create the data directory, upgrade to head under the lock, return heads."""
     prepare_data_directory(settings)
     alembic = migration_config(settings, config)
-    command.upgrade(alembic, "head")
-    return tuple(sorted(ScriptDirectory.from_config(alembic).get_heads()))
+    with migration_lock(settings.data_dir, config.migration_lock_timeout_seconds):
+        command.upgrade(alembic, "head")
+        return tuple(sorted(ScriptDirectory.from_config(alembic).get_heads()))
 
 
 def database_at_head(engine: Engine, heads: tuple[str, ...]) -> bool:
@@ -263,6 +362,7 @@ async def open_services(
             engine=engine,
             session_factory=session_factory,
             migration_heads=heads,
+            database_probe=DatabaseProbe(engine, heads),
             agent_registry=agents,
             tier_table=table,
             capability_registry=capabilities,
@@ -308,13 +408,7 @@ async def readiness(
     statuses = await asyncio.gather(
         *(probe_provider(provider, timeout) for provider in services.providers)
     )
-    try:
-        async with asyncio.timeout(timeout):
-            at_head = await asyncio.to_thread(
-                database_at_head, services.engine, services.migration_heads
-            )
-    except Exception:
-        at_head = False  # any database failure is reported, never raised
+    at_head = await services.database_probe.at_head(timeout)
     models = tuple(
         ModelReadiness(provider_id=record.provider_id, model_id=record.model_id)
         for record in services.capability_registry.list_records()
@@ -338,6 +432,23 @@ async def readiness(
     )
 
 
+def _remove_interactive_docs(app: FastAPI) -> None:
+    """No /docs, /redoc or /openapi.json on the backend (smaller surface)."""
+    hidden = {
+        app.openapi_url,
+        app.docs_url,
+        app.redoc_url,
+        app.swagger_ui_oauth2_redirect_url,
+    } - {None}
+    app.router.routes[:] = [
+        route
+        for route in app.router.routes
+        if getattr(route, "path", None) not in hidden
+    ]
+    app.openapi_url = app.docs_url = app.redoc_url = None
+    app.swagger_ui_oauth2_redirect_url = None
+
+
 def build_server_app(
     settings: AppSettings,
     *,
@@ -348,6 +459,7 @@ def build_server_app(
     options = ServerConfig() if config is None else config
     factory = ollama_providers if provider_factory is None else provider_factory
     app = create_app()
+    _remove_interactive_docs(app)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
