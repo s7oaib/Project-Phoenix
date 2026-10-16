@@ -3575,3 +3575,65 @@ Limitations: the model verifier judges the document answer without seeing the
 file; correlation and authority are checked deterministically, faithfulness to
 the file is not. A cancelled tool step stops waiting, but the bounded read-only
 thread may still finish in the background. No new dependencies.
+
+## ADR-084 — Backend composition root and loopback entrypoint
+
+Status: Proposed (PHX-100; recommendations R1–R9 pending owner confirmation)
+Date: 2026-10-16
+Ticket: PHX-100
+
+ADR-083 is reserved by the unmerged PHX-047 branch.
+
+- **New modules only.** `phoenix/api/server.py`, `phoenix/api/launcher.py` and
+  `phoenix/api/__main__.py` compose the existing services, with no edit to any
+  existing `phoenix/`, `alembic/` or `apps/` file. `create_app()` stays
+  subsystem-free. The two `git diff origin/main` guards
+  (`tests/test_screenshot_vision_loop.py`, `tests/test_windows_ui_automation.py`)
+  exclude exactly these three new paths, each by name.
+- **Composition root.** `build_server_app(settings, *, config, provider_factory)`
+  returns `create_app()` plus a lifespan and `GET /ready`. The lifespan:
+  - migrates SQLite to the Alembic head (R1);
+  - builds the engine and session factory, the default agent registry, the tier
+    table, `ModelCapabilityRegistry` and `ModelLifecycleManager` (capacity 1,
+    INV-023);
+  - builds the default `OllamaProvider` and a `think=False` structured twin
+    (ADR-080);
+  - builds `EventBus`, a `ToolRegistry` of the filesystem definitions (R7),
+    `PermissionPolicy()`, `AuditTrail` and `PhoenixRuntime`.
+
+  Each is built once and held in the frozen `BackendServices` container on
+  `app.state.phoenix`. Tier models are registered once at startup, for healthy
+  providers only, and missing models are skipped (R6). No FilesystemTool
+  workspace is configured (PHX-108). On exit, the lifespan cancels active
+  missions, closes the providers and disposes of the engine. A failed startup
+  closes whatever it had opened.
+- **Readiness.** `GET /ready` returns `ready`, `degraded` or `unavailable`,
+  with:
+  - per-provider IDs and statuses;
+  - the registered (provider, model) pairs;
+  - `database.at_head`.
+
+  Provider probes and the database check are bounded (default 2 s). Any
+  provider error, mismatch or timeout reports that provider as `unavailable`,
+  and the backend as `degraded` (HTTP 200), not a crash (INV-021, INV-022).
+  `unavailable` (HTTP 503) means the services are not built or the database is
+  not at head. No URLs, details, versions or paths are echoed.
+- **Entrypoint.** `python -m phoenix.api [--host] [--port] [--data-dir]`:
+  - Only `127.0.0.1` or `::1` is accepted; anything else exits with code 2
+    before binding.
+  - `--port` defaults to 0, an OS-assigned port (R2). 8000 is Colibri's port,
+    and `AppSettings.api_host` and `api_port` are not read.
+  - The launcher pre-binds the socket, exclusively on Windows (R3), and runs
+    uvicorn programmatically with lifespan `on`, proxy headers off, the access
+    log off and logs on stderr (R9).
+  - Once startup has finished, it writes exactly one stdout line:
+    `{"event":"phoenix.backend.ready","host":...,"port":N,"pid":P,"version":...}`.
+  - SIGINT, SIGTERM and CTRL_BREAK shut down through uvicorn. Active missions
+    are cancelled before connections drain (R8; INV-019), and the drain is
+    bounded to 10 s.
+- **Config.** `ServerConfig` (new) holds the Ollama base URL and the probe
+  timeouts, because `AppSettings` is frozen (R4).
+
+Open: migrations are not packaged in the wheel (Q1); model registration after
+startup (Q2); real-uvicorn WebSocket support needs a new dependency (Q3);
+parent-death detection (Q4). No new dependencies.

@@ -98,3 +98,23 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-092 Packaging/install workflow — TODO
 - PHX-093 Final demo scenarios — TODO
 - PHX-094 Release evidence package — TODO
+
+## Phase 10 — Product Integration
+- PHX-100 Backend composition root and entrypoint — IN_PROGRESS
+- PHX-101 Local API security — IN_PROGRESS
+- PHX-102 Mission persistence and runner — TODO
+- PHX-103 Runtime events and WS — TODO
+- PHX-104 REST API v1 — TODO
+- PHX-105 Request triage — TODO
+- PHX-106 Tauri backend sidecar — TODO
+- PHX-107 Frontend port adapters — TODO
+- PHX-108 Settings and onboarding — TODO
+- PHX-109 MAHORAGA/KAIDO in missions — TODO
+- PHX-110 Memory and RAG in missions — TODO
+- PHX-111 Web research — TODO
+- PHX-112 Computer control steps — TODO
+- PHX-113 Media and documents steps — TODO
+- PHX-114 Voice pipeline — TODO
+- PHX-115 Observability — TODO
+- PHX-116 Colibri deep tier — TODO
+- PHX-117 Metric datasets — TODO

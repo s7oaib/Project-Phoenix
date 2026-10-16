@@ -111,6 +111,13 @@ categories = ["unit", "api_contract"]
 # api_contract: test_health_contract, test_unknown_route
 
 [[file]]
+path = "tests/test_api_server.py"
+categories = ["unit", "integration", "api_contract", "migrations"]
+# integration: test_shutdown_cancels_active_missions (composition root + runtime + SQLite)
+# api_contract: test_ready_when_provider_and_database_are_healthy
+# migrations: test_startup_migrates_database_to_head, test_database_behind_head_is_unavailable
+
+[[file]]
 path = "tests/test_audit_trail.py"
 categories = ["unit", "integration", "migrations", "permissions", "forged_tool_results"]
 # integration: test_six_outcomes_p0_p3_p4_and_repeated_request (PermissionEngine + SQLite)
