@@ -3576,6 +3576,237 @@ file; correlation and authority are checked deterministically, faithfulness to
 the file is not. A cancelled tool step stops waiting, but the bounded read-only
 thread may still finish in the background. No new dependencies.
 
+## ADR-083 — Grounded LEVI verification for document steps and final answers
+
+Status: Accepted (`phoenix-prompts-v3`, including the round-5 sentence, approved by the owner 2026-10-16; live acceptance 3/5 accepted, with remaining variance assigned to PHX-109)
+Date: 2026-10-16
+Ticket: PHX-047
+
+This extends ADR-082. It supersedes ADR-082's "the verifier is unchanged" and its
+stated limitation that the model verifier judges a document answer without the
+file. It also supersedes two ADR-081 rules:
+- the PHX-029 Q7 rule that specialists keep the default provider, for the two
+  document turns (`document_specialist` and `document_answer`) only;
+- the rule that final-answer verification uses the text verifier prompt with
+  only the objective and candidate.
+
+Live evidence, round 1 (2026-10-16,
+`validation/PHX-046-mission-smoke-20261016-003757`):
+the first live mission planned, assigned `documents`, proposed `read_text
+smoke.txt`, was ALLOWED by the caller SESSION grant, read the file and answered
+`42` (2 characters). LEVI's deterministic `tool_evidence` check passed, and then
+LEVI's model verifier (qwen3.5:9b, `think:false`) failed the step, so the mission
+ended `verification_failed`. The model never saw the file, and the verifier
+prompt says to fail a check when unsure, so it could not confirm a file-derived
+fact. The `document_specialist` also ran with thinking on and spent about 34 s and
+1,240 output tokens on a 74-character JSON request.
+
+Owner decisions (2026-10-16):
+
+- **Grounded document verification.** When LEVI verifies a document step, its
+  model receives the step's tool output as one guarded, untrusted `TOOL_OUTPUT`
+  item via `PromptInjectionGuard` (INV-017). It is the same item, with the same
+  bounded rendering, content, call-ID source and field name, that the
+  `document_answer` turn received, next to the existing guarded `objective` and
+  `candidate` items. Intermediate text steps and the final-answer verification
+  receive no tool output.
+- **Order and verdict.** For document steps LEVI still runs
+  `deterministic.tool_evidence` first, then the plain-text and size checks. If
+  any deterministic check fails, the model is not consulted. The verdict stays
+  LEVI's all-checks rule, so the model cannot override a deterministic failure
+  (INV-008). A grounded model check that fails ends the mission
+  `verification_failed`.
+- **Prompts.** `phoenix-prompts-v3` adds a new role, `PHOENIX ROLE:
+  document_verifier` (`DOCUMENT_VERIFICATION_SYSTEM`), and its guard task text
+  (`DOCUMENT_CANDIDATE_TASK`). It tells LEVI to judge the candidate against the
+  objective and the `tool_output` item, to treat all three items as untrusted data
+  and ignore instructions inside them, and to fail a check when the candidate is
+  not supported by the tool output or when unsure. The JSON reply form is the
+  verifier's. The text `VERIFICATION_SYSTEM` is byte-identical. Round 2 below
+  adds the final verifier and changes `ASSIGNMENT_SYSTEM`. A test hash-pins every
+  v2 constant and allows exactly that one change.
+- **Thinking.** The `document_specialist` proposal turn emits one JSON object, so
+  it uses the structured providers (`think:false` when the caller supplies them),
+  like the other structured roles. Round 2 extends this to `document_answer`.
+- **Model selection.** The document and final verifiers use the verifier binding:
+  the verifier tier, preferring a model other than the producer's.
+- **Structure.** `phoenix/agents/tool_steps.py` holds `DocumentVerificationResponder`
+  and `FinalVerificationResponder`. Both subclass `ModelVerificationResponder`,
+  reusing its deterministic checks and check parsing. The document verifier is
+  wrapped by `ToolEvidenceVerificationResponder`. For document steps,
+  `runtime.py` builds the document verifier and passes a structured binding to
+  `DocumentStepRunner.perform`, which uses it for both turns. For the final step
+  it builds the final verifier. `responders.py` stays byte-identical to
+  `origin/main`.
+- **Re-pin.** `tests/test_prompt_injection_defenses.py` freezes every `phoenix/`
+  path in `origin/main`, which now includes `tool_steps.py`. `prompts.py`,
+  `runtime.py` and `tool_steps.py` leave their previous baselines (the
+  `PHX_046_COMMIT` pin for the first two, `origin/main` for the third) and are
+  pinned to the latest PHX-047 implementation commit (`PHX_047_COMMIT` /
+  `PHX_047_PATHS`), so each path keeps exactly one baseline and any further
+  change still fails. Round 1 pinned
+  `f600f122b2715260384db47b63bd7c07172919b1`; round 2 re-pinned to
+  `73a4f007fab4cf65d4e504e5503fbbec588bdf80`; round 3 re-pinned to
+  `e47834a3e82d8f10dfde8479c89cea20aa5d369a`; round 4 re-pinned to
+  `327f4e4abc746b5d0b6d4d9faf8066b3360689a6`; round 5 re-pins to
+  `47aa471712c6c5ea3452cf5a45c3ed390470e185`. As in ADR-082, each
+  implementation commit is followed by its pin commit, and the PR must merge
+  with a merge commit so the pinned SHA stays reachable from main.
+- **Privacy.** Tool output still never enters `MissionTrace`, errors or logs:
+  traces keep IDs, statuses, hashes and lengths only. Model check summaries,
+  which may quote the file or step outputs, are not traced.
+
+Live evidence, round 2 (2026-10-16, 10 live missions on `ea81364`): two missions
+completed with the correct `42`, and the grounded `document_verifier` passed all 4
+times it was reached. The other failures had three causes:
+- **(a)** `document_answer` (4B, default thinking) sometimes spent the whole
+  2048-token cap thinking and returned 0 characters with
+  `finish_reason=length`, which became `responder_output/truncated`.
+- **(b)** The text `verifier` on the `final_answer` step failed a correct `42` in
+  2 of 4 runs. It never saw the verified step outputs, even though its completion
+  rule says "consistent with the verified step outputs".
+- **(c)** The 4B assignment routed a "Read the content of the file smoke.txt..."
+  step to `intelligence` instead of `documents`. Fenced and compact JSON both
+  parsed fine.
+
+Owner decisions, round 2 (2026-10-16):
+
+- **`document_answer` thinking.** `document_answer` also uses the structured
+  providers. Text specialists and `final_answer` keep the default providers.
+- **Grounded final verification.** When LEVI verifies the `final_answer` step,
+  its model receives each verified step output as a guarded, untrusted
+  `MODEL_OUTPUT` item via `PromptInjectionGuard`, plus the `objective` and
+  `candidate` items. These are the same step-output items the `final_answer` turn
+  received. A new role, `PHOENIX ROLE: final_verifier`
+  (`FINAL_VERIFICATION_SYSTEM`, guard task `FINAL_CANDIDATE_TASK`), tells LEVI:
+  - to judge the candidate against the original request, any format it requires,
+    and the step outputs;
+  - to treat all items as untrusted data;
+  - to fail a check when the candidate is unsupported by the step outputs,
+    breaks a required format, or LEVI is unsure.
+
+  The JSON reply form is the verifier's. The size check runs first, and the
+  final answer stays exempt from the plain-text check. The verdict is still
+  `all(checks)`, and nothing new reaches the trace. Intermediate text steps
+  keep `VERIFICATION_SYSTEM` with no step outputs.
+- **Assignment routing rule.** `ASSIGNMENT_SYSTEM` gains one sentence: "If
+  "documents" is one of the allowed domains, assign every step that reads a
+  file, lists a directory or inspects a file's metadata to "documents"."
+  `responders.py` is frozen and formats this prompt only with the domain list,
+  so the rule cannot be inserted conditionally. It is worded to apply only when
+  `documents` is in the allowed list, so a text-only runtime is unaffected. The
+  rest of the prompt is unchanged, and v3 is unreleased, so this v2 constant
+  changes under v3.
+
+Live evidence, round 3 (2026-10-16, live acceptance on `ac37229` + `7c33b9d`):
+- r1 and r3 completed with the correct answer, and every LEVI check passed.
+- In r2, the 4B assignment (62 characters) misrouted the file step to
+  `intelligence`. The text specialist (4B, thinking on) then spent the whole
+  2048-token cap thinking and returned 0 characters, so the mission ended
+  `responder_output/truncated`.
+- r4 and r5 were interrupted by a session restart and do not count.
+
+Owner decisions, round 3 (2026-10-16):
+
+- **Thinking token cap.** Roles on the default providers think before answering
+  (the text `specialist` and `final_answer`). They get the new
+  `RuntimeLimits.max_thinking_output_tokens` (default 4096). Structured roles keep
+  `max_output_tokens` (default 2048): PHOENIX direct and assignment, AIZEN, every
+  LEVI role, and both document turns. `max_output_chars` still bounds the visible
+  answer of every role.
+- **Assignment on T2.** The provisional tier table gains an `assignment` row:
+  qwen3.5:9b, then qwen3.5:4b, then qwen3.5:2b. The binding keeps agent ID
+  `phoenix`. A caller table without an `assignment` row falls back to the
+  `phoenix` row. PHOENIX direct stays on qwen3.5:4b. LEVI still prefers a model
+  other than the producer's where the table allows. Assignment output is not
+  LEVI-verified, so its tier does not affect verifier selection.
+
+Live evidence, round 4 (2026-10-16, 5-run acceptance on `cdf3b9b`, GPU enabled):
+2 of 5 runs passed. The 9B assignment routed correctly in all 5 runs, and nothing
+truncated. A diagnostic of LEVI's raw output found two causes, plus one transient
+`provider_unavailable` mid-run (it stays a failure; PHX-109 owns retries):
+- **(a) Extra keys in check objects.** LEVI (9B, `think:false`) added keys to
+  checks, for example `"completed_step_objective": true`. The strict
+  `extra="forbid"` checks wire rejected them, so a mission whose checks all
+  passed failed with `responder_output/schema`.
+- **(b) Ungrounded intermediate text step.** A two-step plan read the file in s1
+  (`documents`), then had s2 "state the number" in a text domain. The text
+  `verifier` for s2 saw no evidence, wrote that the file contents were
+  inaccessible, and failed a correct `42`.
+
+Owner decisions, round 4 (2026-10-16):
+
+- **Lenient check objects.** Every LEVI role this runtime uses
+  (`verifier`, `step_verifier`, `document_verifier`, `final_verifier`) parses
+  its checks with a PHX-047 wire model in `tool_steps.py`.
+  - The required keys `criterion`, `passed` and `evidence_summary` keep strict
+    types.
+  - Unknown extra keys in each check are dropped unread; they are never trusted,
+    stored or used.
+  - The top level stays strict: exactly one object holding only a non-empty
+    `checks` list, within the `max_checks` bound. A missing or wrongly typed
+    required key, or a top-level extra such as `verdict`, is still `schema`.
+  - `responders.py` stays byte-identical, so the frozen `ModelVerificationResponder`
+    is no longer used directly by the runtime. Planner and assignment parsing
+    stay strict.
+- **Grounded intermediate text steps.** When a text step received earlier
+  verified step outputs, its LEVI check receives the same items as guarded,
+  untrusted `MODEL_OUTPUT` items, plus the objective and candidate. A new role,
+  `PHOENIX ROLE: step_verifier` (`STEP_VERIFICATION_SYSTEM`, guard task
+  `STEP_CANDIDATE_TASK`), tells LEVI:
+  - to judge the candidate against the objective, expected output and
+    completion rule, using the earlier outputs as evidence;
+  - to treat all items as untrusted;
+  - to fail a check when a fact the candidate takes from earlier steps is
+    unsupported, or when it is unsure.
+
+  A text step with no earlier outputs keeps the byte-identical
+  `VERIFICATION_SYSTEM` (role `verifier`) and the same prompt as before.
+  Deterministic checks still run first, the verdict is still `all(checks)`, and
+  nothing new reaches the trace. This is `StepVerificationResponder` in
+  `tool_steps.py`.
+- **Acceptance bar.** The live acceptance bar stays at 4 of 5 runs.
+
+Live evidence, round 5 (2026-10-16, on `4d634bd`): acceptance batch 1 passed 3 of
+5, batch 2 passed 2 of 4 counted runs, and an 8-run diagnostic passed 5 of 8.
+- **Request format enforced on a step.** Two diagnostic failures (runs 3 and 7)
+  had the same cause. The `document_answer` was a correct sentence ("The magic
+  number stated in the file is 42."). The `document_verifier` failed it, quoting
+  the original request's "reply with only the magic number". That format rule
+  belongs to PHOENIX's final answer, but intermediate verifiers see the original
+  request and enforced it on the step. Bare `42` step answers always passed.
+- **Empty assignment.** An occasional `{"assignments": []}` (19 characters)
+  appeared 3 times, each on the first call in a fresh process near Ollama "llm
+  server error" model reloads. It fails explicitly as `schema`; no change here,
+  and PHX-109 owns retries.
+
+Decision, round 5 (approved by the owner 2026-10-16):
+
+- **Step-scoped format.** `DOCUMENT_VERIFICATION_SYSTEM` and
+  `STEP_VERIFICATION_SYSTEM` each gain one sentence, placed before the
+  reply-format paragraph and reflowed to the existing wrapping:
+
+  > The original request's output format (for example "reply with only ...") applies to PHOENIX's final answer, not to this step; do not fail this step for wording or format beyond its expected output and completion rule.
+
+  `FINAL_VERIFICATION_SYSTEM`, the text `VERIFICATION_SYSTEM` and every other
+  constant are unchanged, so the final verifier still enforces the user's
+  format. Tests pin the sentence in both prompts, its absence from the final and
+  text verifiers, and the hashes of the unchanged v3 additions.
+
+Limitations:
+- LEVI's model now judges file-derived facts and step-derived final answers, so a
+  weak verifier can still wrongly fail or pass an answer. Correlation and
+  authority stay deterministic.
+- The verifier prompts grow by the tool output (at most `max_output_chars`) or by
+  the step outputs, which are already bounded for the final-answer turn.
+- The routing rule is advisory to the model: a misrouted file step still runs as
+  a text step, which cannot read files. T2 assignment and the larger thinking
+  cap make that failure less likely and recoverable, not impossible.
+- A larger thinking cap lengthens worst-case step time; step and mission
+  deadlines still bound it.
+
+No new dependencies.
+
 ## ADR-084 — Backend composition root and loopback entrypoint
 
 Status: Accepted (PHX-100; the owner confirmed recommendations R1–R9 on 2026-10-16)

@@ -8,6 +8,7 @@ import ast
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable, Coroutine
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +93,8 @@ class ScriptedProvider(ModelProvider):
             "specialist": "Step answer.",
             "final_answer": "100",
             "verifier": PASS,
+            "final_verifier": PASS,
+            "step_verifier": PASS,
         }
         self.finish: dict[str, str] = {}
         self.hang: set[str] = set()
@@ -252,13 +255,13 @@ def test_complex_mission_plans_routes_verifies_and_completes() -> None:
     # 2n + 4 generations for n = 2 plan steps, each on its provisional tier.
     assert provider.calls() == [
         ("planner", "qwen3.5:9b"),
-        ("assignment", "qwen3.5:4b"),
+        ("assignment", "qwen3.5:9b"),
         ("specialist", "qwen3.5:4b"),
         ("verifier", "qwen3.5:9b"),
         ("specialist", "qwen2.5-coder:7b"),
-        ("verifier", "qwen3.5:9b"),
+        ("step_verifier", "qwen3.5:9b"),
         ("final_answer", "qwen3.5:4b"),
-        ("verifier", "qwen3.5:9b"),
+        ("final_verifier", "qwen3.5:9b"),
     ]
     assert [
         (item.step_id, item.agent_id, item.verdict)
@@ -290,7 +293,7 @@ def test_verifier_prefers_a_model_other_than_the_producer() -> None:
     mission(provider, tier_table=table)
     pairs = provider.calls()
     for index, (role, model) in enumerate(pairs):
-        if role == "verifier":
+        if role in ("verifier", "step_verifier", "final_verifier"):
             assert pairs[index - 1][1] == "qwen3.5:4b" and model == "qwen3.5:9b"
 
 
@@ -310,11 +313,7 @@ def test_failed_levi_verification_never_completes() -> None:
 def test_final_answer_verification_failure_fails_from_verifying() -> None:
     provider = ScriptedProvider()
 
-    def verdict(request: GenerationRequest) -> str:
-        final = prompts.FINAL_OBJECTIVE in request.messages[1].text
-        return FAIL if final else PASS
-
-    provider.replies["verifier"] = verdict
+    provider.replies["final_verifier"] = FAIL
     result = mission(provider)
     assert result.failure_code == MissionFailureCode.VERIFICATION_FAILED
     assert states(result)[-2:] == ["verifying", "failed"]
@@ -684,10 +683,31 @@ def test_default_tier_table_matches_master_spec_with_t0_last() -> None:
         assert table.candidates(agent)[-1].model_id == "qwen3.5:2b"
     assert table.candidates("strategist")[0].model_id == "qwen3.5:9b"
     assert table.candidates("build_engineer")[0].model_id == "qwen2.5-coder:7b"
+    # PHX-047 (ADR-083): assignment moves to T2; PHOENIX direct stays on T1.
+    assert [ref.model_id for ref in table.candidates("assignment")] == [
+        "qwen3.5:9b",
+        "qwen3.5:4b",
+        "qwen3.5:2b",
+    ]
+    assert [ref.model_id for ref in table.candidates("phoenix")] == [
+        "qwen3.5:4b",
+        "qwen3.5:2b",
+    ]
+
+
+def test_assignment_without_its_own_tier_row_uses_the_phoenix_row() -> None:
+    provider = ScriptedProvider()
+    t1, t2 = (ModelCandidateRef(provider_id="ollama", model_id=m) for m in MODELS[1:3])
+    table = ModelTierTable(roles={"phoenix": (t1,), "verifier": (t2,)}, default=(t1,))
+    assert mission(provider, tier_table=table).kind == MissionKind.COMPLETED
+    assert ("assignment", "qwen3.5:4b") in provider.calls()
+    direct = ScriptedProvider()
+    assert mission(direct, OrchestrationPath.DIRECT).kind == MissionKind.COMPLETED
+    assert direct.calls() == [("direct", "qwen3.5:4b")]
 
 
 def test_prompt_set_is_versioned_with_role_markers() -> None:
-    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v2"
+    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v3"
     systems = (
         prompts.DIRECT_SYSTEM,
         prompts.PLANNING_SYSTEM,
@@ -697,9 +717,83 @@ def test_prompt_set_is_versioned_with_role_markers() -> None:
         prompts.DOCUMENT_ANSWER_SYSTEM,
         prompts.FINAL_ANSWER_SYSTEM,
         prompts.VERIFICATION_SYSTEM,
+        prompts.DOCUMENT_VERIFICATION_SYSTEM,
+        prompts.FINAL_VERIFICATION_SYSTEM,
+        prompts.STEP_VERIFICATION_SYSTEM,
     )
     assert len({text.splitlines()[0] for text in systems}) == len(systems)
     assert all(text.startswith("PHOENIX ROLE: ") for text in systems)
+
+
+# First 128 bits of the sha256 of every phoenix-prompts-v2 constant (PHX-046
+# commit 95c5afa).
+V2_PROMPT_SHA256 = {
+    "ASSIGNMENT_SYSTEM": "f819e8032d207c635293ae4d3452bfbe",
+    "CANDIDATE_ITEM": "dda18a0e21ae47c53b4309434cbc02ae",
+    "CANDIDATE_TASK": "7bf35ffdd42c91de727f7e756f5f8a8d",
+    "DIRECT_SYSTEM": "a1a896f5964491ab14e8dd5e4dafdfed",
+    "DOCUMENT_ANSWER_SYSTEM": "70cee99916c9094d456150b80ba34913",
+    "DOCUMENT_ANSWER_TASK": "31166deedec2e119d961bab3443dc621",
+    "DOCUMENT_SPECIALIST_SYSTEM": "3dd00c5456b502e7a5d545cbfe2383a0",
+    "DOCUMENT_STEP_COMPLETION_RULE": "2564a7b558fef9c59b972ecae9107241",
+    "DOCUMENT_STEP_EXPECTED_OUTPUT": "add0a40d8d236e090b0f9c220e48ece0",
+    "DOCUMENT_TOOL_TASK": "cba883f5bb50b0ae60fa618da5d9f48f",
+    "FINAL_ANSWER_SYSTEM": "03306fe70392db1608a87776ba35d1d6",
+    "FINAL_COMPLETION_RULE": "f7688a032cc4239971c0626021e81a7e",
+    "FINAL_EXPECTED_OUTPUT": "dc513033628647a8750564182e070409",
+    "FINAL_OBJECTIVE": "ae493b34b787e691c4419b496235c192",
+    "OBJECTIVE_ITEM": "d454bec656d32723404961023ed9cb3c",
+    "PLANNING_SYSTEM": "e664a681dfce27fe939f8b1c8510199c",
+    "SPECIALIST_SYSTEM": "ca14ed28dbeec717f588bfd2eb304b57",
+    "STEP_COMPLETION_RULE": "cd01ae01c1d97e68d5b959c5e1b5b7bc",
+    "STEP_EXPECTED_OUTPUT": "0ebb078847f3b4304bc092f4d431e082",
+    "STEP_TASK": "7f02c6e862b152968099e6e0d21b3dbc",
+    "TOOL_OUTPUT_ITEM": "38bece272fb70178168892e0c079ed0b",
+    "VERIFICATION_SYSTEM": "9002e516c69063be1f85c1eace3344cc",
+}
+
+
+V3_CHANGED = {"ASSIGNMENT_SYSTEM"}
+DOCUMENTS_RULE = (
+    'If "documents" is one of the allowed domains, assign every step that reads a\n'
+    'file, lists a directory or inspects a file\'s metadata to "documents".\n'
+)
+
+
+def digest_of(text: str) -> str:
+    return sha256(text.encode("utf-8")).hexdigest()[:32]
+
+
+def test_v3_changes_exactly_the_listed_v2_constants() -> None:
+    # PHX-047 (ADR-083): v3 adds the document and final verifier prompts and
+    # their tasks, and only inserts the documents rule into ASSIGNMENT_SYSTEM.
+    # The text VERIFICATION_SYSTEM and every other v2 constant are unchanged.
+    current = {
+        name
+        for name, value in vars(prompts).items()
+        if name.isupper() and isinstance(value, str)
+    }
+    assert current - set(V2_PROMPT_SHA256) == {
+        "PROMPT_SET_VERSION",
+        "DOCUMENT_VERIFICATION_SYSTEM",
+        "DOCUMENT_CANDIDATE_TASK",
+        "FINAL_VERIFICATION_SYSTEM",
+        "FINAL_CANDIDATE_TASK",
+        "STEP_VERIFICATION_SYSTEM",
+        "STEP_CANDIDATE_TASK",
+    }
+    for name, digest in V2_PROMPT_SHA256.items():
+        text: str = getattr(prompts, name)
+        assert (digest_of(text) != digest) == (name in V3_CHANGED), name
+    assert prompts.ASSIGNMENT_SYSTEM.count(DOCUMENTS_RULE) == 1
+    v2_assignment = prompts.ASSIGNMENT_SYSTEM.replace(DOCUMENTS_RULE, "")
+    assert digest_of(v2_assignment) == V2_PROMPT_SHA256["ASSIGNMENT_SYSTEM"]
+    assert set(prompts.DOMAIN_DESCRIPTIONS) == {
+        "intelligence",
+        "scenario_analysis",
+        "build_engineering",
+        "documents",
+    }
 
 
 def test_new_modules_stay_provider_neutral() -> None:
@@ -735,7 +829,14 @@ def test_structured_roles_use_structured_providers() -> None:
     for path in OrchestrationPath:
         result = mission(default, path, structured_providers=(structured,))
         assert result.kind == MissionKind.COMPLETED
-    assert set(structured.roles()) == {"direct", "planner", "assignment", "verifier"}
+    assert set(structured.roles()) == {
+        "direct",
+        "planner",
+        "assignment",
+        "verifier",
+        "step_verifier",
+        "final_verifier",
+    }
     assert set(default.roles()) == {"specialist", "final_answer"}
 
 
@@ -803,6 +904,8 @@ def test_think_false_reaches_ollama_for_structured_roles_only() -> None:
         "specialist": "absent",
         "verifier": False,
         "final_answer": "absent",
+        "final_verifier": False,
+        "step_verifier": False,
     }
 
 
@@ -821,7 +924,9 @@ def test_json_final_answer_passes_but_json_intermediate_step_fails() -> None:
 @pytest.mark.parametrize("role", ["direct", "planner", "specialist"])
 def test_lone_surrogate_output_is_a_coded_failure(role: str) -> None:
     provider = ScriptedProvider()
-    provider.replies[role] = "bad \ud800 text"
+    # Non-hex marker: it can never occur inside a random UUID in the trace (the
+    # earlier "bad" marker made this test flaky).
+    provider.replies[role] = "zqxleak \ud800 text"
     path = OrchestrationPath.DIRECT if role == "direct" else OrchestrationPath.COMPLEX
     result = mission(provider, path)
     assert (result.failure_code, result.responder_error) == (
@@ -829,8 +934,8 @@ def test_lone_surrogate_output_is_a_coded_failure(role: str) -> None:
         ResponderErrorCode.INVALID_TEXT,
     )
     record = result.trace.generations[-1]
-    assert (record.role, record.output_chars) == (role, len("bad \ud800 text"))
-    assert "bad" not in result.model_dump_json()
+    assert (record.role, record.output_chars) == (role, len("zqxleak \ud800 text"))
+    assert "zqxleak" not in result.model_dump_json()
 
 
 def test_planning_timeout_fails_and_cancels_provider_operation() -> None:
@@ -874,3 +979,141 @@ def test_settling_an_illegal_task_edge_fails_loudly() -> None:
     evidence.machine.transition(TaskState.READY)
     with pytest.raises(TaskStateTransitionError):
         evidence.settle(TaskState.FAILED)
+
+
+def test_thinking_roles_get_the_larger_token_cap() -> None:
+    # PHX-047 (ADR-083): roles on the default providers (text specialists and
+    # the final answer) think first, so they get 4096; structured roles keep
+    # 2048. Output-size caps still bound the visible answer.
+    assert RuntimeLimits().max_thinking_output_tokens == 4096
+    provider = ScriptedProvider()
+    for path in OrchestrationPath:
+        assert mission(provider, path).kind == MissionKind.COMPLETED
+    caps = {(role_of(r), r.max_output_tokens) for r in provider.requests}
+    assert caps == {
+        ("direct", 2048),
+        ("planner", 2048),
+        ("assignment", 2048),
+        ("specialist", 4096),
+        ("verifier", 2048),
+        ("final_answer", 4096),
+        ("final_verifier", 2048),
+        ("step_verifier", 2048),
+    }
+    oversized = ScriptedProvider()
+    oversized.replies["specialist"] = "x" * 101
+    limits = RuntimeLimits(max_output_chars=100)
+    result = mission(oversized, limits=limits)
+    assert result.responder_error == ResponderErrorCode.OVERSIZED
+
+
+CHECK = {"criterion": "c", "passed": True, "evidence_summary": "e"}
+
+
+@pytest.mark.parametrize("role", ["verifier", "step_verifier", "final_verifier"])
+def test_levi_check_objects_drop_unknown_keys(role: str) -> None:
+    # PHX-047 (ADR-083): a 9B LEVI adds keys like "completed_step_objective".
+    # They are dropped unread, so they never reach the verdict or the trace.
+    provider = ScriptedProvider()
+    provider.replies[role] = json.dumps(
+        {"checks": [CHECK | {"completed_step_objective": True, "note": "zqxextra"}]}
+    )
+    result = mission(provider)
+    assert result.kind == MissionKind.COMPLETED
+    assert "zqxextra" not in result.model_dump_json()
+    # Extras cannot pass a failed check either: the verdict is from "passed".
+    provider = ScriptedProvider()
+    provider.replies[role] = json.dumps(
+        {"checks": [CHECK | {"passed": False, "verdict": "passed", "override": True}]}
+    )
+    result = mission(provider)
+    assert result.failure_code == MissionFailureCode.VERIFICATION_FAILED
+
+
+@pytest.mark.parametrize("role", ["verifier", "step_verifier", "final_verifier"])
+@pytest.mark.parametrize(
+    "reply",
+    [
+        {"checks": [{"criterion": "c", "passed": True}]},
+        {"checks": [CHECK | {"passed": "true"}]},
+        {"checks": [CHECK | {"criterion": 7}]},
+        {"checks": [CHECK | {"evidence_summary": "   "}]},
+        {"checks": [CHECK], "verdict": "passed"},
+        {"checks": []},
+        {"checks": [CHECK] * 7},
+        {"checks": CHECK},
+        [CHECK],
+    ],
+)
+def test_levi_required_keys_and_top_level_stay_strict(role: str, reply: object) -> None:
+    provider = ScriptedProvider()
+    provider.replies[role] = json.dumps(reply)
+    result = mission(provider)
+    assert result.failure_code == MissionFailureCode.RESPONDER_OUTPUT
+    assert result.responder_error == (
+        ResponderErrorCode.NOT_JSON
+        if isinstance(reply, list)
+        else ResponderErrorCode.SCHEMA
+    )
+
+
+def test_text_step_with_earlier_outputs_uses_the_grounded_step_verifier() -> None:
+    provider = ScriptedProvider()
+    provider.replies["specialist"] = lambda request: (
+        "Step one says 100."
+        if "Step one says" not in request.messages[1].text
+        else "So the answer is 100."
+    )
+    assert mission(provider).kind == MissionKind.COMPLETED
+    first, second = (
+        r for r in provider.requests if role_of(r) in ("verifier", "step_verifier")
+    )
+    # s1 has no earlier outputs: the unchanged text verifier, as before.
+    assert role_of(first) == "verifier"
+    assert first.messages[0].text == prompts.VERIFICATION_SYSTEM.format(max_checks=6)
+    head, _, data = first.messages[1].text.partition("PHOENIX_BOUNDARY_JSON:")
+    items = json.loads(data)["items"]
+    assert [i["content_id"] for i in items] == ["objective", "candidate"]
+    # s2 saw s1's output, so its LEVI sees it too, only as guarded model output.
+    assert role_of(second) == "step_verifier"
+    head, _, data = second.messages[1].text.partition("PHOENIX_BOUNDARY_JSON:")
+    items = json.loads(data)["items"]
+    assert [i["content_id"] for i in items] == ["objective", "s1", "candidate"]
+    assert {i["origin"] for i in items} == {"model_output"}
+    assert items[1]["text"] == "Step one says 100."
+    assert "Step one says" not in head
+
+
+STEP_FORMAT_RULE = (
+    'The original request\'s output format (for example "reply with only ...")'
+    " applies to PHOENIX's final answer, not to this step; do not fail this step"
+    " for wording or format beyond its expected output and completion rule."
+)
+# First 128 bits of the sha256 of v3 constants that round 5 must not change.
+V3_UNCHANGED_SHA256 = {
+    "FINAL_VERIFICATION_SYSTEM": "256fc490cea9b088f4c17a2a2b7725ce",
+    "DOCUMENT_CANDIDATE_TASK": "2830fab9c04feae3e60ddcd47490adb4",
+    "FINAL_CANDIDATE_TASK": "ac2d9a15dfd21aca8d4ad986622a4a48",
+    "STEP_CANDIDATE_TASK": "0307aa1a13c3b32ac3f7818d4dac4f29",
+}
+
+
+def test_intermediate_verifiers_do_not_enforce_the_final_answer_format() -> None:
+    # PHX-047 round 5 (ADR-083, pending owner approval): only the document and
+    # step verifiers say the request's output format is the final answer's.
+    def flat(text: str) -> str:
+        return " ".join(text.split())
+
+    for system in (
+        prompts.DOCUMENT_VERIFICATION_SYSTEM,
+        prompts.STEP_VERIFICATION_SYSTEM,
+    ):
+        assert flat(system).count(STEP_FORMAT_RULE) == 1
+        # The sentence sits just before the reply-format paragraph.
+        assert flat(system).index(STEP_FORMAT_RULE) < flat(system).index(
+            "Reply with exactly one JSON object"
+        )
+    for system in (prompts.FINAL_VERIFICATION_SYSTEM, prompts.VERIFICATION_SYSTEM):
+        assert "applies to PHOENIX's final answer" not in flat(system)
+    for name, digest in V3_UNCHANGED_SHA256.items():
+        assert digest_of(getattr(prompts, name)) == digest, name
