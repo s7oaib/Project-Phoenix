@@ -254,7 +254,7 @@ def test_complex_mission_plans_routes_verifies_and_completes() -> None:
     # 2n + 4 generations for n = 2 plan steps, each on its provisional tier.
     assert provider.calls() == [
         ("planner", "qwen3.5:9b"),
-        ("assignment", "qwen3.5:4b"),
+        ("assignment", "qwen3.5:9b"),
         ("specialist", "qwen3.5:4b"),
         ("verifier", "qwen3.5:9b"),
         ("specialist", "qwen2.5-coder:7b"),
@@ -682,6 +682,27 @@ def test_default_tier_table_matches_master_spec_with_t0_last() -> None:
         assert table.candidates(agent)[-1].model_id == "qwen3.5:2b"
     assert table.candidates("strategist")[0].model_id == "qwen3.5:9b"
     assert table.candidates("build_engineer")[0].model_id == "qwen2.5-coder:7b"
+    # PHX-047 (ADR-083): assignment moves to T2; PHOENIX direct stays on T1.
+    assert [ref.model_id for ref in table.candidates("assignment")] == [
+        "qwen3.5:9b",
+        "qwen3.5:4b",
+        "qwen3.5:2b",
+    ]
+    assert [ref.model_id for ref in table.candidates("phoenix")] == [
+        "qwen3.5:4b",
+        "qwen3.5:2b",
+    ]
+
+
+def test_assignment_without_its_own_tier_row_uses_the_phoenix_row() -> None:
+    provider = ScriptedProvider()
+    t1, t2 = (ModelCandidateRef(provider_id="ollama", model_id=m) for m in MODELS[1:3])
+    table = ModelTierTable(roles={"phoenix": (t1,), "verifier": (t2,)}, default=(t1,))
+    assert mission(provider, tier_table=table).kind == MissionKind.COMPLETED
+    assert ("assignment", "qwen3.5:4b") in provider.calls()
+    direct = ScriptedProvider()
+    assert mission(direct, OrchestrationPath.DIRECT).kind == MissionKind.COMPLETED
+    assert direct.calls() == [("direct", "qwen3.5:4b")]
 
 
 def test_prompt_set_is_versioned_with_role_markers() -> None:
@@ -952,3 +973,28 @@ def test_settling_an_illegal_task_edge_fails_loudly() -> None:
     evidence.machine.transition(TaskState.READY)
     with pytest.raises(TaskStateTransitionError):
         evidence.settle(TaskState.FAILED)
+
+
+def test_thinking_roles_get_the_larger_token_cap() -> None:
+    # PHX-047 (ADR-083): roles on the default providers (text specialists and
+    # the final answer) think first, so they get 4096; structured roles keep
+    # 2048. Output-size caps still bound the visible answer.
+    assert RuntimeLimits().max_thinking_output_tokens == 4096
+    provider = ScriptedProvider()
+    for path in OrchestrationPath:
+        assert mission(provider, path).kind == MissionKind.COMPLETED
+    caps = {(role_of(r), r.max_output_tokens) for r in provider.requests}
+    assert caps == {
+        ("direct", 2048),
+        ("planner", 2048),
+        ("assignment", 2048),
+        ("specialist", 4096),
+        ("verifier", 2048),
+        ("final_answer", 4096),
+        ("final_verifier", 2048),
+    }
+    oversized = ScriptedProvider()
+    oversized.replies["specialist"] = "x" * 101
+    limits = RuntimeLimits(max_output_chars=100)
+    result = mission(oversized, limits=limits)
+    assert result.responder_error == ResponderErrorCode.OVERSIZED

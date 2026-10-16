@@ -3695,6 +3695,29 @@ Owner decisions, round 2 (2026-10-16):
   rest of the prompt is unchanged, and v3 is unreleased, so this v2 constant
   changes under v3.
 
+Live evidence, round 3 (2026-10-16, live acceptance on `ac37229` + `7c33b9d`):
+- r1 and r3 completed with the correct answer, and every LEVI check passed.
+- In r2, the 4B assignment (62 characters) misrouted the file step to
+  `intelligence`. The text specialist (4B, thinking on) then spent the whole
+  2048-token cap thinking and returned 0 characters, so the mission ended
+  `responder_output/truncated`.
+- r4 and r5 were interrupted by a session restart and do not count.
+
+Owner decisions, round 3 (2026-10-16):
+
+- **Thinking token cap.** Roles on the default providers think before answering
+  (the text `specialist` and `final_answer`). They get the new
+  `RuntimeLimits.max_thinking_output_tokens` (default 4096). Structured roles keep
+  `max_output_tokens` (default 2048): PHOENIX direct and assignment, AIZEN, every
+  LEVI role, and both document turns. `max_output_chars` still bounds the visible
+  answer of every role.
+- **Assignment on T2.** The provisional tier table gains an `assignment` row:
+  qwen3.5:9b, then qwen3.5:4b, then qwen3.5:2b. The binding keeps agent ID
+  `phoenix`. A caller table without an `assignment` row falls back to the
+  `phoenix` row. PHOENIX direct stays on qwen3.5:4b. LEVI still prefers a model
+  other than the producer's where the table allows. Assignment output is not
+  LEVI-verified, so its tier does not affect verifier selection.
+
 Limitations:
 - LEVI's model now judges file-derived facts and step-derived final answers, so a
   weak verifier can still wrongly fail or pass an answer. Correlation and
@@ -3702,6 +3725,9 @@ Limitations:
 - The verifier prompts grow by the tool output (at most `max_output_chars`) or by
   the step outputs, which are already bounded for the final-answer turn.
 - The routing rule is advisory to the model: a misrouted file step still runs as
-  a text step, which cannot read files.
+  a text step, which cannot read files. T2 assignment and the larger thinking
+  cap make that failure less likely and recoverable, not impossible.
+- A larger thinking cap lengthens worst-case step time; step and mission
+  deadlines still bound it.
 
 No new dependencies.

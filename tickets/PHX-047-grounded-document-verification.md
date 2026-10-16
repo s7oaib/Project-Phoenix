@@ -34,6 +34,12 @@ Make a live document mission complete reliably:
   - **(b) The final-answer LEVI failed correct answers.** The text `verifier`, checking the `final_answer` step, failed a correct `42` in 2 of 4 runs. It never saw the verified step outputs, even though its completion rule says "consistent with the verified step outputs".
   - **(c) Assignment misrouted.** The 4B model assigned the step "Read the content of the file smoke.txt to locate and extract the magic number." to `intelligence` instead of `documents`. Code-fenced and compact JSON both parsed fine.
 
+### Round 3 (live acceptance on `ac37229` + `7c33b9d`)
+
+- r1 and r3 completed with the correct answer, and every LEVI check passed.
+- In r2, the 4B assignment (62 characters) misrouted the file step to `intelligence`. The text specialist (4B, thinking on) then spent the full 2048-token cap thinking and returned 0 characters, so the mission ended `responder_output/truncated`.
+- r4 and r5 were interrupted by a session restart and do not count.
+
 ## Authoritative documents
 
 - `/AGENTS.md`, `/INVARIANTS.md` (INV-008, INV-017, INV-021)
@@ -52,6 +58,8 @@ Recorded in ADR-083.
 | 5 | Thinking (round 2) | `document_answer` also uses the structured providers. Text specialists and `final_answer` keep the default providers. |
 | 6 | Grounded final LEVI | When LEVI verifies the `final_answer` step, its model receives each verified step output as a guarded, untrusted `MODEL_OUTPUT` item, plus the objective and candidate items. These are the same step outputs the `final_answer` turn received. A new role, `PHOENIX ROLE: final_verifier` (`FINAL_VERIFICATION_SYSTEM`, task `FINAL_CANDIDATE_TASK`), judges the candidate against the original request's format and the step outputs. It treats all items as untrusted, and fails a check when the candidate is unsupported, breaks a required format, or LEVI is unsure. The size check runs first; the verdict is still `all(checks)`. Nothing new reaches the trace. Intermediate text steps keep `VERIFICATION_SYSTEM` without step outputs. |
 | 7 | Routing rule | `ASSIGNMENT_SYSTEM` gains one rule: "If "documents" is one of the allowed domains, assign every step that reads a file, lists a directory or inspects a file's metadata to "documents"." `responders.py` is frozen and formats this prompt only with the domain list, so the rule cannot be inserted conditionally. It is worded to apply only when `documents` is offered, so a text-only runtime is unaffected. The rest of the prompt is unchanged. v3 is unreleased, so changing this v2 constant under v3 is allowed. |
+| 8 | Thinking token cap (round 3) | The new `RuntimeLimits.max_thinking_output_tokens` (default 4096) applies to roles on the default (thinking) providers: `specialist` and `final_answer`. Structured roles keep `max_output_tokens` (2048). `max_output_chars` still bounds every visible answer. |
+| 9 | Assignment tier (round 3) | `default_tier_table` gains an `assignment` row: qwen3.5:9b, then 4b, then 2b. The agent ID stays `phoenix`, and a table without the row falls back to `phoenix`. PHOENIX direct stays on 4b. The verifier still prefers a non-producer model. |
 
 ## Implementation
 
@@ -91,6 +99,9 @@ All tests are offline and use the scripted provider. There are no new test files
   - **Version.** It is `phoenix-prompts-v3`, and role markers are unique.
   - **v2 hash pins.** Every v2 constant is hash-pinned. Only `ASSIGNMENT_SYSTEM` differs, and only by the inserted rule (removing the rule restores the v2 hash). v3 adds exactly four new constants.
   - **Final verification.** The final step is verified by `final_verifier`.
+  - **Tier table (round 3).** `assignment` is 9b, then 4b, then 2b; `phoenix` stays 4b, then 2b. A table without an `assignment` row uses the `phoenix` row, and the direct path stays on 4b.
+  - **Token caps (round 3).** `specialist` and `final_answer` requests carry 4096. `direct`, `planner`, `assignment`, `verifier` and `final_verifier` carry 2048. An oversized specialist answer is still `oversized`.
+- `tests/test_phoenix_mission_e2e.py` (round 3): all five document and LEVI roles carry 2048, `specialist` and `final_answer` carry 4096, and assignment runs on 9b.
 - `tests/test_prompt_injection_defenses.py`: the PHX-047 pin (see Implementation).
 
 ## Non-goals

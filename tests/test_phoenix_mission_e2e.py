@@ -1150,3 +1150,24 @@ def test_assignment_rule_applies_only_when_documents_is_offered(
         .text
     )
     assert "- documents: " not in text_system
+
+
+def test_document_roles_keep_the_structured_token_cap(stack: Stack) -> None:
+    # PHX-047 (ADR-083): document turns are structured (2048); the text
+    # specialist and final answer think on the default providers (4096).
+    result = mission(stack, (stack.grant(),))
+    assert result.kind == MissionKind.COMPLETED
+    caps = {role_of(r): r.max_output_tokens for r in stack.provider.requests}
+    assert caps == {
+        "planner": 2048,
+        "assignment": 2048,
+        "document_specialist": 2048,
+        "document_answer": 2048,
+        "document_verifier": 2048,
+        "specialist": 4096,
+        "verifier": 2048,
+        "final_answer": 4096,
+        "final_verifier": 2048,
+    }
+    models = {g.role: g.model_id for g in result.trace.generations}
+    assert models["assignment"] == "qwen3.5:9b"

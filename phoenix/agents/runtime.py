@@ -158,6 +158,8 @@ def default_tier_table() -> ModelTierTable:
         roles=MappingProxyType(
             {
                 "phoenix": refs(t1, t0),
+                # PHX-047 (ADR-083): PHOENIX's step assignment runs on T2.
+                "assignment": refs(t2, t1, t0),
                 "strategist": refs(t2, t1, t0),
                 "verifier": refs(t2, t1, t0),
                 "build_engineer": refs(code, t2, t1, t0),
@@ -169,7 +171,11 @@ def default_tier_table() -> ModelTierTable:
 
 class RuntimeLimits(_Value):
     max_plan_steps: int = Field(default=4, strict=True, ge=1, le=8)
+    # Structured roles (thinking off when structured providers are supplied).
     max_output_tokens: int = Field(default=2048, strict=True, gt=0)
+    # PHX-047 (ADR-083): roles on the default providers think before answering
+    # (text specialists and the final answer), so their cap leaves room for both.
+    max_thinking_output_tokens: int = Field(default=4096, strict=True, gt=0)
     # UntrustedContentItem accepts at most 50,000 characters per item.
     max_output_chars: int = Field(default=20000, strict=True, gt=0, le=50000)
     mission_timeout_seconds: float = Field(default=1800.0, gt=0, allow_inf_nan=False)
@@ -550,12 +556,16 @@ class PhoenixRuntime:
         structured: bool = False,
     ) -> ModelBinding:
         providers = self._structured if structured else self._providers
+        limits = self._limits
         return ModelBinding(
             agent_id=agent_id,
             provider=providers[ref.provider_id],
             model_id=ref.model_id,
             lifecycle=self._lifecycle,
-            max_output_tokens=self._limits.max_output_tokens,
+            # max_output_chars still bounds the visible answer either way.
+            max_output_tokens=limits.max_output_tokens
+            if structured
+            else limits.max_thinking_output_tokens,
             max_output_chars=self._limits.max_output_chars,
             record=evidence.generations.append,
         )
@@ -567,8 +577,12 @@ class PhoenixRuntime:
         evidence: _Evidence,
         *,
         avoid: ModelCandidateRef | None = None,
+        tier: str | None = None,
     ) -> ModelBinding:
         candidates = self._tiers.candidates(agent_id)
+        if tier is not None:
+            # A role-specific row, falling back to the agent's own row.
+            candidates = self._tiers.roles.get(tier, candidates)
         if avoid is not None:
             # Prefer a model other than the producer's, keeping it as a fallback.
             candidates = (
@@ -636,7 +650,7 @@ class PhoenixRuntime:
                 ),
             )
             assignments = await ModelStepAssignmentResponder(
-                self._control("phoenix", health, evidence),
+                self._control("phoenix", health, evidence, tier="assignment"),
                 self._guard,
                 allowed_domains=self._domains,
             ).assign(plan)
