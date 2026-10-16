@@ -1,6 +1,6 @@
 # PHX-047 — Grounded document verification
 
-Status: IN_PROGRESS (the exact `phoenix-prompts-v3` text awaits owner approval in the PR; the round-5 sentence is a candidate pending owner approval)
+Status: DONE (`phoenix-prompts-v3` approved by the owner 2026-10-16, including the round-5 sentence; live acceptance 3/5 accepted, with remaining variance assigned to PHX-109)
 Phase: 4 — Tools, Permissions & Security (integration)
 Branch: `feature/PHX-047-grounded-document-verification` (local commits only)
 Base: main `47bb91e` (includes PHX-046)
@@ -75,7 +75,7 @@ Recorded in ADR-083.
 | 9 | Assignment tier (round 3) | `default_tier_table` gains an `assignment` row: qwen3.5:9b, then 4b, then 2b. The agent ID stays `phoenix`, and a table without the row falls back to `phoenix`. PHOENIX direct stays on 4b. The verifier still prefers a non-producer model. |
 | 10 | Lenient check objects (round 4) | Every LEVI role (`verifier`, `step_verifier`, `document_verifier`, `final_verifier`) drops unknown keys in each check, unread. Required keys keep strict types. The top level stays strict: one object, only a non-empty `checks` list, within `max_checks`. This is implemented in `tool_steps.py`, because `responders.py` is frozen. Planner and assignment stay strict. |
 | 11 | Grounded intermediate text steps (round 4) | A text step that received earlier verified outputs is verified by the new `PHOENIX ROLE: step_verifier` (`STEP_VERIFICATION_SYSTEM`, task `STEP_CANDIDATE_TASK`). It receives those outputs as guarded `MODEL_OUTPUT` items. A text step with no earlier outputs keeps the byte-identical `VERIFICATION_SYSTEM`. The acceptance bar stays at 4 of 5 runs. |
-| 12 | Step-scoped format (round 5, **pending owner approval**) | `DOCUMENT_VERIFICATION_SYSTEM` and `STEP_VERIFICATION_SYSTEM` gain one sentence before the reply-format paragraph: "The original request's output format (for example "reply with only ...") applies to PHOENIX's final answer, not to this step; do not fail this step for wording or format beyond its expected output and completion rule." `FINAL_VERIFICATION_SYSTEM`, `VERIFICATION_SYSTEM` and every other constant are unchanged. |
+| 12 | Step-scoped format (round 5, approved by the owner 2026-10-16) | `DOCUMENT_VERIFICATION_SYSTEM` and `STEP_VERIFICATION_SYSTEM` gain one sentence before the reply-format paragraph: "The original request's output format (for example "reply with only ...") applies to PHOENIX's final answer, not to this step; do not fail this step for wording or format beyond its expected output and completion rule." `FINAL_VERIFICATION_SYSTEM`, `VERIFICATION_SYSTEM` and every other constant are unchanged. |
 
 ## Implementation
 
@@ -148,8 +148,26 @@ commit SHAs.
 - Round 2: implementation `73a4f007fab4cf65d4e504e5503fbbec588bdf80`, pin `ac37229`.
 - Round 3: implementation `e47834a3e82d8f10dfde8479c89cea20aa5d369a`, pin `cdf3b9b`.
 - Round 4: implementation `327f4e4abc746b5d0b6d4d9faf8066b3360689a6`, pin `4d634bd`.
-- Round 5 (candidate, pending owner approval): implementation `47aa471712c6c5ea3452cf5a45c3ed390470e185`, which `PHX_047_COMMIT` now pins (followed by its pin commit).
+- Round 5 (owner-approved 2026-10-16): implementation `47aa471712c6c5ea3452cf5a45c3ed390470e185`, which `PHX_047_COMMIT` now pins (followed by its pin commit).
 
-The prompt text awaits owner approval. The live smoke run
-(`scripts/phoenix_mission_smoke.py`, unchanged: it already reports the prompt set
-version from the trace) is pending.
+**Owner approval (2026-10-16).** The owner approved the `phoenix-prompts-v3` text, including the round-5 sentence, and accepted PHX-047 at 3 of 5 live passes. The remaining variance goes to PHX-109 (MAHORAGA bounded retries), where it will be measured again.
+
+**Live acceptance** (`scripts/phoenix_mission_smoke.py`, BLAZE-6). Conditions: AC power, RTX 3050 on CUDA, Ollama 0.40.4 desktop app, 16K context. Evidence is under `validation/PHX-047-acceptance-*`. Rounds 3 to 5 used the owner's 4-of-5 bar.
+
+| Round | Result | Notes |
+| --- | --- | --- |
+| 3 | 2/5 | Assignment misroutes, a step truncated by thinking, ungrounded final LEVI. |
+| 4 | 3/5 and 2/4 | Extra keys and two-step grounding fixed. The intermediate verifiers enforced the user's "reply with only" format, and three empty `{"assignments": []}` outputs appeared near Ollama `llm server error` model reloads. |
+| 5 | 3/5 | Run r2: planner JSON failed the schema. Run r5: the document verifier failed a correct sentence. |
+
+**Not affected by these failures:**
+- **Explicit failures:** every failure ended as an explicit `failed` with a coded reason.
+- **Correct answers:** every completed mission returned the correct answer, verified by grounded LEVI checks. No wrong answer was ever reported as verified (INV-008).
+
+**8-run diagnostic** (raw outputs printed locally, harmless smoke text only):
+- Bare "42" step answers always passed.
+- Sentence answers failed about half the time, until the round-5 sentence.
+
+**Follow-ups:**
+- PHX-109: bounded retries per failure class.
+- Schema-constrained decoding (Ollama `format`): a later provider ticket.

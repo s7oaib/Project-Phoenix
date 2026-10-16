@@ -3578,7 +3578,7 @@ thread may still finish in the background. No new dependencies.
 
 ## ADR-083 — Grounded LEVI verification for document steps and final answers
 
-Status: Accepted (the exact `phoenix-prompts-v3` text awaits owner approval in the PR; the round-5 sentence is a candidate pending owner approval)
+Status: Accepted (`phoenix-prompts-v3`, including the round-5 sentence, approved by the owner 2026-10-16; live acceptance 3/5 accepted, with remaining variance assigned to PHX-109)
 Date: 2026-10-16
 Ticket: PHX-047
 
@@ -3780,7 +3780,7 @@ Live evidence, round 5 (2026-10-16, on `4d634bd`): acceptance batch 1 passed 3 o
   server error" model reloads. It fails explicitly as `schema`; no change here,
   and PHX-109 owns retries.
 
-Candidate decision, round 5 (**pending owner approval**):
+Decision, round 5 (approved by the owner 2026-10-16):
 
 - **Step-scoped format.** `DOCUMENT_VERIFICATION_SYSTEM` and
   `STEP_VERIFICATION_SYSTEM` each gain one sentence, placed before the

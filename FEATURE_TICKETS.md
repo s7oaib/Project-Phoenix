@@ -50,7 +50,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-044 Terminal tool — DONE
 - PHX-045 Secrets boundary — DONE
 - PHX-046 Permissioned tool steps in mission runtime — DONE
-- PHX-047 Grounded document verification — IN_PROGRESS
+- PHX-047 Grounded document verification — DONE
 
 ## Phase 5 — Computer & Web
 - PHX-050 Playwright browser tool — DONE
