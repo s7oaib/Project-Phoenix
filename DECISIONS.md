@@ -3578,7 +3578,7 @@ thread may still finish in the background. No new dependencies.
 
 ## ADR-083 — Grounded LEVI verification for document steps and final answers
 
-Status: Accepted (the exact `phoenix-prompts-v3` text awaits owner approval in the PR)
+Status: Accepted (the exact `phoenix-prompts-v3` text awaits owner approval in the PR; the round-5 sentence is a candidate pending owner approval)
 Date: 2026-10-16
 Ticket: PHX-047
 
@@ -3765,6 +3765,32 @@ Owner decisions, round 4 (2026-10-16):
   nothing new reaches the trace. This is `StepVerificationResponder` in
   `tool_steps.py`.
 - **Acceptance bar.** The live acceptance bar stays at 4 of 5 runs.
+
+Live evidence, round 5 (2026-10-16, on `4d634bd`): acceptance batch 1 passed 3 of
+5, batch 2 passed 2 of 4 counted runs, and an 8-run diagnostic passed 5 of 8.
+- **Request format enforced on a step.** Two diagnostic failures (runs 3 and 7)
+  had the same cause. The `document_answer` was a correct sentence ("The magic
+  number stated in the file is 42."). The `document_verifier` failed it, quoting
+  the original request's "reply with only the magic number". That format rule
+  belongs to PHOENIX's final answer, but intermediate verifiers see the original
+  request and enforced it on the step. Bare `42` step answers always passed.
+- **Empty assignment.** An occasional `{"assignments": []}` (19 characters)
+  appeared 3 times, each on the first call in a fresh process near Ollama "llm
+  server error" model reloads. It fails explicitly as `schema`; no change here,
+  and PHX-109 owns retries.
+
+Candidate decision, round 5 (**pending owner approval**):
+
+- **Step-scoped format.** `DOCUMENT_VERIFICATION_SYSTEM` and
+  `STEP_VERIFICATION_SYSTEM` each gain one sentence, placed before the
+  reply-format paragraph and reflowed to the existing wrapping:
+
+  > The original request's output format (for example "reply with only ...") applies to PHOENIX's final answer, not to this step; do not fail this step for wording or format beyond its expected output and completion rule.
+
+  `FINAL_VERIFICATION_SYSTEM`, the text `VERIFICATION_SYSTEM` and every other
+  constant are unchanged, so the final verifier still enforces the user's
+  format. Tests pin the sentence in both prompts, its absence from the final and
+  text verifiers, and the hashes of the unchanged v3 additions.
 
 Limitations:
 - LEVI's model now judges file-derived facts and step-derived final answers, so a

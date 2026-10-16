@@ -1,6 +1,6 @@
 # PHX-047 — Grounded document verification
 
-Status: IN_PROGRESS (the exact `phoenix-prompts-v3` text awaits owner approval in the PR)
+Status: IN_PROGRESS (the exact `phoenix-prompts-v3` text awaits owner approval in the PR; the round-5 sentence is a candidate pending owner approval)
 Phase: 4 — Tools, Permissions & Security (integration)
 Branch: `feature/PHX-047-grounded-document-verification` (local commits only)
 Base: main `47bb91e` (includes PHX-046)
@@ -47,6 +47,12 @@ Make a live document mission complete reliably:
 - **Ungrounded s2.** Two-step plans (s1 reads the file, s2 "state the number" in a text domain) failed at s2. The text `verifier` had no evidence and failed a correct `42` as unverifiable.
 - **Provider drop.** One transient `provider_unavailable` stays a failure; PHX-109 owns retries.
 
+### Round 5 (on `4d634bd`)
+
+- **Pass rates.** Acceptance batch 1 passed 3 of 5; batch 2 passed 2 of 4 counted runs; an 8-run diagnostic passed 5 of 8.
+- **Diagnostic failures (runs 3 and 7).** The `document_answer` was a correct sentence ("The magic number stated in the file is 42."). The `document_verifier` failed it for breaking the original request's "reply with only the magic number". That rule applies only to PHOENIX's final answer. Bare `42` step answers always passed.
+- **Empty assignment.** An occasional `{"assignments": []}` (19 characters) appeared on the first call in a fresh process near Ollama "llm server error" model reloads, 3 times. It fails explicitly as `schema`. No change is needed here; PHX-109 owns retries.
+
 ## Authoritative documents
 
 - `/AGENTS.md`, `/INVARIANTS.md` (INV-008, INV-017, INV-021)
@@ -69,6 +75,7 @@ Recorded in ADR-083.
 | 9 | Assignment tier (round 3) | `default_tier_table` gains an `assignment` row: qwen3.5:9b, then 4b, then 2b. The agent ID stays `phoenix`, and a table without the row falls back to `phoenix`. PHOENIX direct stays on 4b. The verifier still prefers a non-producer model. |
 | 10 | Lenient check objects (round 4) | Every LEVI role (`verifier`, `step_verifier`, `document_verifier`, `final_verifier`) drops unknown keys in each check, unread. Required keys keep strict types. The top level stays strict: one object, only a non-empty `checks` list, within `max_checks`. This is implemented in `tool_steps.py`, because `responders.py` is frozen. Planner and assignment stay strict. |
 | 11 | Grounded intermediate text steps (round 4) | A text step that received earlier verified outputs is verified by the new `PHOENIX ROLE: step_verifier` (`STEP_VERIFICATION_SYSTEM`, task `STEP_CANDIDATE_TASK`). It receives those outputs as guarded `MODEL_OUTPUT` items. A text step with no earlier outputs keeps the byte-identical `VERIFICATION_SYSTEM`. The acceptance bar stays at 4 of 5 runs. |
+| 12 | Step-scoped format (round 5, **pending owner approval**) | `DOCUMENT_VERIFICATION_SYSTEM` and `STEP_VERIFICATION_SYSTEM` gain one sentence before the reply-format paragraph: "The original request's output format (for example "reply with only ...") applies to PHOENIX's final answer, not to this step; do not fail this step for wording or format beyond its expected output and completion rule." `FINAL_VERIFICATION_SYSTEM`, `VERIFICATION_SYSTEM` and every other constant are unchanged. |
 
 ## Implementation
 
@@ -113,6 +120,10 @@ All tests are offline and use the scripted provider. There are no new test files
     - extras cannot pass a failed check;
     - a missing key, a wrong type, a blank summary, a top-level `verdict`, zero or seven checks, a non-list `checks`, or a bare list fails as `schema`/`not_json`.
   - **Step verifier (round 4).** s1 (no earlier outputs) uses the unchanged `VERIFICATION_SYSTEM`, with only objective and candidate. s2 uses `step_verifier`, with `objective`, `s1` and `candidate`, all `model_output`.
+  - **Step-scoped format (round 5).**
+    - The sentence is in the document and step verifier prompts, before the reply-format paragraph.
+    - It is absent from the final and text verifier prompts.
+    - The unchanged v3 additions are hash-pinned.
   - **Tier table (round 3).** `assignment` is 9b, then 4b, then 2b; `phoenix` stays 4b, then 2b. A table without an `assignment` row uses the `phoenix` row, and the direct path stays on 4b.
   - **Token caps (round 3).** `specialist` and `final_answer` requests carry 4096. `direct`, `planner`, `assignment`, `verifier` and `final_verifier` carry 2048. An oversized specialist answer is still `oversized`.
 - `tests/test_phoenix_mission_e2e.py` (round 4): the s2 `step_verifier` gets s1 exactly as s2 saw it, and never the tool output. `document_verifier` drops unknown check keys.

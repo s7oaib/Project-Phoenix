@@ -1082,3 +1082,38 @@ def test_text_step_with_earlier_outputs_uses_the_grounded_step_verifier() -> Non
     assert {i["origin"] for i in items} == {"model_output"}
     assert items[1]["text"] == "Step one says 100."
     assert "Step one says" not in head
+
+
+STEP_FORMAT_RULE = (
+    'The original request\'s output format (for example "reply with only ...")'
+    " applies to PHOENIX's final answer, not to this step; do not fail this step"
+    " for wording or format beyond its expected output and completion rule."
+)
+# First 128 bits of the sha256 of v3 constants that round 5 must not change.
+V3_UNCHANGED_SHA256 = {
+    "FINAL_VERIFICATION_SYSTEM": "256fc490cea9b088f4c17a2a2b7725ce",
+    "DOCUMENT_CANDIDATE_TASK": "2830fab9c04feae3e60ddcd47490adb4",
+    "FINAL_CANDIDATE_TASK": "ac2d9a15dfd21aca8d4ad986622a4a48",
+    "STEP_CANDIDATE_TASK": "0307aa1a13c3b32ac3f7818d4dac4f29",
+}
+
+
+def test_intermediate_verifiers_do_not_enforce_the_final_answer_format() -> None:
+    # PHX-047 round 5 (ADR-083, pending owner approval): only the document and
+    # step verifiers say the request's output format is the final answer's.
+    def flat(text: str) -> str:
+        return " ".join(text.split())
+
+    for system in (
+        prompts.DOCUMENT_VERIFICATION_SYSTEM,
+        prompts.STEP_VERIFICATION_SYSTEM,
+    ):
+        assert flat(system).count(STEP_FORMAT_RULE) == 1
+        # The sentence sits just before the reply-format paragraph.
+        assert flat(system).index(STEP_FORMAT_RULE) < flat(system).index(
+            "Reply with exactly one JSON object"
+        )
+    for system in (prompts.FINAL_VERIFICATION_SYSTEM, prompts.VERIFICATION_SYSTEM):
+        assert "applies to PHOENIX's final answer" not in flat(system)
+    for name, digest in V3_UNCHANGED_SHA256.items():
+        assert digest_of(getattr(prompts, name)) == digest, name
