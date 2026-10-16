@@ -1714,9 +1714,9 @@ PHX_017_PATHS = ("phoenix/models/ollama.py",)
 # commit 95c5afad908933ea92ab61c6c2e5b86fdd04e0e0. PHX-047 (ADR-083)
 # intentionally changed both again, plus tool_steps.py (frozen at origin/main
 # since PHX-046 merged); all three stay pinned, at the latest PHX-047
-# implementation commit (round 2; round 1 was f600f12), so each path has
-# exactly one baseline.
-PHX_047_COMMIT = "73a4f007fab4cf65d4e504e5503fbbec588bdf80"
+# implementation commit (round 3; earlier rounds were f600f12 and 73a4f00),
+# so each path has exactly one baseline.
+PHX_047_COMMIT = "e47834a3e82d8f10dfde8479c89cea20aa5d369a"
 PHX_047_PATHS = (
     "phoenix/agents/prompts.py",
     "phoenix/agents/runtime.py",
