@@ -3683,6 +3683,9 @@ Host and Origin are checked, and there is no CORS for other origins.
   2. **Origin (R5).** Absent, or exactly one of `http://tauri.localhost`,
      `https://tauri.localhost` or `tauri://localhost` (verified in tauri
      2.12.1). Anything else, including `null`, is 403 `forbidden_origin`.
+     This is defence in depth only, not authentication: every Tauri app on
+     Windows sends `http://tauri.localhost`, and a missing Origin is accepted.
+     The token is the real gate.
   3. **Token (R3, R7).** HTTP needs exactly one
      `Authorization: Bearer <token>` (the scheme is case-insensitive); a
      failure is 401 `unauthorized` with `WWW-Authenticate: Bearer`. A WebSocket
