@@ -28,7 +28,8 @@ FastAPI is the local transport layer.
 ## Rules
 
 - Pydantic schemas define contracts.
-- Errors are structured.
+- Errors are structured: `{"error": {"code", "message", "request_id"}}` (PHX-101).
+- Every HTTP request and WebSocket requires the per-launch token, the bound loopback Host and, when present, a Tauri Origin (PHX-101; `docs/09_SECURITY.md`, "Local API").
 - Long work returns task IDs.
 - Live progress goes through events.
 - Privileged operations still pass PermissionEngine.

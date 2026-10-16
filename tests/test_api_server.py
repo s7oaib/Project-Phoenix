@@ -2,13 +2,14 @@
 
 Fakes only: a scripted ModelProvider and SQLite under tmp_path. An autouse guard
 fails any httpx send or outbound socket connection, so no test touches Ollama
-or the network.
+or the network. Since PHX-101 every client presents the token and bound Host.
 """
 
 import asyncio
 import io
 import json
 import os
+import secrets
 import socket
 import subprocess
 import sys
@@ -37,6 +38,7 @@ from phoenix.api.launcher import (
     main,
     parse_options,
 )
+from phoenix.api.security import LocalApiSecurity
 from phoenix.api.server import (
     BackendServices,
     MigrationLockTimeout,
@@ -68,6 +70,9 @@ from phoenix.tools.filesystem import filesystem_tool_definitions
 
 HEAD = "0005_audit_events"
 ROOT = Path(__file__).resolve().parents[1]
+TOKEN = secrets.token_urlsafe(32)
+PORT = 48765  # Host-header identity for in-process clients; nothing binds it
+SECURITY = LocalApiSecurity(TOKEN, host="127.0.0.1", port=PORT)
 SECRET_DETAIL = "internal-detail-http://10.9.8.7:4321/private"
 INSTALLED = ("qwen3.5:4b", "qwen3.5:2b")
 FAST = ServerConfig(probe_timeout_seconds=0.2, startup_timeout_seconds=2)
@@ -185,6 +190,15 @@ def services_engine(settings: AppSettings) -> Iterator[Engine]:
         engine.dispose()
 
 
+def client_for(app: FastAPI) -> TestClient:
+    """An authenticated client presenting the bound loopback Host (PHX-101)."""
+    return TestClient(
+        app,
+        base_url=f"http://127.0.0.1:{PORT}",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+
+
 def services_of(client: TestClient) -> BackendServices:
     services = get_services(client.app)  # type: ignore[arg-type]
     assert services is not None
@@ -193,7 +207,9 @@ def services_of(client: TestClient) -> BackendServices:
 
 def test_construction_is_lazy(settings: AppSettings) -> None:
     fakes = factory()
-    app = build_server_app(settings, config=FAST, provider_factory=fakes)
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=fakes
+    )
     assert fakes.calls == 0
     assert not settings.data_dir.exists()
     assert get_services(app) is None
@@ -204,8 +220,10 @@ def test_construction_is_lazy(settings: AppSettings) -> None:
 
 def test_lifespan_builds_services_once_and_closes_them(settings: AppSettings) -> None:
     fakes = factory()
-    app = build_server_app(settings, config=FAST, provider_factory=fakes)
-    with TestClient(app) as client:
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=fakes
+    )
+    with client_for(app) as client:
         services = services_of(client)
         for _ in range(3):
             assert client.get("/ready").status_code == 200
@@ -226,8 +244,10 @@ def test_lifespan_builds_services_once_and_closes_them(settings: AppSettings) ->
 
 
 def test_startup_migrates_database_to_head(settings: AppSettings) -> None:
-    app = build_server_app(settings, config=FAST, provider_factory=factory())
-    with TestClient(app) as client:
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=factory()
+    )
+    with client_for(app) as client:
         engine = services_of(client).engine
         tables = set(inspect(engine).get_table_names())
         assert {"alembic_version", "memories", "documents", "audit_events"} <= tables
@@ -240,8 +260,10 @@ def test_startup_migrates_database_to_head(settings: AppSettings) -> None:
 
 
 def test_ready_when_provider_and_database_are_healthy(settings: AppSettings) -> None:
-    app = build_server_app(settings, config=FAST, provider_factory=factory())
-    with TestClient(app) as client:
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=factory()
+    )
+    with client_for(app) as client:
         response = client.get("/ready")
     assert response.status_code == 200
     assert response.json() == {
@@ -259,8 +281,10 @@ def test_ready_when_provider_and_database_are_healthy(settings: AppSettings) -> 
 
 def test_missing_tier_models_are_skipped(settings: AppSettings) -> None:
     fakes = factory(models=("qwen3.5:2b",))
-    app = build_server_app(settings, config=FAST, provider_factory=fakes)
-    with TestClient(app) as client:
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=fakes
+    )
+    with client_for(app) as client:
         body = client.get("/ready").json()
     assert body["status"] == "ready"
     assert body["models"] == [{"provider_id": "ollama", "model_id": "qwen3.5:2b"}]
@@ -281,8 +305,10 @@ def test_unhealthy_provider_is_degraded_not_a_crash(
     settings: AppSettings, kwargs: dict[str, object], reported: str
 ) -> None:
     fakes = factory(**kwargs)
-    app = build_server_app(settings, config=FAST, provider_factory=fakes)
-    with TestClient(app) as client:
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=fakes
+    )
+    with client_for(app) as client:
         response = client.get("/ready")
     assert response.status_code == 200
     body = response.json()
@@ -295,8 +321,10 @@ def test_unhealthy_provider_is_degraded_not_a_crash(
 
 def test_hung_provider_probe_is_bounded(settings: AppSettings) -> None:
     fakes = factory(hang=True)
-    app = build_server_app(settings, config=FAST, provider_factory=fakes)
-    with TestClient(app) as client:
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=fakes
+    )
+    with client_for(app) as client:
         started = time.monotonic()
         body = client.get("/ready").json()
         elapsed = time.monotonic() - started
@@ -307,16 +335,20 @@ def test_hung_provider_probe_is_bounded(settings: AppSettings) -> None:
 
 
 def test_no_registered_models_is_degraded(settings: AppSettings) -> None:
-    app = build_server_app(settings, config=FAST, provider_factory=factory(models=()))
-    with TestClient(app) as client:
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=factory(models=())
+    )
+    with client_for(app) as client:
         body = client.get("/ready").json()
     assert body["status"] == "degraded"
     assert body["providers"] == [{"provider_id": "ollama", "status": "healthy"}]
 
 
 def test_database_behind_head_is_unavailable(settings: AppSettings) -> None:
-    app = build_server_app(settings, config=FAST, provider_factory=factory())
-    with TestClient(app) as client:
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=factory()
+    )
+    with client_for(app) as client:
         command.downgrade(migration_config(settings, FAST), "0001")
         response = client.get("/ready")
     assert response.status_code == 503
@@ -329,8 +361,10 @@ def test_readiness_echoes_no_detail_or_url(settings: AppSettings) -> None:
         ollama_base_url="http://127.0.0.1:59999/private-path",
         probe_timeout_seconds=0.2,
     )
-    app = build_server_app(settings, config=config, provider_factory=factory())
-    with TestClient(app) as client:
+    app = build_server_app(
+        settings, security=SECURITY, config=config, provider_factory=factory()
+    )
+    with client_for(app) as client:
         text = client.get("/ready").text
     leaks = (SECRET_DETAIL, "59999", "private", "http://", str(settings.data_dir))
     for secret in leaks:
@@ -339,9 +373,11 @@ def test_readiness_echoes_no_detail_or_url(settings: AppSettings) -> None:
 
 def test_failed_startup_closes_opened_providers(settings: AppSettings) -> None:
     fakes = Factory(FakeProvider(), FakeProvider(provider_id="orphan"))
-    app = build_server_app(settings, config=FAST, provider_factory=fakes)
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=fakes
+    )
     with pytest.raises(PhoenixRuntimeError):
-        with TestClient(app):
+        with client_for(app):
             pass  # pragma: no cover
     assert fakes.default.closed == fakes.structured.closed == 1
     assert get_services(app) is None
@@ -351,16 +387,20 @@ def test_migration_failure_stops_before_providers(settings: AppSettings) -> None
     settings.data_dir.parent.mkdir(parents=True, exist_ok=True)
     settings.data_dir.write_text("not a directory", encoding="utf-8")
     fakes = factory()
-    app = build_server_app(settings, config=FAST, provider_factory=fakes)
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=fakes
+    )
     with pytest.raises(OSError):
-        with TestClient(app):
+        with client_for(app):
             pass  # pragma: no cover
     assert fakes.calls == 0
 
 
 def test_shutdown_cancels_active_missions(settings: AppSettings) -> None:
     fakes = factory()
-    app = build_server_app(settings, config=FAST, provider_factory=fakes)
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=fakes
+    )
 
     async def scenario() -> MissionKind:
         async with app.router.lifespan_context(app):
@@ -492,9 +532,11 @@ def test_migration_lock_wait_is_bounded_and_explicit(settings: AppSettings) -> N
 
 
 def test_interactive_docs_and_schema_are_removed(settings: AppSettings) -> None:
-    app = build_server_app(settings, config=FAST, provider_factory=factory())
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=factory()
+    )
     assert app.openapi_url is None and app.docs_url is None and app.redoc_url is None
-    with TestClient(app) as client:
+    with client_for(app) as client:
         for path in ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"):
             assert client.get(path).status_code == 404
         assert client.get("/ready").status_code == 200
@@ -514,9 +556,11 @@ def test_ready_keeps_one_database_probe_in_flight(
         release.wait(10)
         return real(*args)  # type: ignore[arg-type]
 
-    app = build_server_app(settings, config=FAST, provider_factory=factory())
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=factory()
+    )
     try:
-        with TestClient(app) as client:
+        with client_for(app) as client:
             monkeypatch.setattr(server_module, "database_at_head", hung)
             for _ in range(4):
                 response = client.get("/ready")
@@ -567,6 +611,7 @@ def serve_once(settings: AppSettings) -> Iterator[tuple[io.StringIO, Factory]]:
         server, sock = create_server(
             LaunchOptions(host="127.0.0.1", port=0, data_dir=settings.data_dir),
             settings=settings,
+            token=TOKEN,
             stdout=out,
             config=FAST,
             provider_factory=fakes,

@@ -111,6 +111,14 @@ categories = ["unit", "api_contract"]
 # api_contract: test_health_contract, test_unknown_route
 
 [[file]]
+path = "tests/test_api_security.py"
+categories = ["unit", "integration", "api_contract", "permission_bypass", "secret_leakage"]
+# integration: test_real_launcher_with_stdin_token_serves_securely (launcher + uvicorn + composition root + SQLite)
+# api_contract: test_envelope_for_404_405_422_and_500_never_echoes_input
+# permission_bypass: test_wrong_host_is_forbidden_even_with_token, test_foreign_origin_is_forbidden_even_with_token, test_websocket_rejections_close_before_accept
+# secret_leakage: test_token_never_appears_in_responses_or_logs, test_security_repr_and_host_header_hide_token
+
+[[file]]
 path = "tests/test_api_server.py"
 categories = ["unit", "integration", "api_contract", "migrations"]
 # integration: test_shutdown_cancels_active_missions (composition root + runtime + SQLite)

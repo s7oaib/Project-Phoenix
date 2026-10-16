@@ -1855,6 +1855,8 @@ def test_no_action_persistence_or_dependency_change() -> None:
             ":(exclude)phoenix/api/server.py",
             ":(exclude)phoenix/api/launcher.py",
             ":(exclude)phoenix/api/__main__.py",
+            # PHX-101 (ADR-085) adds the local API security module.
+            ":(exclude)phoenix/api/security.py",
         ],
         cwd=ROOT,
     )
