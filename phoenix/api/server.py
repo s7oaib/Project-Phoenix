@@ -3,11 +3,12 @@
 build_server_app() wraps the transport from create_app() with a lifespan that
 migrates SQLite to head, builds every backend service exactly once, keeps them in
 one typed container on ``app.state.phoenix`` and closes them on exit. The only
-route added is ``GET /ready``; the interactive docs and OpenAPI schema are
-removed. Migrations run under an exclusive, bounded data-directory lock.
-Readiness probes are bounded, with at most one database check in flight; a
-failing provider reports as unavailable and the backend as degraded, never as a
-crash (INV-021, INV-022). No filesystem workspace is configured here (PHX-108).
+route added is ``GET /ready``, and every route requires local API security
+(PHX-101); the interactive docs and OpenAPI schema are removed. Migrations run
+under an exclusive, bounded data-directory lock. Readiness probes are bounded,
+with at most one database check in flight; a failing provider reports as
+unavailable and the backend as degraded, never as a crash (INV-021, INV-022). No
+filesystem workspace is configured here (PHX-108).
 """
 
 import asyncio
@@ -33,6 +34,7 @@ from alembic import command
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.runtime import ModelTierTable, PhoenixRuntime, default_tier_table
 from phoenix.api.app import create_app
+from phoenix.api.security import LocalApiSecurity, install_local_api_security
 from phoenix.core.config import AppSettings
 from phoenix.core.event_bus import EventBus
 from phoenix.models.lifecycle import ModelLifecycleManager
@@ -452,14 +454,20 @@ def _remove_interactive_docs(app: FastAPI) -> None:
 def build_server_app(
     settings: AppSettings,
     *,
+    security: LocalApiSecurity,
     config: ServerConfig | None = None,
     provider_factory: ProviderFactory | None = None,
 ) -> FastAPI:
-    """create_app() plus the owning lifespan and GET /ready; no other routes."""
+    """create_app() plus the owning lifespan and GET /ready; no other routes.
+
+    Local API security is mandatory (PHX-101): every route, including /health
+    and /ready, requires the bound Host, an allowed Origin and the token.
+    """
     options = ServerConfig() if config is None else config
     factory = ollama_providers if provider_factory is None else provider_factory
     app = create_app()
     _remove_interactive_docs(app)
+    install_local_api_security(app, security)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

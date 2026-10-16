@@ -1,12 +1,19 @@
 """``python -m phoenix.api``: loopback-only backend entrypoint (PHX-100, ADR-084).
 
-The launcher refuses non-loopback hosts, binds the socket itself (port 0 asks the
-OS for a free port), serves the composition root with uvicorn and, once startup
-has finished, writes exactly one JSON line to stdout for the desktop shell:
-``{"event": "phoenix.backend.ready", "host": ..., "port": ..., "pid": ...,
-"version": ...}``. Logs go to stderr; the access log and proxy headers are off.
-SIGINT, SIGTERM and Windows CTRL_BREAK shut down gracefully, cancelling active
-missions first.
+The launcher:
+
+- refuses non-loopback hosts;
+- reads the per-launch API token as one line on stdin (PHX-101, ADR-085),
+  never from argv or the environment, and exits with code 2 before binding if
+  no valid token arrives within 10 s;
+- binds the socket itself (port 0 asks the OS for a free port) and serves the
+  composition root with uvicorn;
+- once startup has finished, writes exactly one JSON line to stdout for the
+  desktop shell: ``{"event": "phoenix.backend.ready", "host": ..., "port": ...,
+  "pid": ..., "version": ...}``.
+
+Logs go to stderr; the access log and proxy headers are off. SIGINT, SIGTERM and
+Windows CTRL_BREAK shut down gracefully, cancelling active missions first.
 """
 
 import argparse
@@ -15,6 +22,7 @@ import logging
 import os
 import socket
 import sys
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib.metadata import version
@@ -24,6 +32,12 @@ from typing import TextIO
 import uvicorn
 from fastapi import FastAPI
 
+from phoenix.api.security import (
+    LOOPBACK_HOSTS,
+    LocalApiSecurity,
+    TokenError,
+    parse_token,
+)
 from phoenix.api.server import (
     ProviderFactory,
     ServerConfig,
@@ -33,15 +47,16 @@ from phoenix.api.server import (
 )
 from phoenix.core.config import AppSettings
 
-LOOPBACK_HOSTS = ("127.0.0.1", "::1")
 DEFAULT_PORT = 0
 READY_EVENT = "phoenix.backend.ready"
 GRACEFUL_SHUTDOWN_SECONDS = 10
+TOKEN_TIMEOUT_SECONDS = 10.0
+MAX_TOKEN_LINE = 1024
 EXIT_USAGE = 2
 
 
 class LaunchError(Exception):
-    """A launch refusal whose message is safe to print."""
+    """A launch refusal whose message is safe to print (never the token)."""
 
 
 @dataclass(frozen=True)
@@ -74,7 +89,10 @@ def _port(value: str) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m phoenix.api",
-        description="Run the PHOENIX backend on a loopback address.",
+        description=(
+            "Run the PHOENIX backend on a loopback address. The per-launch API"
+            " token is read as one line on stdin."
+        ),
     )
     parser.add_argument("--host", default=LOOPBACK_HOSTS[0], help="127.0.0.1 or ::1")
     parser.add_argument(
@@ -89,6 +107,27 @@ def parse_options(argv: Sequence[str] | None = None) -> LaunchOptions:
     return LaunchOptions(
         host=require_loopback(args.host), port=args.port, data_dir=args.data_dir
     )
+
+
+def read_token(stream: TextIO, timeout: float = TOKEN_TIMEOUT_SECONDS) -> str:
+    """One bounded line from the parent; errors never include what was read."""
+    received: list[str] = []
+
+    def read() -> None:
+        try:
+            received.append(stream.readline(MAX_TOKEN_LINE))
+        except (AttributeError, OSError, ValueError):
+            received.append("")  # no usable stdin counts as no token
+
+    reader = threading.Thread(target=read, name="phoenix-token-reader", daemon=True)
+    reader.start()
+    reader.join(timeout)
+    if not received or not received[0].strip():
+        raise LaunchError(f"No API token on stdin within {timeout:g} s; not starting")
+    try:
+        return parse_token(received[0])
+    except TokenError as error:
+        raise LaunchError(f"{error}; not starting") from None
 
 
 def load_settings(options: LaunchOptions) -> AppSettings:
@@ -158,12 +197,24 @@ def create_server(
     options: LaunchOptions,
     *,
     settings: AppSettings,
+    token: str,
     stdout: TextIO,
     config: ServerConfig | None = None,
     provider_factory: ProviderFactory | None = None,
 ) -> tuple[PhoenixServer, socket.socket]:
+    """Bind, then build the app secured for the real bound host:port."""
     sock = bind_loopback(options.host, options.port)
-    app = build_server_app(settings, config=config, provider_factory=provider_factory)
+    try:
+        port = int(sock.getsockname()[1])
+        app = build_server_app(
+            settings,
+            security=LocalApiSecurity(token, host=options.host, port=port),
+            config=config,
+            provider_factory=provider_factory,
+        )
+    except BaseException:
+        sock.close()
+        raise
     server = PhoenixServer(
         uvicorn.Config(
             app,
@@ -184,20 +235,26 @@ def create_server(
 def main(
     argv: Sequence[str] | None = None,
     *,
+    stdin: TextIO | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
+    token_timeout: float = TOKEN_TIMEOUT_SECONDS,
 ) -> int:
+    source = sys.stdin if stdin is None else stdin
     out = sys.stdout if stdout is None else stdout
     err = sys.stderr if stderr is None else stderr
     try:
-        options = parse_options(argv)
+        options = parse_options(argv)  # host refusal precedes reading the token
+        token = read_token(source, token_timeout)
     except LaunchError as error:
         err.write(f"phoenix.api: {error}\n")
         return EXIT_USAGE
     logging.basicConfig(
         stream=err, level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
     )
-    server, sock = create_server(options, settings=load_settings(options), stdout=out)
+    server, sock = create_server(
+        options, settings=load_settings(options), token=token, stdout=out
+    )
     try:
         server.run(sockets=[sock])
     except KeyboardInterrupt:
