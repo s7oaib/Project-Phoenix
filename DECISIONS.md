@@ -3806,3 +3806,141 @@ Limitations:
   deadlines still bound it.
 
 No new dependencies.
+
+## ADR-084 — Backend composition root and loopback entrypoint
+
+Status: Accepted (PHX-100; the owner confirmed recommendations R1–R9 on 2026-10-16)
+Date: 2026-10-16
+Ticket: PHX-100
+
+ADR-083 is reserved by the unmerged PHX-047 branch.
+
+- **New modules only.** `phoenix/api/server.py`, `phoenix/api/launcher.py` and
+  `phoenix/api/__main__.py` compose the existing services, with no edit to any
+  existing `phoenix/`, `alembic/` or `apps/` file. `create_app()` stays
+  subsystem-free. The two `git diff origin/main` guards
+  (`tests/test_screenshot_vision_loop.py`, `tests/test_windows_ui_automation.py`)
+  exclude exactly these three new paths, each by name.
+- **Composition root.** `build_server_app(settings, *, config, provider_factory)`
+  returns `create_app()` plus a lifespan and `GET /ready`. The lifespan:
+  - migrates SQLite to the Alembic head (R1) under an OS-level exclusive lock
+    file in the data directory (`phoenix.migrate.lock`; `msvcrt.locking` on
+    Windows, `fcntl.flock` elsewhere). SQLite DDL is not transactional, so
+    concurrent upgrades could otherwise interleave and leave a half-applied
+    schema. The wait is bounded (`migration_lock_timeout_seconds`, default
+    30 s) and a timeout fails startup explicitly with `MigrationLockTimeout`
+    (INV-021);
+  - builds the engine and session factory, the default agent registry, the tier
+    table, `ModelCapabilityRegistry` and `ModelLifecycleManager` (capacity 1,
+    INV-023);
+  - builds the default `OllamaProvider` and a `think=False` structured twin
+    (ADR-080);
+  - builds `EventBus`, a `ToolRegistry` of the filesystem definitions (R7),
+    `PermissionPolicy()`, `AuditTrail` and `PhoenixRuntime`.
+
+  Each is built once and held in the frozen `BackendServices` container on
+  `app.state.phoenix`. Tier models are registered once at startup, for healthy
+  providers only, and missing models are skipped (R6). No FilesystemTool
+  workspace is configured (PHX-108). On exit, the lifespan cancels active
+  missions, closes the providers and disposes of the engine. A failed startup
+  closes whatever it had opened. The lock serializes migrations only: a second
+  backend instance on the same data directory is still possible, and PHX-106
+  owns single-instance enforcement.
+- **Surface.** `/docs`, `/redoc`, `/openapi.json` and the OAuth2 redirect are
+  removed from the server app (`create_app()` itself is frozen and unchanged).
+- **Readiness.** `GET /ready` returns `ready`, `degraded` or `unavailable`,
+  with:
+  - per-provider IDs and statuses;
+  - the registered (provider, model) pairs;
+  - `database.at_head`.
+
+  Provider probes and the database check are bounded (default 2 s). At most
+  one database check is in flight: a timed-out `to_thread` worker keeps
+  running, so later calls share it instead of filling the executor. Any
+  provider error, mismatch or timeout reports that provider as `unavailable`,
+  and the backend as `degraded` (HTTP 200), not a crash (INV-021, INV-022).
+  `unavailable` (HTTP 503) means the services are not built or the database is
+  not at head. Besides statuses and IDs, only the PHOENIX version is
+  returned; provider URLs, provider versions, health details and paths are
+  never echoed.
+- **Entrypoint.** `python -m phoenix.api [--host] [--port] [--data-dir]`:
+  - Only `127.0.0.1` or `::1` is accepted; anything else exits with code 2
+    before binding.
+  - `--port` defaults to 0, an OS-assigned port (R2). 8000 is Colibri's port,
+    and `AppSettings.api_host` and `api_port` are not read.
+  - The launcher pre-binds the socket, exclusively on Windows (R3), and runs
+    uvicorn programmatically with lifespan `on`, proxy headers off, the access
+    log off and logs on stderr (R9).
+  - Once startup has finished, it writes exactly one stdout line:
+    `{"event":"phoenix.backend.ready","host":...,"port":N,"pid":P,"version":...}`.
+  - SIGINT, SIGTERM and CTRL_BREAK shut down through uvicorn. Active missions
+    are cancelled before connections drain (R8; INV-019), and the drain is
+    bounded to 10 s. The drain runs even if cancellation raises.
+- **Config.** `ServerConfig` (new) holds the Ollama base URL, the probe
+  timeouts and the migration-lock timeout, because `AppSettings` is frozen
+  (R4).
+
+Open: migrations are not packaged in the wheel (Q1); model registration after
+startup (Q2); real-uvicorn WebSocket support needs a new dependency (Q3);
+parent-death detection (Q4). No new dependencies.
+
+## ADR-085 — Local API security: loopback, per-launch token, Host and Origin checks
+
+Status: Accepted (owner decision 2026-10-16; the owner confirmed details R1–R10
+on 2026-10-16)
+Date: 2026-10-16
+Ticket: PHX-101
+
+**Owner decision.** The backend binds loopback only. The Tauri shell hands it a
+fresh secret on every launch, which every HTTP request and WebSocket must carry.
+Host and Origin are checked, and there is no CORS for other origins.
+
+- **Token handoff (R1, R2).** The token is one stdin line, read within 10 s and
+  at most 1024 characters. It is URL-safe base64 without padding, 43–512
+  characters, and decodes to at least 32 bytes. It is never passed in argv or
+  the environment. The host is validated before the token is read. A missing
+  or malformed token exits with code 2 before binding, and the message never
+  contains the token. There is deliberately **no** `--dev-insecure` flag;
+  developers pipe in a generated token.
+- **Enforcement point.** `phoenix/api/security.py` (new) adds pure ASGI
+  middleware covering HTTP and WebSocket scopes, before routing. Every route is
+  covered, including `/health`, `/ready` and unknown paths.
+  `build_server_app(settings, *, security, ...)` now *requires* a
+  `LocalApiSecurity` (R9). `create_app()` is unchanged.
+- **Checks, in order.**
+  1. **Host (R4).** Exactly one `Host`, equal to the bound literal
+     `127.0.0.1:<port>` or `[::1]:<port>`. Anything else is 403
+     `forbidden_host`, which defeats DNS rebinding.
+  2. **Origin (R5).** Absent, or exactly one of `http://tauri.localhost`,
+     `https://tauri.localhost` or `tauri://localhost` (verified in tauri
+     2.12.1). Anything else, including `null`, is 403 `forbidden_origin`.
+     This is defence in depth only, not authentication: every Tauri app on
+     Windows sends `http://tauri.localhost`, and a missing Origin is accepted.
+     The token is the real gate.
+  3. **Token (R3, R7).** HTTP needs exactly one
+     `Authorization: Bearer <token>` (the scheme is case-insensitive); a
+     failure is 401 `unauthorized` with `WWW-Authenticate: Bearer`. A WebSocket
+     must offer `phoenix.v1` and exactly one `phoenix.auth.<token>`
+     subprotocol. A failure closes it with 1008 *before accept*.
+     `accept_websocket()` re-checks (failing closed when no security is
+     installed) and echoes only `phoenix.v1`. The comparison is always
+     `hmac.compare_digest` on bytes.
+- **No CORS (R6).** No CORS middleware is installed, for any origin. The
+  webview therefore cannot `fetch` the backend directly. The recommendation for
+  PHX-106 and PHX-107 is that the Rust shell keeps the token and proxies HTTP
+  and WebSocket traffic, so the token never enters webview JavaScript. The
+  alternative, an exact-origin CORS allowlist for the Tauri origins only, needs
+  an owner decision.
+- **Errors (R8).** `{"error": {"code", "message", "request_id"}}` for 401, 403,
+  404, 405, 422, other HTTP errors and 500. Messages are fixed text; input,
+  header values and exception details are never echoed. `request_id` is a
+  server-generated `uuid4().hex`, also sent as `X-Request-ID`; a client-supplied
+  ID is ignored.
+- **Secrets (R10).** The token is held as bytes, the `repr` is redacted, and the
+  token is never logged. The access log and proxy-header trust stay off
+  (ADR-084).
+- **Guards.** The two `git diff origin/main` guards also exclude
+  `phoenix/api/security.py` by name.
+
+Open: the dev-mode Vite origin (Q1); the webview transport, proxy or CORS (Q2);
+no in-process token rotation (Q3). No new dependencies.

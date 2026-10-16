@@ -1850,6 +1850,13 @@ def test_no_action_persistence_or_dependency_change() -> None:
             "phoenix/tools/terminal.py",
             ":(exclude)apps/desktop/src/App.tsx",
             ":(exclude)apps/desktop/src/styles.css",
+            # PHX-100 (ADR-084) adds these new modules; every file that existed
+            # in phoenix/api stays protected.
+            ":(exclude)phoenix/api/server.py",
+            ":(exclude)phoenix/api/launcher.py",
+            ":(exclude)phoenix/api/__main__.py",
+            # PHX-101 (ADR-085) adds the local API security module.
+            ":(exclude)phoenix/api/security.py",
         ],
         cwd=ROOT,
     )
