@@ -3646,8 +3646,9 @@ Owner decisions (2026-10-16):
   `PHX_047_PATHS`), so each path keeps exactly one baseline and any further
   change still fails. Round 1 pinned
   `f600f122b2715260384db47b63bd7c07172919b1`; round 2 re-pinned to
-  `73a4f007fab4cf65d4e504e5503fbbec588bdf80`; round 3 re-pins to
-  `e47834a3e82d8f10dfde8479c89cea20aa5d369a`. As in ADR-082, each
+  `73a4f007fab4cf65d4e504e5503fbbec588bdf80`; round 3 re-pinned to
+  `e47834a3e82d8f10dfde8479c89cea20aa5d369a`; round 4 re-pins to
+  `327f4e4abc746b5d0b6d4d9faf8066b3360689a6`. As in ADR-082, each
   implementation commit is followed by its pin commit, and the PR must merge
   with a merge commit so the pinned SHA stays reachable from main.
 - **Privacy.** Tool output still never enters `MissionTrace`, errors or logs:
