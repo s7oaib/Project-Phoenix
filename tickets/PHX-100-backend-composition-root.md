@@ -142,4 +142,19 @@ New `tests/test_api_server.py`, mapped in `tests/matrix.toml` as `unit, integrat
 
 ## Completion evidence
 
-See the bottom of this file once implemented.
+- **Changed files.**
+  - New: `phoenix/api/server.py`, `phoenix/api/launcher.py`, `phoenix/api/__main__.py`, `tests/test_api_server.py`, this ticket.
+  - Edited: `tests/test_screenshot_vision_loop.py` and `tests/test_windows_ui_automation.py` (three named `:(exclude)` pathspecs each, with a reason comment), `tests/matrix.toml`, `DECISIONS.md` (ADR-084), `docs/13_API_CONTRACTS.md` (`GET /ready`), `FEATURE_TICKETS.md` (Phase 10).
+- **Frozen files.** No existing `phoenix/`, `alembic/`, `apps/`, `pyproject.toml` or `uv.lock` file changed, and `tests/test_api.py` is unchanged. The guard tests pass with the exclusions.
+- **Targeted checks (implementation commit `00cfbf0`).**
+  - `pytest tests/test_api_server.py tests/test_api.py tests/test_persistence.py tests/test_bootstrap.py` plus the three frozen-file guard tests: 64 passed.
+  - `ruff check`, `ruff format --check` and `mypy --strict` on `phoenix/api` and `tests/test_api_server.py`: clean.
+  - `python scripts/test_matrix.py --validate-only`: OK. `git diff --check`: clean.
+- **Full matrix.** Run once on the final PHX-101 tip; see PHX-101 completion evidence (all 13 gates PASS).
+- **Live startup smoke (2026-10-16 20:09 IST, PHX-101 tip, local Ollama; health and model listing only, no generation).**
+  - Ready line after 2.3 s, with a non-zero OS-assigned port.
+  - `GET /ready` returned 200 `ready`: Ollama healthy, `qwen2.5-coder:7b`, `qwen3.5:2b`, `qwen3.5:4b` and `qwen3.5:9b` registered, database at head.
+  - CTRL_BREAK gave a graceful uvicorn shutdown with no further stdout. The process exit code was 3 because uvicorn re-raises the captured signal (see limitations).
+- **Limitations.**
+  - Q1–Q4 above remain open.
+  - After a signal-driven shutdown, uvicorn re-raises the signal, so on Windows the exit code after CTRL_BREAK is 3. That is the same number as uvicorn's startup-failure code, so PHX-106 must not treat exit code 3 alone as a startup failure; the ready line is the signal.
