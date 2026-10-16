@@ -1379,7 +1379,7 @@ def test_static_isolation_no_concrete_engine_or_unauthorized_import() -> None:
             )
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0005_audit_events"]
+    ).get_heads() == ["0006_missions"]
 
 
 def test_guarded_uncached_construction_no_events_or_clock_reads(

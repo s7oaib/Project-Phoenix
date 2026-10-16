@@ -1677,7 +1677,7 @@ def test_event_schema_dependencies_and_protected_sources_unchanged() -> None:
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0005_audit_events"]
+    ).get_heads() == ["0006_missions"]
 
 
 def test_guarded_uncached_import_and_construction(

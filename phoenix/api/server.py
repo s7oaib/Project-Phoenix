@@ -8,7 +8,9 @@ route added is ``GET /ready``, and every route requires local API security
 under an exclusive, bounded data-directory lock. Readiness probes are bounded,
 with at most one database check in flight; a failing provider reports as
 unavailable and the backend as degraded, never as a crash (INV-021, INV-022). No
-filesystem workspace is configured here (PHX-108).
+filesystem workspace is configured here (PHX-108). PHX-102 (ADR-086) adds the
+persisted MissionService: it starts with the lifespan, and the shutdown path stops
+it, so queued and running missions are recorded as interrupted.
 """
 
 import asyncio
@@ -34,6 +36,7 @@ from alembic import command
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.runtime import ModelTierTable, PhoenixRuntime, default_tier_table
 from phoenix.api.app import create_app
+from phoenix.api.missions import MissionService
 from phoenix.api.security import LocalApiSecurity, install_local_api_security
 from phoenix.core.config import AppSettings
 from phoenix.core.event_bus import EventBus
@@ -51,6 +54,7 @@ from phoenix.persistence.database import (
     database_url,
     prepare_data_directory,
 )
+from phoenix.persistence.missions import MissionStore
 from phoenix.security.audit import AuditTrail
 from phoenix.security.permissions import PermissionPolicy
 from phoenix.tools.filesystem import filesystem_tool_definitions
@@ -176,6 +180,7 @@ class BackendServices:
     permission_policy: PermissionPolicy
     audit_trail: AuditTrail
     runtime: PhoenixRuntime
+    missions: MissionService
 
 
 class ReadinessStatus(StrEnum):
@@ -324,7 +329,12 @@ async def _close_provider(provider: ModelProvider) -> None:
 
 
 async def cancel_active_missions(services: BackendServices) -> int:
-    """Request cooperative cancellation of every active mission (INV-019)."""
+    """Request cooperative cancellation of every active mission (INV-019).
+
+    The mission service stops first (PHX-102): queued missions and the running
+    one are recorded failed/interrupted. Any other runtime mission is cancelled.
+    """
+    await services.missions.stop()
     request_ids = services.runtime.active_request_ids
     for request_id in request_ids:
         await services.runtime.cancel(request_id)
@@ -359,6 +369,14 @@ async def open_services(
         lifecycle = ModelLifecycleManager()
         session_factory = create_session_factory(engine)
         tools = ToolRegistry(filesystem_tool_definitions())
+        runtime = PhoenixRuntime(
+            providers=provider_set.providers,
+            structured_providers=provider_set.structured,
+            capability_registry=capabilities,
+            lifecycle=lifecycle,
+            agent_registry=agents,
+            tier_table=table,
+        )
         services = BackendServices(
             settings=settings,
             engine=engine,
@@ -375,16 +393,15 @@ async def open_services(
             tool_registry=tools,
             permission_policy=PermissionPolicy(),
             audit_trail=AuditTrail(session_factory, tools),
-            runtime=PhoenixRuntime(
-                providers=provider_set.providers,
-                structured_providers=provider_set.structured,
-                capability_registry=capabilities,
-                lifecycle=lifecycle,
-                agent_registry=agents,
-                tier_table=table,
+            runtime=runtime,
+            missions=MissionService(
+                runtime=runtime,
+                store=MissionStore(session_factory),
+                tool_registry=tools,
             ),
         )
         try:
+            await services.missions.start()
             yield services
         finally:
             await cancel_active_missions(services)

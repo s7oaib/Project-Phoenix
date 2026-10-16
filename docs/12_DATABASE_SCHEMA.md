@@ -29,6 +29,14 @@ Migrations: Alembic.
 - provider_health
 - voice_profiles
 
+## Mission tables (PHX-102, ADR-086)
+
+Migration `0006_missions` adds `conversations`, `messages`, `missions` (the
+planned `tasks`), `mission_traces`, `permission_requests` and
+`permission_grants`. Messages hold only the user's text and PHOENIX's final
+answer; traces hold hashes, lengths, IDs and statuses only. Chat history is
+deleted after 30 days; grants are kept until revoked.
+
 ## Rules
 
 - Stable IDs.

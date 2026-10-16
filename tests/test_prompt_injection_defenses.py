@@ -1751,9 +1751,10 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         ).strip()
         assert actual == expected, path
     assert len(EventType) == 32
+    # PHX-102 (ADR-086) adds migration 0006_missions.
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0005_audit_events"]
+    ).get_heads() == ["0006_missions"]
 
 
 def test_credential_signature_scan_new_sources() -> None:

@@ -1986,14 +1986,21 @@ def test_scope_ast_schema_dependencies_and_protected_sources_unchanged(
     database: Engine,
 ) -> None:
     scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
-    assert scripts.get_heads() == ["0005_audit_events"] and len(EventType) == 32
+    assert scripts.get_heads() == ["0006_missions"] and len(EventType) == 32
     assert inspect(database).get_table_names() == [
         "alembic_version",
         "audit_events",
+        # PHX-102 (ADR-086) adds the mission tables in 0006_missions.
+        "conversations",
         "document_chunks",
         "documents",
         "embedding_records",
         "memories",
+        "messages",
+        "mission_traces",
+        "missions",
+        "permission_grants",
+        "permission_requests",
     ]
     assert EmbeddingRecordRow.__tablename__ == "embedding_records"
     # PHX-050's exact dependency gate owns the authorized Python manifest change;
@@ -2030,6 +2037,15 @@ def test_scope_ast_schema_dependencies_and_protected_sources_unchanged(
                 ")\n"
             ).encode()
             assert current.count(registration) == 1
+            # PHX-102 (ADR-086) adds exactly one registration; the rest of the
+            # environment must still match the main baseline.
+            missions = (
+                "from phoenix.persistence.missions import (\n"
+                "    MissionRow,  # noqa: F401 — register target metadata (PHX-102)\n"
+                ")\n"
+            ).encode()
+            assert current.count(missions) == 1
+            current = current.replace(missions, b"")
         assert current == previous.replace(b"\r\n", b"\n")
     allowed = {
         "asyncio",

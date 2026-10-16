@@ -1824,7 +1824,7 @@ def test_no_action_persistence_or_dependency_change() -> None:
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0005_audit_events"]
+    ).get_heads() == ["0006_missions"]
     # PHX-072 separately owns the exact parser manifest/lock promotion.
     # PHX-080 owns only App.tsx/styles.css; every other apps path stays protected.
     assert not subprocess.check_output(
@@ -1857,6 +1857,13 @@ def test_no_action_persistence_or_dependency_change() -> None:
             ":(exclude)phoenix/api/__main__.py",
             # PHX-101 (ADR-085) adds the local API security module.
             ":(exclude)phoenix/api/security.py",
+            # PHX-102 (ADR-086) adds these new modules and migration; env.py
+            # registers the new rows and is hash-pinned (PHX_102_PATHS in
+            # test_prompt_injection_defenses.py).
+            ":(exclude)phoenix/api/missions.py",
+            ":(exclude)phoenix/persistence/missions.py",
+            ":(exclude)alembic/versions/0006_missions.py",
+            ":(exclude)alembic/env.py",
         ],
         cwd=ROOT,
     )
