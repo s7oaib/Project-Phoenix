@@ -147,7 +147,8 @@ commit SHAs.
 - Implementation and pin, round 1: `f600f122b2715260384db47b63bd7c07172919b1` and `ea81364`.
 - Round 2: implementation `73a4f007fab4cf65d4e504e5503fbbec588bdf80`, pin `ac37229`.
 - Round 3: implementation `e47834a3e82d8f10dfde8479c89cea20aa5d369a`, pin `cdf3b9b`.
-- Round 4: implementation `327f4e4abc746b5d0b6d4d9faf8066b3360689a6`, which `PHX_047_COMMIT` now pins (followed by its pin commit).
+- Round 4: implementation `327f4e4abc746b5d0b6d4d9faf8066b3360689a6`, pin `4d634bd`.
+- Round 5 (candidate, pending owner approval): implementation `47aa471712c6c5ea3452cf5a45c3ed390470e185`, which `PHX_047_COMMIT` now pins (followed by its pin commit).
 
 The prompt text awaits owner approval. The live smoke run
 (`scripts/phoenix_mission_smoke.py`, unchanged: it already reports the prompt set
