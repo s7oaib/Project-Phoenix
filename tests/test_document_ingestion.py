@@ -1443,7 +1443,7 @@ def test_real_alembic_lifecycle_preserves_memories_and_old_migrations(
 ) -> None:
     migration_config = config(tmp_path)
     scripts = ScriptDirectory.from_config(migration_config)
-    assert scripts.get_heads() == ["0005_audit_events"]
+    assert scripts.get_heads() == ["0006_missions"]
     revision = scripts.get_revision("0003_document_ingestion")
     assert revision is not None and revision.down_revision == "0002_memory_schema"
     for path in (

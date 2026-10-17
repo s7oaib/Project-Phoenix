@@ -212,6 +212,14 @@ categories = ["unit", "migrations"]
 # migrations: test_real_alembic_upgrade_downgrade_reupgrade_lifecycle
 
 [[file]]
+path = "tests/test_mission_service.py"
+categories = ["unit", "integration", "migrations", "permissions", "permission_bypass"]
+# integration: test_approve_stores_grant_and_linked_rerun_completes (MissionService + PhoenixRuntime + FilesystemTool + PermissionEngine + SQLite)
+# migrations: test_migration_head_round_trip_and_mapping
+# permissions: test_session_grant_is_not_used_by_another_session, test_persistent_grant_survives_restart_until_revoked
+# permission_bypass: test_no_grant_is_ever_created_from_model_text, test_stored_grants_outside_document_scope_are_not_passed
+
+[[file]]
 path = "tests/test_model_benchmark.py"
 categories = ["unit", "integration"]
 # integration: test_two_runners_share_global_heavy_capacity (real lifecycle manager)

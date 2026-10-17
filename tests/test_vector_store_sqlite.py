@@ -981,10 +981,17 @@ def assert_embedding_schema(database: Engine) -> None:
     assert inspector.get_table_names() == [
         "alembic_version",
         "audit_events",
+        # PHX-102 (ADR-086) adds the mission tables in 0006_missions.
+        "conversations",
         "document_chunks",
         "documents",
         "embedding_records",
         "memories",
+        "messages",
+        "mission_traces",
+        "missions",
+        "permission_grants",
+        "permission_requests",
     ]
     columns = inspector.get_columns("embedding_records")
     assert {c["name"] for c in columns} == FIELDS
@@ -1045,6 +1052,13 @@ def test_shared_base_mapping_exact_schema_and_full_head_no_drift(
         "documents",
         "document_chunks",
         "embedding_records",
+        # PHX-102 (ADR-086): alembic/env.py registers the mission rows.
+        "conversations",
+        "messages",
+        "missions",
+        "mission_traces",
+        "permission_requests",
+        "permission_grants",
     }
     assert_embedding_schema(database)
     with database.connect() as connection:
@@ -1203,7 +1217,7 @@ def test_real_migration_lifecycle_preserves_all_previous_sources(
 ) -> None:
     migration = config(tmp_path)
     scripts = ScriptDirectory.from_config(migration)
-    assert scripts.get_heads() == ["0005_audit_events"]
+    assert scripts.get_heads() == ["0006_missions"]
     revision = scripts.get_revision("0004_embedding_records")
     assert revision is not None and revision.down_revision == "0003_document_ingestion"
     for path in (
@@ -1262,7 +1276,7 @@ def test_real_migration_lifecycle_preserves_all_previous_sources(
         with engine.connect() as connection:
             assert (
                 MigrationContext.configure(connection).get_current_revision()
-                == "0005_audit_events"
+                == "0006_missions"
             )
             assert (
                 compare_metadata(MigrationContext.configure(connection), Base.metadata)

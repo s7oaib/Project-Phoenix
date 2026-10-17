@@ -1722,6 +1722,14 @@ PHX_047_PATHS = (
     "phoenix/agents/runtime.py",
     "phoenix/agents/tool_steps.py",
 )
+# PHX-102 (ADR-086) intentionally changed server.py (MissionService wiring) and
+# alembic/env.py (row registration); both stay pinned, at the PHX-102
+# implementation commit.
+PHX_102_COMMIT = "9ccc5d4522c513832f85da49c44a236284aab7b7"
+PHX_102_PATHS = (
+    "phoenix/api/server.py",
+    "alembic/env.py",
+)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -1736,10 +1744,12 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in {"apps/desktop/src/App.tsx", "apps/desktop/src/styles.css"}
         and path not in PHX_017_PATHS
         and path not in PHX_047_PATHS
+        and path not in PHX_102_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
     baselines += [(PHX_047_COMMIT, path) for path in PHX_047_PATHS]
+    baselines += [(PHX_102_COMMIT, path) for path in PHX_102_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
@@ -1751,9 +1761,10 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         ).strip()
         assert actual == expected, path
     assert len(EventType) == 32
+    # PHX-102 (ADR-086) adds migration 0006_missions.
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0005_audit_events"]
+    ).get_heads() == ["0006_missions"]
 
 
 def test_credential_signature_scan_new_sources() -> None:

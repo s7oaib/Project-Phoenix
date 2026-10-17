@@ -1311,8 +1311,8 @@ def test_architecture_imports_bounds_and_frozen_values() -> None:
     assert len(EventType) == 32
     revisions = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
     assert (
-        revisions.get_heads() == ["0005_audit_events"]
-        and len(list(revisions.walk_revisions())) == 5
+        revisions.get_heads() == ["0006_missions"]
+        and len(list(revisions.walk_revisions())) == 6
     )
     for cls in (
         YouTubeCall,

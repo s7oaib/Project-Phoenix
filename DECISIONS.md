@@ -3944,3 +3944,91 @@ Host and Origin are checked, and there is no CORS for other origins.
 
 Open: the dev-mode Vite origin (Q1); the webview transport, proxy or CORS (Q2);
 no in-process token rotation (Q3). No new dependencies.
+
+## ADR-086 — Persisted missions, FIFO runner and user-decided grants
+
+Status: Accepted (owner decisions 2026-10-16 and 2026-10-17; the owner confirmed
+recommendations R1–R15 in `tickets/PHX-102-mission-persistence-runner.md` on 2026-10-17)
+Date: 2026-10-17
+Ticket: PHX-102
+
+Owner decisions:
+
+- **Concurrency.** One active mission at a time, with a FIFO queue. Queued
+  missions show `queued` and can be cancelled (INV-019, INV-023).
+- **Resume after approval is a linked re-run.** Approving a waiting permission
+  stores the grant, supersedes the waiting mission (`superseded`) and queues a
+  new mission for the same request with `rerun_of` set. There is no mid-mission
+  checkpoint (ADR-082).
+- **Grant duration is the user's choice.** "This session" is a SESSION grant
+  scoped to the backend's per-launch session ID; "always" is PERSISTENT until
+  revoked. Grants are stored per exact actor, tool, action, resource and reason,
+  carry `user_decision=approved`, are created only by a user approval and never
+  from model text (INV-003), and can be revoked.
+- **Restart.** On startup, missions left `running` or `queued` are marked
+  `failed/interrupted`. Nothing re-runs automatically; `run_again` is the
+  explicit path (an API in PHX-104).
+- **Retention.** Conversations, messages, missions and traces are kept 30 days,
+  then deleted: on startup and hourly while running. Delete-conversation and
+  clear-all exist. Grants are not purged by age.
+- **Content.** The user's message and PHOENIX's final completed answer are
+  stored as chat history. Traces stay hashes, lengths, IDs and statuses only
+  (the runtime's `MissionTrace`). The pending PermissionRequest, including its
+  resource path, is stored so the UI can show it. Raw model output, tool output
+  and file content are never stored.
+
+Design:
+
+- **Modules.** `phoenix/persistence/missions.py` (rows and `MissionStore`) and
+  `phoenix/api/missions.py` (`MissionService`), both new. The service is
+  backend application logic, not transport: it imports no FastAPI. It cannot
+  live in `phoenix/agents`, which ADR-082 keeps free of persistence imports.
+- **Schema.** Migration `0006_missions`: `conversations`, `messages`,
+  `missions` (status, path, failure code, responder error, `rerun_of`,
+  timestamps, user and answer message links), `mission_traces` (one JSON
+  `MissionTrace` per mission), `permission_requests` and `permission_grants`
+  (SESSION or PERSISTENT, P1–P3, `revoked_at`, provenance
+  `approved_request_id`). Structural CHECK constraints mirror `MissionResult`'s
+  consistency rules.
+- **Store.** Short synchronous transactions called through `asyncio.to_thread`,
+  serialized in-process by a lock. Every status change is compare-and-set, so a
+  stale writer (a late settle after a delete, a claim racing a cancel) changes
+  nothing.
+- **Runner.** One task consumes an in-memory FIFO. Each mission runs in its own
+  task (`PhoenixRuntime.run` needs a caller task) with the stored, unrevoked
+  grants that pass `document_grants` (persistent, plus this launch's session
+  grants) and the launch session ID. A runtime defect is recorded
+  `failed/internal_error` and the queue continues (INV-021).
+- **Wiring.** `BackendServices.missions`; the lifespan starts the service after
+  building it. `cancel_active_missions`, which the launcher already calls
+  before draining and the lifespan calls on exit, now stops the service first:
+  queued and running missions become `failed/interrupted`, consistent with the
+  restart rule.
+- **Frozen files.** `phoenix/api/server.py` (wiring) and `alembic/env.py` (row
+  registration, as PHX-042 did) change. Following ADR-082/083, both leave the
+  `origin/main` baseline and are pinned to the PHX-102 implementation commit
+  (`PHX_102_COMMIT` / `PHX_102_PATHS`, `9ccc5d4522c513832f85da49c44a236284aab7b7`), landed as an implementation commit then
+  a pin commit; the PR must merge with a merge commit. The two `git diff
+  origin/main` guards exclude the new modules, the migration and `env.py` by
+  name. Head expectations move to `0006_missions` and revision counts to 6;
+  table-list expectations gain the six tables; the PHX-050 `env.py` byte guard
+  allows exactly the one new registration block.
+- **Review fixes (2026-10-17).** Stored grant rows that are not valid grants
+  are skipped and counted (`skipped_grants`), never raised. Any failure after
+  a claim records `failed/internal_error` and the queue continues; a failed
+  claim records the dequeued mission `failed/internal_error` too (R15).
+  `run_again` is refused once a re-run of that mission exists. Once `stop()`
+  begins nothing new is enqueued, and it waits (bounded) for writes in flight
+  before its final interrupt sweep. `list_grants` returns this launch's usable
+  grants; with `include_inactive` it adds earlier launches' SESSION grants as
+  `expired` and revoked grants as `revoked`.
+- **Revoke timing.** Grants are read once when a mission starts, so revoking
+  does not affect a mission that is already running; it applies from the next
+  mission.
+- **Follow-up: SQLite foreign keys.** Production does not set
+  `PRAGMA foreign_keys=ON`. The store deletes in foreign-key order and the
+  tests run with foreign keys enforced, so purge and delete leave no orphans.
+  Enabling the pragma belongs to a separate ticket: `database.py` is frozen and
+  the change also affects `document_chunks`.
+
+No routes (PHX-104) and no events (PHX-103). No new dependencies.
