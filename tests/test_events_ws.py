@@ -29,6 +29,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketDenialResponse
 from starlette.websockets import WebSocketDisconnect
 from uvicorn.protocols.websockets.auto import AutoWebSocketsProtocol
 from uvicorn.protocols.websockets.websockets_sansio_impl import (
@@ -40,6 +41,7 @@ from websockets.typing import Origin, Subprotocol
 
 from phoenix.api import launcher
 from phoenix.api.event_stream import (
+    EVENT_BUS_CAPACITY,
     WS_GOING_AWAY,
     WS_TRY_AGAIN_LATER,
     EventStream,
@@ -80,6 +82,8 @@ MODELS = ("qwen3.5:2b", "qwen3.5:4b", "qwen3.5:9b", "qwen2.5-coder:7b")
 USER = "USER-SENTINEL-37"
 MODEL = "MODEL-SENTINEL-55"
 QUESTION = f"What is the codename? {USER}"
+MISSION = "5f0c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f"
+MISSION = "5f0c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f"
 
 
 # ---- fakes
@@ -173,8 +177,8 @@ class FakeWebSocket:
 def event(step: int) -> EventEnvelope:
     return EventEnvelope(
         event_type=EventType.STEP_STARTED,
-        payload={"step_id": f"s{step}"},
-        correlation_id="mission-1",
+        payload={"step_id": f"s{step % 99 + 1}"},
+        correlation_id=MISSION,
     )
 
 
@@ -182,6 +186,10 @@ async def until(predicate: Callable[[], bool], timeout: float = 5) -> None:
     async with asyncio.timeout(timeout):
         while not predicate():
             await asyncio.sleep(0.005)
+
+
+def has_frames(client: FakeWebSocket, count: int) -> Callable[[], bool]:
+    return lambda: len(client.frames) == count
 
 
 async def settle_loop(rounds: int = 10) -> None:
@@ -200,37 +208,85 @@ def no_model_network(monkeypatch: pytest.MonkeyPatch) -> None:
 # ---- the bridge
 
 
+def start(stream: EventStream, client: FakeWebSocket) -> "asyncio.Task[None]":
+    assert stream.reserve()
+    return asyncio.create_task(stream.serve(client))  # type: ignore[arg-type]
+
+
 def test_slow_client_gets_1013_while_others_keep_receiving() -> None:
     async def scenario() -> None:
         bus = EventBus()
         stream = EventStream(bus, client_buffer=2)
-        fast, slow = FakeWebSocket(), FakeWebSocket(slow=True)
-        serving = [
-            asyncio.create_task(stream.serve(socket))  # type: ignore[arg-type]
-            for socket in (fast, slow)
-        ]
-        await until(lambda: bus.subscriber_count == 2)
+        fast, other, slow = FakeWebSocket(), FakeWebSocket(), FakeWebSocket(slow=True)
+        serving = [start(stream, socket) for socket in (fast, other, slow)]
+        await until(lambda: stream.connection_count == 3)
+        assert bus.subscriber_count == 1  # one shared bridge subscription
         for step in range(10):
             await stream.publish(event(step))  # never waits for the slow client
             await settle_loop()
         await until(lambda: slow.closed_with is not None)
         assert slow.closed_with == WS_TRY_AGAIN_LATER
-        assert stream.slow_disconnects == 1
-        assert bus.subscriber_count == 1  # the slow client's subscription is gone
-        assert stream.connection_count == 1
+        assert stream.slow_disconnects == 1 and stream.connection_count == 2
         for step in range(10, 15):
             await stream.publish(event(step))
             await settle_loop()
-        await until(lambda: len(fast.frames) == 15)
-        assert [f["payload"]["step_id"] for f in fast.frames] == [
-            f"s{step}" for step in range(15)
-        ]
-        assert stream.dropped_events == 0
-        assert fast.closed_with is None
-        fast.leave.set()  # the fast client disconnects itself
+        for client in (fast, other):
+            await until(has_frames(client, 15))
+            assert [f["payload"]["step_id"] for f in client.frames] == [
+                f"s{step % 99 + 1}" for step in range(15)
+            ]
+            assert client.closed_with is None
+        assert stream.dropped_events == 0 and stream.overflow_disconnects == 0
+        fast.leave.set()
+        other.leave.set()  # both remaining clients disconnect themselves
         await asyncio.gather(*serving)
-        assert bus.subscriber_count == 0 and stream.connection_count == 0
+        await until(lambda: bus.subscriber_count == 0)
+        assert stream.connection_count == 0
         assert fast.closed_with is None  # no close is sent to a departed client
+
+    asyncio.run(asyncio.wait_for(scenario(), 10))
+
+
+def test_burst_beyond_256_without_yield_reaches_every_fast_client() -> None:
+    async def scenario() -> None:
+        bus = EventBus(capacity=EVENT_BUS_CAPACITY)
+        stream = EventStream(bus)  # default per-client buffer: 256
+        clients = [FakeWebSocket() for _ in range(3)]
+        slow = FakeWebSocket(slow=True)
+        serving = [start(stream, client) for client in (*clients, slow)]
+        await until(lambda: stream.connection_count == 4)
+        burst = 300
+        for step in range(burst):  # no yield between publications
+            await stream.publish(event(step))
+        for client in clients:
+            await until(has_frames(client, burst))
+            assert client.closed_with is None
+        await until(lambda: slow.closed_with is not None)
+        assert slow.closed_with == WS_TRY_AGAIN_LATER  # only the slow one
+        assert stream.dropped_events == 0 and stream.slow_disconnects == 1
+        for client in clients:
+            client.leave.set()
+        await asyncio.gather(*serving)
+        await until(lambda: bus.subscriber_count == 0)
+
+    asyncio.run(asyncio.wait_for(scenario(), 20))
+
+
+def test_bridge_subscription_overflow_closes_every_client_with_1013() -> None:
+    async def scenario() -> None:
+        bus = EventBus(capacity=4)
+        stream = EventStream(bus)
+        clients = [FakeWebSocket() for _ in range(3)]
+        serving = [start(stream, client) for client in clients]
+        await until(lambda: stream.connection_count == 3)
+        for step in range(10):  # more than the bridge subscription holds
+            await stream.publish(event(step))
+        await asyncio.gather(*serving)
+        # Nobody is left silently behind: every client must refetch over REST.
+        assert [c.closed_with for c in clients] == [WS_TRY_AGAIN_LATER] * 3
+        assert stream.dropped_events == 6 and stream.overflow_disconnects >= 1
+        await until(lambda: bus.subscriber_count == 0)
+        assert stream.connection_count == 0
 
     asyncio.run(asyncio.wait_for(scenario(), 10))
 
@@ -254,23 +310,21 @@ def test_off_allowlist_events_are_never_sent() -> None:
         bus = EventBus()
         stream = EventStream(bus)
         client = FakeWebSocket()
-        serving = asyncio.create_task(stream.serve(client))  # type: ignore[arg-type]
+        serving = start(stream, client)
         await until(lambda: bus.subscriber_count == 1)
         await bus.publish(
             EventEnvelope(
                 event_type=EventType.AGENT_COMPLETED,
                 payload={"role": "direct", "answer": f"PELICAN-7 {MODEL}"},
-                correlation_id="mission-1",
+                correlation_id=MISSION,
             )
         )
         await bus.publish(
-            EventEnvelope(
-                event_type=EventType.MEMORY_CREATED, correlation_id="mission-1"
-            )
+            EventEnvelope(event_type=EventType.MEMORY_CREATED, correlation_id=MISSION)
         )
         await bus.publish(event(1))
         await until(lambda: len(client.frames) == 1)
-        assert client.frames[0]["payload"] == {"step_id": "s1"}
+        assert client.frames[0]["payload"] == {"step_id": "s2"}
         assert stream.rejected_events == 2
         client.leave.set()
         await serving
@@ -283,24 +337,60 @@ def test_close_sends_1001_to_every_client_and_refuses_new_ones() -> None:
         bus = EventBus()
         stream = EventStream(bus)
         clients = [FakeWebSocket(), FakeWebSocket(slow=True)]
-        serving = [
-            asyncio.create_task(stream.serve(client))  # type: ignore[arg-type]
-            for client in clients
-        ]
+        serving = [start(stream, client) for client in clients]
         await until(lambda: stream.connection_count == 2)
         await stream.close()
         await asyncio.gather(*serving)
         assert [client.closed_with for client in clients] == [WS_GOING_AWAY] * 2
-        assert bus.subscriber_count == 0 and stream.connection_count == 0
-        late = FakeWebSocket()
-        await stream.serve(late)  # type: ignore[arg-type]
-        assert late.closed_with == WS_GOING_AWAY and bus.subscriber_count == 0
+        await until(lambda: bus.subscriber_count == 0)
+        assert stream.connection_count == 0
+        assert not stream.reserve()  # no slot once closed
+
+    asyncio.run(asyncio.wait_for(scenario(), 10))
+
+
+def test_serve_blocked_on_subscribe_during_close_is_refused() -> None:
+    async def scenario() -> None:
+        bus = EventBus()
+        stream = EventStream(bus)
+        assert stream.reserve()
+        async with bus._lock:  # contend subscribe() while close() runs
+            late = FakeWebSocket()
+            serving = asyncio.create_task(stream.serve(late))  # type: ignore[arg-type]
+            await settle_loop()
+            closing = asyncio.create_task(stream.close())
+            await settle_loop()
+        await asyncio.gather(serving, closing)
+        assert late.closed_with == WS_GOING_AWAY
+        await until(lambda: bus.subscriber_count == 0)
+        assert stream.connection_count == 0
+
+    asyncio.run(asyncio.wait_for(scenario(), 10))
+
+
+def test_connection_cap_reserves_and_releases_slots() -> None:
+    async def scenario() -> None:
+        stream = EventStream(EventBus(), max_connections=2)
+        first, second = FakeWebSocket(), FakeWebSocket()
+        serving = [start(stream, first), start(stream, second)]
+        await until(lambda: stream.connection_count == 2)
+        assert not stream.reserve() and stream.refused_connections == 1
+        first.leave.set()
+        await serving[0]
+        assert stream.reserve()  # the departed client's slot is free again
+        stream.release()
+        second.leave.set()
+        await serving[1]
 
     asyncio.run(asyncio.wait_for(scenario(), 10))
 
 
 def test_bridge_rejects_invalid_configuration() -> None:
-    for options in ({"client_buffer": 0}, {"close_timeout_seconds": 0.0}):
+    for options in (
+        {"client_buffer": 0},
+        {"max_connections": 0},
+        {"close_timeout_seconds": 0.0},
+    ):
         with pytest.raises(ValueError):
             EventStream(EventBus(), **options)
 
@@ -425,7 +515,39 @@ def test_stream_close_closes_open_sockets_with_1001(client: TestClient) -> None:
         client.portal.call(services.event_stream.close)
         message = ws.receive()
         assert (message["type"], message["code"]) == ("websocket.close", WS_GOING_AWAY)
-    assert services.event_bus.subscriber_count == 0
+    assert client.portal is not None
+    client.portal.call(until, lambda: services.event_bus.subscriber_count == 0)
+
+
+def test_connections_beyond_the_cap_are_refused_with_503(tmp_path: Path) -> None:
+    settings = AppSettings(data_dir=tmp_path / "data", _env_file=None)  # type: ignore[call-arg]
+    app = build_server_app(
+        settings,
+        security=LocalApiSecurity(TOKEN, host="127.0.0.1", port=PORT),
+        config=FAST.model_copy(update={"event_max_connections": 2}),
+        provider_factory=LoopCapture(),
+    )
+    with TestClient(app, base_url=f"http://{HOST}") as client:
+        stream = services_of(client).event_stream
+        with (
+            client.websocket_connect(WS_URL, subprotocols=ws_protocols()),
+            client.websocket_connect(WS_URL, subprotocols=ws_protocols()),
+        ):
+            assert client.portal is not None
+            client.portal.call(until, lambda: stream.connection_count == 2)
+            with pytest.raises(WebSocketDenialResponse) as caught:
+                with client.websocket_connect(WS_URL, subprotocols=ws_protocols()):
+                    pass  # pragma: no cover
+            denied = caught.value
+            assert denied.status_code == 503
+            assert denied.headers["retry-after"] == "1"
+            assert denied.json()["error"]["code"] == "too_many_connections"
+            assert TOKEN not in denied.text
+            assert stream.refused_connections == 1
+        client.portal.call(until, lambda: stream.connection_count == 0)
+        # Slots are released: a new connection is accepted again.
+        with client.websocket_connect(WS_URL, subprotocols=ws_protocols()) as ws:
+            assert ws.accepted_subprotocol == WS_SUBPROTOCOL
 
 
 def test_events_without_running_services_is_try_again_later(tmp_path: Path) -> None:
@@ -524,7 +646,7 @@ def test_real_server_streams_events_and_closes_sockets_on_shutdown(
             def call(coroutine: Any) -> Any:
                 return asyncio.run_coroutine_threadsafe(coroutine, loop).result(10)
 
-            call(until(lambda: services.event_bus.subscriber_count == 2))
+            call(until(lambda: services.event_stream.connection_count == 2))
             conversation = call(services.missions.create_conversation())
             mission_id = call(
                 services.missions.submit(conversation, QUESTION, "direct")
@@ -541,7 +663,7 @@ def test_real_server_streams_events_and_closes_sockets_on_shutdown(
                     for secret in (TOKEN, USER, MODEL, "PELICAN"):
                         assert secret not in frame
             second.close()
-            call(until(lambda: services.event_bus.subscriber_count == 1))
+            call(until(lambda: services.event_stream.connection_count == 1))
             server.should_exit = True
             with pytest.raises(ConnectionClosed) as closed:
                 first.recv(timeout=10)
@@ -561,6 +683,39 @@ def test_real_server_streams_events_and_closes_sockets_on_shutdown(
 # PHX-103 base; this gate owns current manifest/lock exactness.
 DEPENDENCY_BASELINE = "4a70867203a70d3a85e2c141ef0dbb92bdff42e2"
 WEBSOCKETS = "websockets>=17.2,<18"
+# The exact PyPI artifacts locked for 17.2: the sdist and 27 wheels.
+WEBSOCKETS_HASHES = frozenset(
+    {
+        "063508ce9e0db745f30ab52fc652f4e59efc79c2b74934b3837d5cdb974da620",
+        "15a7101b660a9f15fac34108c92cefc9848f6753a50acef8869e3cd94148fdb7",
+        "214da56dba368f61b3d745c77630b2d03c61c02da7b42fe80ef6efba079d3077",
+        "2de1ccf298f5c9e0f27113836d742edb95f015eee3148f004ac386f7ba9a05b1",
+        "36c2fb94c990cc2545143b12690e2de6c16300f9dbe5b4f33fa300cf57dc8792",
+        "376a693697ddb695ea282ead76060f4847f90e564b12b4389f2c7589e6fadb9e",
+        "3892d76754b5f36fb40619f3ef09c68e5c3091f1ab8840964518ae5a41f30952",
+        "4733fc2d99fe888261417b7e29995403a72d9ffa78629902882325ea141177f2",
+        "48997ed4431d8006988788ef4b62e1fd3f053c7463b4fa793aa6c4f9e96a3bb7",
+        "4e312e07557a5ad348f4e83d3419773527f6e790c7f97928b1911d767b6ea1c7",
+        "5436ffea003adb50e283ca0684a3fcaa1396104f841736c3322ee6582bd09e98",
+        "55c5b9eab079540bfb639b40b07b7b467e5c5a7ecf97a65cc8665781381c9856",
+        "55f9a808a0e072473337c240c939849818276e288e2374b832255b5b791b0851",
+        "569ed5db651e420b13279f9333443bb5b84a436cc66b599cbc535697ae4434a0",
+        "660aa158127035e741d4b1835dbe79ae18a1fbb21ecd236655f31d60110e68d5",
+        "6aa59f0ef92e796b2db6f5f26550c4713c0e4036899fadf02f55e2ed4db0b7ae",
+        "761cde41439f0be761aa460e1451a31e2e14baf4a46db6fe4913e5a06a90df66",
+        "80cbc645af23ac5c12096545c161626960114a1bc10f864760558d3b3e82ba18",
+        "902ce8cafca2dc14cef9558a6fc3b45dbf7f121d1404bf2ad18a1c894555e48c",
+        "946ac2164d646e733004946ae39536b5af473853183d81da5962e29d36e3ad35",
+        "9c393a202df08e96ed619310f0cd78be700e532a57d9a6ceee5f80b4e35bef14",
+        "9df9d048def11365d170b375b6ffc8b23a7f188c3560acd4418ba088ca2e2705",
+        "ada04d0262ab06527054a2a497f384d102698ff39b3865dc566a7d24b6f4058c",
+        "af4c565b923bb5975401b8e4cedc2e17b2fdbf33b905737ee12384e6a6fd9507",
+        "c2ec7e51157a3fa0e9cfdb1a8969bab38d1c22ad1ace7c6cea006383b43a1ad4",
+        "c81d6cdbacccda7e0eef3b076a457fd14c3835cdbc5993d2881580c2fb1f5f26",
+        "e53d950e16d4bb672a5ff41fe3131e65a4e5d688d694e1c7074c8c9990bb3ceb",
+        "ecd63d0c7ed0d3d719c91b5a3861f0f0b3cec9bf223033ddf69d17aaac74bb6d",
+    }
+)
 
 
 def historic(path: str) -> str:
@@ -584,6 +739,16 @@ def test_exact_websockets_dependency_delta() -> None:
     assert not set(old_records) - set(new_records)
     added = new_records["websockets"]
     assert added["version"] == "17.2" and "dependencies" not in added
+    assert added["source"] == {"registry": "https://pypi.org/simple"}
+    artifacts = [added["sdist"], *added["wheels"]]
+    assert len(artifacts) == len(WEBSOCKETS_HASHES) == 28
+    assert {a["hash"].removeprefix("sha256:") for a in artifacts} == (WEBSOCKETS_HASHES)
+    assert all(a["hash"].startswith("sha256:") for a in artifacts)
+    assert all(
+        a["url"].startswith("https://files.pythonhosted.org/packages/")
+        and "/websockets-17.2" in a["url"]
+        for a in artifacts
+    )
     for name, record in old_records.items():
         after = copy.deepcopy(new_records[name])
         if name == "phoenix":

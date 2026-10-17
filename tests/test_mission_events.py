@@ -84,6 +84,9 @@ MODELS = ("qwen3.5:2b", "qwen3.5:4b", "qwen3.5:9b", "qwen2.5-coder:7b")
 PASS = '{"checks":[{"criterion":"Correct","passed":true,"evidence_summary":"Fine."}]}'
 FAIL = '{"checks":[{"criterion":"Correct","passed":false,"evidence_summary":"No."}]}'
 SESSION = "session-1"
+MISSION = "5f0c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f"
+OTHER_MISSION = "6a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d"
+LEFT_QUEUED = "7b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e"
 # Planted content: none of these may ever appear in an event.
 USER = "USER-SENTINEL-37"
 FILE = "FILE-SENTINEL-93"
@@ -313,7 +316,7 @@ def mission(
     *,
     events: Any = None,
     grants: tuple[PermissionGrant, ...] = (),
-    request_id: str = "mission-1",
+    request_id: str = MISSION,
 ) -> tuple[MissionResult, PhoenixRuntime]:
     async def exercise() -> tuple[MissionResult, PhoenixRuntime]:
         runtime = stack.runtime(events)
@@ -404,7 +407,7 @@ def test_complex_document_mission_publishes_ordered_correlated_events(
     events = sink.events
     assert [sig(e) for e in events] == COMPLEX_DOCUMENT_SEQUENCE
     # Correlation: the mission (request) ID and the runtime's task ID.
-    assert {e.correlation_id for e in events} == {"mission-1"}
+    assert {e.correlation_id for e in events} == {MISSION}
     assert {e.task_id for e in events} == {result.trace.task_id}
     assert {e.severity for e in events} == {EventSeverity.INFO}
     assert runtime.dropped_events == 0
@@ -450,7 +453,7 @@ def test_direct_mission_publishes_phoenix_agent_events(stack: Stack) -> None:
         "agent.completed direct",
     ]
     assert {(e.agent_id, e.correlation_id, e.task_id) for e in sink.events} == {
-        ("phoenix", "mission-1", None)
+        ("phoenix", MISSION, None)
     }
     assert sink.events[1].payload["outcome"] == "completed"
     assert_content_free(sink.events)
@@ -578,13 +581,13 @@ def test_cancellation_publishes_cancelled(stack: Stack) -> None:
         stack.provider.gate = asyncio.Event()
         task = asyncio.create_task(
             runtime.run(
-                PhoenixRequest(request_id="mission-1", text=QUESTION),
+                PhoenixRequest(request_id=MISSION, text=QUESTION),
                 OrchestrationPath.COMPLEX,
             )
         )
         while not sink.events or sig(sink.events[-1]) != "agent.started planner":
             await asyncio.sleep(0.005)
-        await runtime.cancel("mission-1")
+        await runtime.cancel(MISSION)
         return await task, sink.events
 
     result, events = run(scenario())
@@ -605,7 +608,7 @@ def test_cancellation_publishes_cancelled(stack: Stack) -> None:
 def test_runtime_completes_when_the_sink_raises(stack: Stack, error: Exception) -> None:
     sink = RaisingSink(error)
     result, runtime = mission(stack, events=sink, grants=(stack.grant(),))
-    baseline, quiet = mission(stack, grants=(stack.grant(),), request_id="mission-2")
+    baseline, quiet = mission(stack, grants=(stack.grant(),), request_id=OTHER_MISSION)
     assert result.kind == baseline.kind == MissionKind.COMPLETED
     assert result.text == baseline.text
     assert result.trace.states == baseline.trace.states
@@ -621,7 +624,7 @@ def test_runtime_completes_when_the_bus_is_full(stack: Stack) -> None:
         stalled = await bus.subscribe()  # never read: full after one event
         runtime = stack.runtime(bus)
         result = await runtime.run(
-            PhoenixRequest(request_id="mission-1", text=QUESTION),
+            PhoenixRequest(request_id=MISSION, text=QUESTION),
             OrchestrationPath.COMPLEX,
             grants=(stack.grant(),),
             session_id=SESSION,
@@ -643,7 +646,7 @@ def test_off_allowlist_events_are_refused_before_any_sink() -> None:
         mission_event(
             EventType.AGENT_COMPLETED,
             {"role": "direct", "text": "PELICAN-7"},
-            correlation_id="m",
+            correlation_id=MISSION,
         )
 
 
@@ -687,11 +690,50 @@ def test_allowlist_refuses_content_and_unknown_fields(
 def test_envelope_ids_must_be_identifiers() -> None:
     for fields in (
         {"correlation_id": "a request with spaces"},
-        {"correlation_id": "m", "task_id": "../task"},
-        {"correlation_id": "m", "agent_id": "LEVI says hi"},
+        {"correlation_id": "notes.txt"},
+        {"correlation_id": "mission-1"},
+        {"correlation_id": MISSION.upper()},
+        {"correlation_id": MISSION, "task_id": "../task"},
+        {"correlation_id": MISSION, "task_id": "notes.txt"},
+        {"correlation_id": MISSION, "agent_id": "LEVI says hi"},
+        {"correlation_id": MISSION, "agent_id": "notes.txt"},
     ):
         with pytest.raises(EventPayloadError):
             mission_event(EventType.TASK_CREATED, {"path": "complex"}, **fields)
+    accepted = mission_event(
+        EventType.TASK_CREATED,
+        {"path": "complex"},
+        correlation_id=MISSION,
+        task_id=OTHER_MISSION,
+        agent_id="phoenix",
+    )
+    check_event(accepted)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("step_id", "notes.txt"),
+        ("step_id", "s0"),
+        ("step_id", "step-1"),
+        ("call_id", "notes.txt"),
+        ("tool_id", "notes.txt"),
+        ("tool_id", "filesystem.write_text"),
+        ("permission_request_id", "notes.txt"),
+    ],
+)
+def test_id_fields_accept_only_the_real_id_shapes(key: str, value: str) -> None:
+    good = {
+        "step_id": "s1",
+        "tool_id": "filesystem.read_text",
+        "call_id": MISSION,
+        "permission_request_id": OTHER_MISSION,
+        "risk_level": "P1",
+    }
+    check_payload(EventType.PERMISSION_REQUESTED, good)
+    check_payload(EventType.STEP_STARTED, {"step_id": "final"})
+    with pytest.raises(EventPayloadError):
+        check_payload(EventType.PERMISSION_REQUESTED, good | {key: value})
 
 
 def test_vocabulary_stays_32_and_mapping_uses_existing_types() -> None:
@@ -729,6 +771,10 @@ def test_mirrored_closed_values_match_their_sources() -> None:
     assert mission_events.DOCUMENT_OPERATIONS == {
         o.value for o in tool_steps.DOCUMENT_OPERATIONS
     }
+    assert mission_events.TOOL_IDS == set(tool_steps.DOCUMENT_TOOL_IDS)
+    assert {"phoenix", "strategist", "verifier", "document_analyst"} <= (
+        mission_events.AGENT_IDS
+    )
 
 
 def test_event_module_stays_provider_and_transport_neutral() -> None:
@@ -896,7 +942,7 @@ def test_restart_recovery_publishes_interrupted(stack: Stack) -> None:
     store.create_conversation("c", now)
     store.submit(
         conversation_id="c",
-        mission_id="left-queued",
+        mission_id=LEFT_QUEUED,
         message_id="u",
         text=QUESTION,
         path="direct",
@@ -913,7 +959,7 @@ def test_restart_recovery_publishes_interrupted(stack: Stack) -> None:
     events = run(scenario())
     assert [(e.correlation_id, dict(e.payload)) for e in events] == [
         (
-            "left-queued",
+            LEFT_QUEUED,
             {
                 "scope": "mission",
                 "mission_status": "failed",

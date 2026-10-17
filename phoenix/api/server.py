@@ -42,6 +42,8 @@ from phoenix.agents.runtime import ModelTierTable, PhoenixRuntime, default_tier_
 from phoenix.api.app import create_app
 from phoenix.api.event_stream import (
     DEFAULT_CLIENT_BUFFER,
+    DEFAULT_MAX_CONNECTIONS,
+    EVENT_BUS_CAPACITY,
     EVENTS_PATH,
     WS_TRY_AGAIN_LATER,
     EventStream,
@@ -50,6 +52,7 @@ from phoenix.api.missions import MissionService
 from phoenix.api.security import (
     LocalApiSecurity,
     accept_websocket,
+    error_response,
     install_local_api_security,
 )
 from phoenix.core.config import AppSettings
@@ -118,6 +121,10 @@ class ServerConfig(BaseModel):
     # PHX-103: events buffered per WebSocket client before it counts as slow.
     event_client_buffer: int = Field(
         default=DEFAULT_CLIENT_BUFFER, strict=True, ge=1, le=4096
+    )
+    # PHX-103: concurrent WS /events connections; more are refused with 503.
+    event_max_connections: int = Field(
+        default=DEFAULT_MAX_CONNECTIONS, strict=True, ge=1, le=256
     )
     alembic_ini: Path = ALEMBIC_INI
 
@@ -388,8 +395,12 @@ async def open_services(
         lifecycle = ModelLifecycleManager()
         session_factory = create_session_factory(engine)
         tools = ToolRegistry(filesystem_tool_definitions())
-        bus = EventBus()
-        stream = EventStream(bus, client_buffer=config.event_client_buffer)
+        bus = EventBus(capacity=EVENT_BUS_CAPACITY)
+        stream = EventStream(
+            bus,
+            client_buffer=config.event_client_buffer,
+            max_connections=config.event_max_connections,
+        )
         runtime = PhoenixRuntime(
             providers=provider_set.providers,
             structured_providers=provider_set.structured,
@@ -495,6 +506,18 @@ def _remove_interactive_docs(app: FastAPI) -> None:
     app.swagger_ui_oauth2_redirect_url = None
 
 
+async def _refuse_connection(websocket: WebSocket) -> None:
+    """HTTP 503 denial (distinct from auth's 403); 1013 if unsupported."""
+    request_id = websocket.scope.get("state", {}).get("request_id", "")
+    response = error_response(
+        503, "too_many_connections", str(request_id), {"Retry-After": "1"}
+    )
+    try:
+        await websocket.send_denial_response(response)
+    except RuntimeError:
+        await websocket.close(code=WS_TRY_AGAIN_LATER)
+
+
 def build_server_app(
     settings: AppSettings,
     *,
@@ -534,13 +557,28 @@ def build_server_app(
 
     @app.websocket(EVENTS_PATH)
     async def events(websocket: WebSocket) -> None:
-        """PHX-103: live, content-free events; REST stays the source of truth."""
-        if not await accept_websocket(websocket):
-            return  # closed 1008 before accept (PHX-101)
+        """PHX-103: live, content-free events; REST stays the source of truth.
+
+        The middleware has already authenticated the handshake. Beyond the
+        connection cap the upgrade is refused at the HTTP level (503 with the
+        error envelope and Retry-After), before any WebSocket session exists.
+        """
         services = get_services(websocket.app)
-        if services is None:
-            await websocket.close(code=WS_TRY_AGAIN_LATER)
+        stream = None if services is None else services.event_stream
+        if stream is not None and not stream.reserve():
+            await _refuse_connection(websocket)
             return
-        await services.event_stream.serve(websocket)
+        serving = False
+        try:
+            if not await accept_websocket(websocket):
+                return  # closed 1008 before accept (PHX-101)
+            if stream is None:
+                await websocket.close(code=WS_TRY_AGAIN_LATER)
+                return
+            serving = True
+            await stream.serve(websocket)  # releases the slot when it ends
+        finally:
+            if stream is not None and not serving:
+                stream.release()
 
     return app

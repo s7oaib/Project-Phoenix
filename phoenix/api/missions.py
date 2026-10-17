@@ -242,6 +242,9 @@ class MissionService:
             await self._status(
                 mission_id, MissionStatus.FAILED, failure_code=INTERRUPTED
             )
+            if self._events.enabled:
+                # A sweep may be long: yield so subscribers keep draining.
+                await asyncio.sleep(0)
 
     # ---- lifecycle
 

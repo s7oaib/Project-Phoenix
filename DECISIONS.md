@@ -4083,23 +4083,35 @@ Design:
   `model.*`, `provider.unavailable`, `recovery.*`, `memory.created`,
   `document.indexed` and `voice.*`.
 - **Allowlist.** Every published type has a complete key list, and every key a
-  kind: an ID (`[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`), a closed value set,
-  integer milliseconds or a boolean. Correlation, task and agent IDs must be
-  ID-shaped. No text, path, prompt, output or secret can pass. The bridge
+  kind: a canonical UUID, a step ID (`s1`-`s99` or `final`), a closed value
+  set (including the tool IDs and the registry's agent IDs), integer
+  milliseconds or a boolean. Correlation and task IDs must be UUIDs and agent
+  IDs registry agents. No text, path (not even `notes.txt`), prompt, output or
+  secret can pass. The bridge
   re-checks every event before sending (`rejected_events`).
 - **Never blocking, never failing.** `EventPublisher` swallows anything a sink
   or the allowlist raises (only cancellation propagates) and counts it in
   `PhoenixRuntime.dropped_events` / `MissionService.dropped_events`. The
   production sink, `EventStream.publish`, never raises: a bus that refuses
-  because a subscriber is full is counted in `EventStream.dropped_events`.
+  because a subscriber is full is counted in `EventStream.dropped_events`
+  and closes every client with 1013 (see Bridge).
   Nothing reaches `MissionResult` or `MissionTrace`.
 - **Bridge.** `EventBus` publication is all-or-none, so no client may own a
-  queue the publisher can fill. Each connection gets its own subscription,
-  drained at once into a per-client buffer (`ServerConfig.event_client_buffer`,
-  default 256). A full buffer closes the client with 1013 and releases its
-  subscription; the others are unaffected. Closes wait at most 5 s. Frames are
-  JSON envelopes (eight fields), server to client only; client frames are
-  ignored. Without running services the socket is accepted and closed 1013.
+  queue the publisher can fill. The bridge holds one subscription (bus
+  capacity 4096) while any client is connected; a shared pump drains it
+  promptly, yielding per event, into per-client buffers
+  (`ServerConfig.event_client_buffer`, default 256). A full client buffer
+  closes that client alone with 1013. A bus refusal (the bridge's own
+  subscription overflowed) closes every client with 1013, so no client misses
+  events silently. Long publish loops (the interrupt sweep) yield. Closes wait
+  at most 5 s.
+- **Connection cap.** `ServerConfig.event_max_connections` (default 16). Beyond
+  it the upgrade is refused with HTTP 503 (`too_many_connections`,
+  `Retry-After: 1`) via the WebSocket Denial Response extension, distinct from
+  authentication's 403; each connection runs three tasks.
+- **Frames.** JSON envelopes (eight fields), server to client only; client
+  frames are ignored. Without running services the socket is accepted and
+  closed 1013.
 - **Shutdown.** The lifespan exit closes remaining sockets with 1001 and
   refuses new ones; under the launcher uvicorn closes them with 1012 first.
   `launcher.py` is unchanged.
@@ -4110,10 +4122,10 @@ Design:
   commit. `prompts.py` stays on PHX-047 and `alembic/env.py` on PHX-102. The
   two `git diff origin/main` guards exclude `phoenix/api/event_stream.py`.
 
-Limitations: the ID kind cannot tell an ID from a short ID-shaped name (such as
-`notes.txt`); only runtime-generated IDs are placed in ID fields. A phase cut
-short by the mission or planning deadline reports `cancelled`; the task's
-terminal event carries `timeout`. No connection limit and no replay.
+Limitations: a phase cut short by the mission or planning deadline reports
+`cancelled`; the task's terminal event carries `timeout`. No replay. Deleting
+conversations publishes no terminal mission-scope event for the deleted
+missions; under the launcher, shutdown arrives as uvicorn's 1012.
 
 ## ADR-088 — `websockets` as uvicorn's WebSocket backend
 
