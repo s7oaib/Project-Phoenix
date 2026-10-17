@@ -4251,9 +4251,9 @@ generic message. No new dependencies and no new event types.
 
 ## ADR-090 — Request triage: a routing hint with an observable COMPLEX fallback
 
-Status: Proposed (owner decisions 2026-10-18; the `TRIAGE_SYSTEM` text, the
-routing-set labels and recommendations R1–R12 in
-`tickets/PHX-105-request-triage.md` await owner review)
+Status: Accepted (owner decisions 2026-10-18; the owner approved the `TRIAGE_SYSTEM`
+text, the routing-set labels and recommendations R1–R14 in
+`tickets/PHX-105-request-triage.md` on 2026-10-18; live routing accuracy 85%)
 Date: 2026-10-18
 Ticket: PHX-105
 

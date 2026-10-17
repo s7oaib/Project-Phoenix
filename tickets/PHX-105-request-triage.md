@@ -1,6 +1,6 @@
 # PHX-105 — Request triage
 
-Status: IN_PROGRESS (awaiting owner review of the `TRIAGE_SYSTEM` text, the routing-set labels and R1–R14)
+Status: DONE (the owner approved the `TRIAGE_SYSTEM` text, the routing-set labels and R1–R14 on 2026-10-18)
 Phase: 10 — Product Integration (milestone M1, backend)
 Branch: `feature/PHX-105-request-triage` (local commits only; no push, no PR)
 Base: `origin/main` `f8aaef0` (PHX-104, PR #78)
@@ -57,7 +57,7 @@ Every v3 constant is unchanged; `tests/test_phoenix_runtime.py` pins each v3 dig
 
 Labels most worth checking: `ambiguous-help-essay`, `ambiguous-weather` and `ambiguous-key-points` (complex: the content or data is not in the message), `ambiguous-cpu-cache` (direct: long but general knowledge), and `adversarial-tools-trivial` / `adversarial-fake-system` (direct despite tool or system wording).
 
-## Recommendations (R1–R14, for owner confirmation)
+## Recommendations (R1–R14, confirmed by the owner 2026-10-18)
 
 - **R1 — Placement.** New `phoenix/agents/triage.py` holds `ModelTriageResponder` (the frozen responders' `_generate` and `parse_json_object`, as `tool_steps.py` uses them, and a strict `extra="forbid"` wire model), `TriageOutcome`, `TriageFallbackReason` and `fallback_reason`. `responders.py` is byte-identical. PHOENIX (`agent_id="phoenix"`) owns triage (INV-001); the generation record role is `triage`.
 - **R2 — No PromptInjectionGuard on the request.** The request goes in as the user message, exactly as for the DIRECT and planning roles (ADR-081: only runtime constants and the user's own request appear as raw prompt text). The guard has origins only for untrusted third-party content (web, tool, model, documents), so labelling the user's own request as one would be wrong. Its blocking signals would also turn ordinary wording ("ignore the previous draft") into a `prompt_boundary` fallback. `TRIAGE_SYSTEM` states that the request is data. A wrong path costs only routing: the decision grants nothing, and COMPLEX still has LEVI.
@@ -98,7 +98,12 @@ Live triage accuracy measurements (the main session runs them); changing the DIR
 
 - Triage adds one generation, a T1 load if T2 was resident, and its latency to every request without a path.
 - A crash before a triaged mission settles loses its decision, so run-again triages again (R9). Persisting the decision at triage time would need a mid-run store write.
-- Live accuracy is unmeasured until the main session runs `scripts/routing_benchmark.py`.
+- **Live routing accuracy (2026-10-18, BLAZE-6).** Setup: RTX 3050 on CUDA, Ollama 0.40.4, qwen3.5:4b with thinking off, `phoenix-prompts-v4`, routing set 1.0.0. Evidence is under `validation/PHX-105-routing-20261018-030021`.
+  - **85% overall (51 of 60),** with 0 fallbacks.
+  - **Latency:** median 325 ms, p95 339 ms.
+  - **By category:** factual 100%, rewrite/format 100%, workspace files 100%, ambiguous 88%, adversarial 62%, multi-step **58%**.
+  - **Confusion:** 7 complex requests were routed direct, and 2 direct requests were routed complex.
+  - **Known limitation:** the complex-routed-direct errors cost more, because those requests skip planning and LEVI. Improving multi-step recall is the next routing task. The client override (`path`) and the COMPLEX fallback stay available.
 
 ## Acceptance
 
