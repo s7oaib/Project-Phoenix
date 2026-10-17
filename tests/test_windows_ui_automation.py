@@ -1474,7 +1474,8 @@ def test_source_architecture_and_immutability() -> None:
         "apps",
         "alembic",
         "phoenix/tools/browser.py",
-        "phoenix/tools/filesystem.py",
+        # PHX-048 (ADR-094) changes filesystem.py; it is hash-pinned
+        # (PHX_048_PATHS in test_prompt_injection_defenses.py).
         "phoenix/tools/terminal.py",
         "phoenix/tools/registry.py",
         ":(exclude)apps/desktop/src/App.tsx",
