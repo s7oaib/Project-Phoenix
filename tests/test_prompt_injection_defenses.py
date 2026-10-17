@@ -1725,14 +1725,18 @@ PHX_047_PATHS = ("phoenix/agents/prompts.py",)
 PHX_102_COMMIT = "9ccc5d4522c513832f85da49c44a236284aab7b7"
 PHX_102_PATHS: tuple[str, ...] = ()
 # PHX-103 (ADR-087) intentionally changed runtime.py and tool_steps.py (event
-# publishing), server.py (WS /events wiring) and missions.py (mission events);
-# runtime.py and tool_steps.py stay pinned, at the latest PHX-103 implementation
-# commit (review round; the first round was 829670b). PHX-104 moved server.py
-# and missions.py to its own pin (below).
-PHX_103_COMMIT = "10c17237e0340df9b88041335fbc7b78a8e1e693"
+# publishing), server.py (WS /events wiring) and missions.py (mission events).
+# After PHX-103 merged, its flake fix changed event_stream.py and
+# mission_events.py (then on main). runtime.py, tool_steps.py,
+# mission_events.py and event_stream.py stay pinned, at the latest PHX-103
+# implementation commit (earlier rounds: 829670b, 10c1723). PHX-104 moved
+# server.py and missions.py to its own pin (below).
+PHX_103_COMMIT = "023be4ea7cd71ff8ff5c74b0ff8992cf7bb0c134"
 PHX_103_PATHS = (
     "phoenix/agents/runtime.py",
     "phoenix/agents/tool_steps.py",
+    "phoenix/agents/mission_events.py",
+    "phoenix/api/event_stream.py",
 )
 # PHX-104 (ADR-089) intentionally changed server.py (REST routes, settings
 # store and workspace wiring), missions.py (use_runtime; a mission keeps its

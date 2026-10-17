@@ -25,6 +25,7 @@ from importlib.metadata import metadata, version
 from pathlib import Path
 from typing import Any
 
+import anyio
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -385,6 +386,58 @@ def test_connection_cap_reserves_and_releases_slots() -> None:
     asyncio.run(asyncio.wait_for(scenario(), 10))
 
 
+def test_cancel_scope_cancellation_keeps_its_identity_and_frees_the_slot() -> None:
+    # An anyio cancel scope (as Starlette's TestClient and task groups use)
+    # cancelling the handler is swallowed by that scope, and the slot is freed.
+    async def scenario() -> None:
+        for _ in range(20):
+            bus = EventBus()
+            stream = EventStream(bus)
+            client = FakeWebSocket()
+            assert stream.reserve()
+            with anyio.CancelScope() as scope:
+                asyncio.get_running_loop().call_later(0.01, scope.cancel)
+                await stream.serve(client)  # type: ignore[arg-type]
+            assert scope.cancelled_caught  # swallowed by its own scope
+            assert stream.reserved_connections == 0
+            assert stream.connection_count == 0
+            await until(lambda: bus.subscriber_count == 0)
+
+    asyncio.run(asyncio.wait_for(scenario(), 20))
+
+
+class RaisingCloseWebSocket(FakeWebSocket):
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self.error = error
+
+    async def close(self, code: int = 1000) -> None:
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    ("error", "counted"),
+    [
+        (RuntimeError("close after close"), 0),
+        (ConnectionResetError("client gone"), 0),  # OSError, as ClientDisconnected
+        (TimeoutError(), 0),
+        (ValueError("unexpected"), 1),
+    ],
+)
+def test_close_failures_are_expected_or_counted(error: Exception, counted: int) -> None:
+    async def scenario() -> None:
+        stream = EventStream(EventBus())
+        client = RaisingCloseWebSocket(error)
+        serving = start(stream, client)
+        await until(lambda: stream.connection_count == 1)
+        await stream.close()
+        await serving  # never raises: the handler ends and frees its slot
+        assert stream.failed_closes == counted
+        assert stream.reserved_connections == 0
+
+    asyncio.run(asyncio.wait_for(scenario(), 10))
+
+
 def test_bridge_rejects_invalid_configuration() -> None:
     for options in (
         {"client_buffer": 0},
@@ -491,6 +544,24 @@ def test_valid_token_receives_mission_events_without_content(
     }
 
 
+def test_rapid_disconnects_never_leak_a_cancellation(client: TestClient) -> None:
+    # Regression (PR #76 flake): TestClient disconnects, then cancels the app's
+    # anyio scope while the handler may still be cleaning up. Awaiting the
+    # cancelled children with gather() re-raised a child's message-less
+    # CancelledError, which the scope did not recognise as its own, so it
+    # escaped (about 2% of cycles). 500 cycles make a regression near certain.
+    services = services_of(client)
+    for _ in range(500):
+        with client.websocket_connect(WS_URL, subprotocols=ws_protocols()):
+            pass
+    assert client.portal is not None
+    client.portal.call(
+        until,
+        lambda: services.event_stream.reserved_connections == 0
+        and services.event_bus.subscriber_count == 0,
+    )
+
+
 def test_disconnect_releases_the_bus_subscription(client: TestClient) -> None:
     services = services_of(client)
     for _ in range(3):
@@ -544,7 +615,8 @@ def test_connections_beyond_the_cap_are_refused_with_503(tmp_path: Path) -> None
             assert denied.json()["error"]["code"] == "too_many_connections"
             assert TOKEN not in denied.text
             assert stream.refused_connections == 1
-        client.portal.call(until, lambda: stream.connection_count == 0)
+        # A slot is free only once its handler has fully ended, not at detach.
+        client.portal.call(until, lambda: stream.reserved_connections == 0)
         # Slots are released: a new connection is accepted again.
         with client.websocket_connect(WS_URL, subprotocols=ws_protocols()) as ws:
             assert ws.accepted_subprotocol == WS_SUBPROTOCOL

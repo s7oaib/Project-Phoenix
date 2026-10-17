@@ -314,10 +314,6 @@ class MissionEvents:
         self.correlation_id = correlation_id
         self.task_id: str | None = None
 
-    @property
-    def enabled(self) -> bool:
-        return self._publisher.enabled
-
     async def emit(
         self,
         event_type: EventType,

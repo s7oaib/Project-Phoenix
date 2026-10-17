@@ -51,6 +51,11 @@ DEFAULT_MAX_CONNECTIONS: Final = 16
 DEFAULT_CLOSE_TIMEOUT_SECONDS: Final = 5.0
 
 
+def _retrieve(task: "asyncio.Task[object]") -> None:
+    if not task.cancelled():
+        task.exception()  # retrieved: a finished child never warns
+
+
 @dataclass(eq=False)
 class _Client:
     websocket: WebSocket
@@ -95,6 +100,7 @@ class EventStream:
         self._slow = 0
         self._overflows = 0
         self._refused = 0
+        self._failed_closes = 0
         self._closing: set[asyncio.Task[None]] = set()
 
     @property
@@ -125,6 +131,16 @@ class EventStream:
     def refused_connections(self) -> int:
         """Connections refused because every slot was taken."""
         return self._refused
+
+    @property
+    def reserved_connections(self) -> int:
+        """Slots held; a slot is released when its handler has fully ended."""
+        return self._slots
+
+    @property
+    def failed_closes(self) -> int:
+        """Closes that failed unexpectedly (not already-gone or stalled)."""
+        return self._failed_closes
 
     async def publish(self, event: EventEnvelope) -> None:
         """Never blocks or raises; a bus refusal closes every client (1013)."""
@@ -160,13 +176,19 @@ class EventStream:
                 asyncio.create_task(self._receive(client)),
                 asyncio.create_task(client.stopping.wait()),
             }
+            for task in tasks:
+                task.add_done_callback(_retrieve)
             try:
                 await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             finally:
                 for task in tasks:
                     task.cancel()
                 self._detach(client)
-                await asyncio.gather(*tasks, return_exceptions=True)
+                # asyncio.wait, never gather: gather would re-raise a child's
+                # message-less CancelledError in place of a cancellation of this
+                # handler (e.g. an anyio cancel scope's), which the canceller
+                # then fails to recognise and lets escape.
+                await asyncio.wait(tasks)
             if client.stopping.is_set():
                 await self._close(websocket, client.close_code)
         finally:
@@ -247,8 +269,13 @@ class EventStream:
         try:
             async with asyncio.timeout(self._close_timeout):
                 await websocket.close(code=code)
+        except (RuntimeError, OSError):
+            # Expected: already closed or disconnected (Starlette RuntimeError,
+            # uvicorn ClientDisconnected) or stalled (TimeoutError); the server
+            # drops the transport.
+            pass
         except Exception:
-            pass  # already gone, or stalled: the server drops the transport
+            self._failed_closes += 1  # unexpected: counted, never hidden
 
     async def close(self) -> None:
         """Backend shutdown: close every connection (1001); refuse new ones."""
