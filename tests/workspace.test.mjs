@@ -213,9 +213,11 @@ test('text and selected navigation tokens meet readable contrast', () => {
 test('PHX-080 leaves manifests, entry point and Tauri native security files byte-identical', () => {
   const root = fileURLToPath(new URL('../', import.meta.url));
   // PHX-088 (ADR-075) intentionally changed the native host files; they stay pinned, at the PHX-088 commit.
+  // PHX-103 (ADR-088) intentionally added websockets to pyproject.toml and uv.lock; they stay pinned, at the PHX-103 commit.
   const baselines = {
-    '4a70867203a70d3a85e2c141ef0dbb92bdff42e2': ['package.json', 'package-lock.json', 'pyproject.toml', 'uv.lock', 'apps/desktop/package.json', 'apps/desktop/src/main.tsx', 'apps/desktop/tsconfig.json', 'apps/desktop/vite.config.ts', 'apps/desktop/src-tauri/tauri.conf.json'],
+    '4a70867203a70d3a85e2c141ef0dbb92bdff42e2': ['package.json', 'package-lock.json', 'apps/desktop/package.json', 'apps/desktop/src/main.tsx', 'apps/desktop/tsconfig.json', 'apps/desktop/vite.config.ts', 'apps/desktop/src-tauri/tauri.conf.json'],
     '30c8d5752d2d19dd2d8ec014a0ce5b778ceeb71b': ['apps/desktop/src-tauri/Cargo.toml', 'apps/desktop/src-tauri/Cargo.lock', 'apps/desktop/src-tauri/src/main.rs'],
+    '829670b7713eacf246e3dd282e0e15f1c94c142f': ['pyproject.toml', 'uv.lock'],
   };
   for (const [commit, paths] of Object.entries(baselines)) {
     for (const path of paths) {

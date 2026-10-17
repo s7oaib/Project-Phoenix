@@ -5,10 +5,16 @@ composes PhoenixOrchestrator, AIZEN, the router, task graph, handoffs and LEVI
 without changing them. Steps are text-only unless the caller supplies a
 FilesystemTool: then PHX-046 document steps may make one read-only P1 call through
 ToolRegistry and PermissionEngine, with caller grants only (see tool_steps). No
-events, persistence, recovery or fail-safe behavior exist here. Every failure is
+persistence, recovery or fail-safe behavior exists here. Every failure is
 explicit (INV-021); COMPLETED requires every required LEVI verification to pass
 (INV-008). WAITING_PERMISSION is a non-terminal outcome: the task stays there,
 and a rerun with a grant is a new mission.
+
+PHX-103 (ADR-087): with an optional event sink the runtime publishes live,
+content-free progress (task, step, agent, tool, permission and verification
+events; see mission_events), correlated by the mission's request ID and task
+ID. Events carry IDs, states, codes and timings only. Publishing never blocks
+or fails a mission: refusals are counted, never reported in the result.
 
 Task state is task-level: intermediate step verification runs while RUNNING, and
 VERIFYING is the final-answer verification phase. Callers refresh capability
@@ -17,6 +23,7 @@ yet, so every registered candidate is treated as resource eligible.
 """
 
 import asyncio
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -28,12 +35,20 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     TypeAdapter,
     model_validator,
 )
 
 from phoenix.agents import prompts
 from phoenix.agents.handoff import HandoffBuilder
+from phoenix.agents.mission_events import (
+    EventPublisher,
+    EventSink,
+    MissionEvents,
+    Phase,
+    elapsed_ms,
+)
 from phoenix.agents.orchestrator import (
     CancellationResult,
     CancellationStatus,
@@ -71,6 +86,7 @@ from phoenix.agents.task_graph import (
     TaskState,
     TaskStateMachine,
     TaskStepDefinition,
+    TaskTransition,
 )
 from phoenix.agents.tool_steps import (
     DOCUMENT_TOOL_IDS,
@@ -95,6 +111,7 @@ from phoenix.agents.verifier import (
     VerificationVerdict,
     verification_requirement_satisfied,
 )
+from phoenix.core.events import EventType
 from phoenix.models.lifecycle import ModelLifecycleManager
 from phoenix.models.provider import (
     Identifier,
@@ -314,10 +331,11 @@ class _Evidence:
     verifications: list[StepVerification] = field(default_factory=list)
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
 
-    def settle(self, state: TaskState) -> None:
+    def settle(self, state: TaskState) -> TaskTransition | None:
         # An illegal edge here is a runtime defect: raise rather than skip it.
         if self.machine is not None:
-            self.machine.transition(state)
+            return self.machine.transition(state)
+        return None
 
     def result(
         self,
@@ -371,6 +389,10 @@ class PhoenixRuntime:
 
     filesystem_tool optionally enables read-only document steps under its
     explicit workspace root. Their grants come only from run()'s caller.
+
+    events optionally receives PHX-103 progress events (e.g. an EventBus). It
+    must not block; anything it raises is swallowed and counted in
+    dropped_events, so a mission never fails or waits because of it.
     """
 
     def __init__(
@@ -384,6 +406,7 @@ class PhoenixRuntime:
         tier_table: ModelTierTable | None = None,
         limits: RuntimeLimits | None = None,
         filesystem_tool: FilesystemTool | None = None,
+        events: EventSink | None = None,
     ) -> None:
         registry = (
             build_default_agent_registry() if agent_registry is None else agent_registry
@@ -419,6 +442,7 @@ class PhoenixRuntime:
             self._domains = (*TEXT_DOMAINS, RoutingDomain.DOCUMENTS)
         self._active: dict[str, _Mission] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._events = EventPublisher(events)
 
     @property
     def orchestrator_id(self) -> Literal["phoenix"]:
@@ -427,6 +451,11 @@ class PhoenixRuntime:
     @property
     def active_request_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._active))
+
+    @property
+    def dropped_events(self) -> int:
+        """Events the sink refused or that failed the allowlist (INV-022)."""
+        return self._events.dropped
 
     def _bind_loop(self) -> None:
         loop = asyncio.get_running_loop()
@@ -465,28 +494,32 @@ class PhoenixRuntime:
         mission = _Mission(task)
         self._active[request.request_id] = mission
         evidence = _Evidence(directive)
+        events = MissionEvents(self._events, request.request_id)
         try:
             async with asyncio.timeout(self._limits.mission_timeout_seconds):
                 if directive == OrchestrationPath.DIRECT:
-                    text = await self._direct(request, evidence)
+                    text = await self._direct(request, evidence, events)
                 else:
-                    text = await self._complex(request, evidence, accepted, session)
+                    text = await self._complex(
+                        request, evidence, events, accepted, session
+                    )
             return evidence.result(request, MissionKind.COMPLETED, text=text)
         except asyncio.CancelledError:
-            evidence.settle(TaskState.CANCELLED)
+            await _state_changed(events, evidence.settle(TaskState.CANCELLED))
             if mission.cancellation_requested and task.uncancel() == 0:
                 return evidence.result(request, MissionKind.CANCELLED)
             raise
         except ResponderOutputError as error:
-            return self._failed(
+            return await self._failed(
                 request,
                 evidence,
+                events,
                 MissionFailureCode.RESPONDER_OUTPUT,
                 responder_error=error.code,
             )
         except ToolPermissionRequired as pending:
             # Non-terminal: the task waits; a rerun with a grant is a new mission.
-            evidence.settle(TaskState.WAITING_PERMISSION)
+            await _state_changed(events, evidence.settle(TaskState.WAITING_PERMISSION))
             return evidence.result(
                 request, MissionKind.WAITING_PERMISSION, pending=pending.request
             )
@@ -494,19 +527,23 @@ class PhoenixRuntime:
             code = _failure_code(error)
             if code is None:
                 raise
-            return self._failed(request, evidence, code)
+            return await self._failed(request, evidence, events, code)
         finally:
             del self._active[request.request_id]
 
     @staticmethod
-    def _failed(
+    async def _failed(
         request: PhoenixRequest,
         evidence: _Evidence,
+        events: MissionEvents,
         code: MissionFailureCode,
         *,
         responder_error: ResponderErrorCode | None = None,
     ) -> MissionResult:
-        evidence.settle(TaskState.FAILED)
+        codes: dict[str, JsonValue] = {"failure_code": code.value}
+        if responder_error is not None:
+            codes["responder_error"] = responder_error.value
+        await _state_changed(events, evidence.settle(TaskState.FAILED), **codes)
         return evidence.result(
             request, MissionKind.FAILED, failure=code, responder_error=responder_error
         )
@@ -616,12 +653,15 @@ class PhoenixRuntime:
             )
         )
 
-    async def _direct(self, request: PhoenixRequest, evidence: _Evidence) -> str:
-        health = await self._health(evidence)
-        responder = ModelDirectResponder(self._control("phoenix", health, evidence))
-        result = await self._orchestrator.execute(
-            request, OrchestrationPath.DIRECT, direct_responder=responder
-        )
+    async def _direct(
+        self, request: PhoenixRequest, evidence: _Evidence, events: MissionEvents
+    ) -> str:
+        async with _agent_phase(events, "phoenix", "direct"):
+            health = await self._health(evidence)
+            responder = ModelDirectResponder(self._control("phoenix", health, evidence))
+            result = await self._orchestrator.execute(
+                request, OrchestrationPath.DIRECT, direct_responder=responder
+            )
         assert result.text is not None  # COMPLETED is the only direct outcome.
         return result.text
 
@@ -629,6 +669,7 @@ class PhoenixRuntime:
         self,
         request: PhoenixRequest,
         evidence: _Evidence,
+        events: MissionEvents,
         grants: tuple[PermissionGrant, ...],
         session_id: str | None,
     ) -> str:
@@ -638,22 +679,28 @@ class PhoenixRuntime:
             raise PhoenixRuntimeError("Complex path did not require planning")
         machine = TaskStateMachine(str(uuid4()))
         evidence.machine = machine
-        machine.transition(TaskState.PLANNING)
+        events.task_id = machine.task_id
+        await events.emit(EventType.TASK_CREATED, path=OrchestrationPath.COMPLEX.value)
+        await _transition(events, machine, TaskState.PLANNING)
         health = await self._health(evidence)
 
         async with asyncio.timeout(limits.planning_timeout_seconds):
-            plan = await self._planner.plan(
-                PlanningRequest(request_id=request.request_id, objective=request.text),
-                responder=ModelPlanningResponder(
-                    self._control("strategist", health, evidence),
-                    max_steps=limits.max_plan_steps,
-                ),
-            )
-            assignments = await ModelStepAssignmentResponder(
-                self._control("phoenix", health, evidence, tier="assignment"),
-                self._guard,
-                allowed_domains=self._domains,
-            ).assign(plan)
+            async with _agent_phase(events, "strategist", "planner"):
+                plan = await self._planner.plan(
+                    PlanningRequest(
+                        request_id=request.request_id, objective=request.text
+                    ),
+                    responder=ModelPlanningResponder(
+                        self._control("strategist", health, evidence),
+                        max_steps=limits.max_plan_steps,
+                    ),
+                )
+            async with _agent_phase(events, "phoenix", "assignment"):
+                assignments = await ModelStepAssignmentResponder(
+                    self._control("phoenix", health, evidence, tier="assignment"),
+                    self._guard,
+                    allowed_domains=self._domains,
+                ).assign(plan)
 
         routes = {
             item.step_id: self._route(item.domain, health)
@@ -699,8 +746,8 @@ class PhoenixRuntime:
             {"task_id": machine.task_id, "steps": steps},
             context={"agent_registry": self._agents},
         )
-        machine.transition(TaskState.READY)
-        machine.transition(TaskState.RUNNING)
+        await _transition(events, machine, TaskState.READY)
+        await _transition(events, machine, TaskState.RUNNING)
 
         outputs: dict[str, str] = {}
         for step_id in graph.topological_step_ids:
@@ -708,6 +755,14 @@ class PhoenixRuntime:
             assert step is not None
             final = step_id == FINAL_STEP_ID
             decision = routes[step_id]
+            step_clock = time.monotonic()
+            await events.emit(
+                EventType.STEP_STARTED,
+                agent_id=decision.agent_id,
+                step_id=step_id,
+                domain=decision.domain.value,
+                final=final,
+            )
             producer = ModelCandidateRef(
                 provider_id=decision.provider_id, model_id=decision.model_id
             )
@@ -725,61 +780,86 @@ class PhoenixRuntime:
             )
             prior = tuple((ref, outputs[ref]) for ref in step.input_refs)
             tool_evidence: ToolEvidence | None = None
-            async with asyncio.timeout(step.timeout_seconds):
-                if step_id in documents:
-                    assert self._documents is not None  # allowlisted only with a tool
-                    candidate, tool_evidence = await self._documents.perform(
-                        binding,
-                        handoff,
-                        user_request=request.text,
-                        evidence=prior,
-                        grants=grants,
-                        session_id=session_id,
-                        record=evidence.tool_calls.append,
-                    )
-                else:
-                    candidate = await ModelSpecialistResponder(
-                        binding, self._guard, final=final
-                    ).perform(handoff, user_request=request.text, evidence=prior)
+            role = (
+                "final_answer"
+                if final
+                else "document"
+                if step_id in documents
+                else "specialist"
+            )
+            # Outside the step deadline, so a step timeout reports "timeout".
+            async with _agent_phase(events, decision.agent_id, role, step_id):
+                async with asyncio.timeout(step.timeout_seconds):
+                    if step_id in documents:
+                        assert self._documents is not None  # allowlisted with a tool
+                        candidate, tool_evidence = await self._documents.perform(
+                            binding,
+                            handoff,
+                            user_request=request.text,
+                            evidence=prior,
+                            grants=grants,
+                            session_id=session_id,
+                            record=evidence.tool_calls.append,
+                            events=events,
+                        )
+                    else:
+                        candidate = await ModelSpecialistResponder(
+                            binding, self._guard, final=final
+                        ).perform(handoff, user_request=request.text, evidence=prior)
             if final:
-                machine.transition(TaskState.VERIFYING)
-            verifier = self._control("verifier", health, evidence, avoid=producer)
-            responder: VerificationResponder
-            if final:
-                # PHX-047: LEVI's model sees the verified step outputs it judges.
-                responder = FinalVerificationResponder(
-                    verifier,
-                    self._guard,
-                    original_request=request.text,
-                    evidence=prior,
-                )
-            elif tool_evidence is None:
-                # PHX-047: grounded in the earlier outputs this step saw, if any.
-                responder = StepVerificationResponder(
-                    verifier,
-                    self._guard,
-                    original_request=request.text,
-                    evidence=prior,
-                )
-            else:
-                # PHX-047: LEVI's model sees the guarded tool output it verifies.
-                responder = ToolEvidenceVerificationResponder(
-                    DocumentVerificationResponder(
+                await _transition(events, machine, TaskState.VERIFYING)
+            async with events.phase(
+                EventType.VERIFICATION_STARTED,
+                EventType.VERIFICATION_PASSED,
+                agent_id="verifier",
+                failed=_verification_failed,
+                step_id=step_id,
+            ) as check:
+                verifier = self._control("verifier", health, evidence, avoid=producer)
+                responder: VerificationResponder
+                if final:
+                    # PHX-047: LEVI's model sees the verified step outputs it judges.
+                    responder = FinalVerificationResponder(
                         verifier,
                         self._guard,
                         original_request=request.text,
-                        evidence=tool_evidence,
-                    ),
-                    tool_evidence,
-                    grants,
-                )
-            async with asyncio.timeout(limits.verification_timeout_seconds):
-                verification = await self._verifier.verify(
-                    graph=graph,
-                    handoff=handoff,
-                    candidate_output=candidate,
-                    responder=responder,
-                )
+                        evidence=prior,
+                    )
+                elif tool_evidence is None:
+                    # PHX-047: grounded in the earlier outputs this step saw, if any.
+                    responder = StepVerificationResponder(
+                        verifier,
+                        self._guard,
+                        original_request=request.text,
+                        evidence=prior,
+                    )
+                else:
+                    # PHX-047: LEVI's model sees the guarded tool output it verifies.
+                    responder = ToolEvidenceVerificationResponder(
+                        DocumentVerificationResponder(
+                            verifier,
+                            self._guard,
+                            original_request=request.text,
+                            evidence=tool_evidence,
+                        ),
+                        tool_evidence,
+                        grants,
+                    )
+                async with asyncio.timeout(limits.verification_timeout_seconds):
+                    verification = await self._verifier.verify(
+                        graph=graph,
+                        handoff=handoff,
+                        candidate_output=candidate,
+                        responder=responder,
+                    )
+                satisfied = verification_requirement_satisfied(handoff, verification)
+                check.result = {
+                    "verification_id": verification.verification_id,
+                    "verdict": verification.verdict.value,
+                }
+                if not satisfied:
+                    check.done = EventType.VERIFICATION_FAILED
+                    check.result["code"] = MissionFailureCode.VERIFICATION_FAILED.value
             evidence.verifications.append(
                 StepVerification(
                     step_id=step_id,
@@ -788,10 +868,16 @@ class PhoenixRuntime:
                     verdict=verification.verdict,
                 )
             )
-            if not verification_requirement_satisfied(handoff, verification):
+            if not satisfied:
                 raise _VerificationFailed
             outputs[step_id] = candidate
-        machine.transition(TaskState.COMPLETED)
+            await events.emit(
+                EventType.STEP_COMPLETED,
+                agent_id=decision.agent_id,
+                step_id=step_id,
+                duration_ms=elapsed_ms(step_clock),
+            )
+        await _transition(events, machine, TaskState.COMPLETED)
         return outputs[FINAL_STEP_ID]
 
 
@@ -804,6 +890,71 @@ def _by_id(providers: Sequence[ModelProvider]) -> dict[str, ModelProvider]:
             raise PhoenixRuntimeError("Duplicate model provider ID")
         found[provider.provider_id] = provider
     return found
+
+
+async def _state_changed(
+    events: MissionEvents, transition: TaskTransition | None, **codes: JsonValue
+) -> None:
+    if transition is not None:
+        await events.emit(
+            EventType.TASK_STATE_CHANGED,
+            agent_id=None,
+            scope="task",
+            from_state=transition.from_state.value,
+            to_state=transition.to_state.value,
+            **codes,
+        )
+
+
+async def _transition(
+    events: MissionEvents, machine: TaskStateMachine, state: TaskState
+) -> None:
+    await _state_changed(events, machine.transition(state))
+
+
+def _agent_phase(
+    events: MissionEvents, agent_id: str, role: str, step_id: str | None = None
+) -> Phase:
+    """agent.started, then agent.completed or agent.failed (PHX-103)."""
+    fields: dict[str, JsonValue] = {"role": role}
+    if step_id is not None:
+        fields["step_id"] = step_id
+    phase = events.phase(
+        EventType.AGENT_STARTED,
+        EventType.AGENT_COMPLETED,
+        agent_id=agent_id,
+        failed=_agent_ended,
+        **fields,
+    )
+    phase.result["outcome"] = "completed"
+    return phase
+
+
+def _agent_ended(error: BaseException) -> tuple[EventType, dict[str, JsonValue]]:
+    if isinstance(error, ToolPermissionRequired):
+        # The agent did its part; the step now waits for the user's decision.
+        return EventType.AGENT_COMPLETED, {"outcome": "waiting_permission"}
+    return EventType.AGENT_FAILED, {"code": _event_code(error)}
+
+
+def _verification_failed(
+    error: BaseException,
+) -> tuple[EventType, dict[str, JsonValue]]:
+    return EventType.VERIFICATION_FAILED, {"code": _event_code(error)}
+
+
+def _event_code(error: BaseException) -> str:
+    """A closed code for an event; the mission's own result is unaffected.
+
+    Cancellation, including a mission or planning deadline cutting a phase
+    short, is "cancelled"; the task's terminal event carries the final code.
+    """
+    if isinstance(error, asyncio.CancelledError):
+        return "cancelled"
+    if isinstance(error, ResponderOutputError):
+        return MissionFailureCode.RESPONDER_OUTPUT.value
+    code = _failure_code(error) if isinstance(error, Exception) else None
+    return "internal_error" if code is None else code.value
 
 
 def _failure_code(error: Exception) -> MissionFailureCode | None:

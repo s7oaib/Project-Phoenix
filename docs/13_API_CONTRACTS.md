@@ -23,7 +23,17 @@ FastAPI is the local transport layer.
 
 ## WebSocket
 
-- `WS /events`
+- `WS /events` (PHX-103, ADR-087). Authenticated like every route; a failure
+  closes 1008 before accept, and only `phoenix.v1` is echoed. Frames are
+  server-to-client JSON event envelopes (`event_id`, `event_type`, `timestamp`,
+  `task_id`, `agent_id`, `payload`, `severity`, `correlation_id`) holding IDs,
+  states, codes and timings only (`docs/14_EVENT_SYSTEM.md`). Client frames are
+  ignored, and there is no replay. A client whose bounded buffer fills is closed
+  with 1013 (try again later), and so is every client if the bridge itself
+  overflows. Beyond the connection cap (default 16) the upgrade is refused with
+  HTTP 503 and `Retry-After`; shutdown closes with 1001 (1012 from the server
+  under the launcher). After any close the client reconnects and reloads state
+  over REST, the source of truth.
 
 ## Rules
 

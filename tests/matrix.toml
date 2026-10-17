@@ -176,6 +176,14 @@ path = "tests/test_events.py"
 categories = ["unit"]
 
 [[file]]
+path = "tests/test_events_ws.py"
+categories = ["unit", "integration", "api_contract", "permission_bypass", "secret_leakage"]
+# integration: test_real_server_streams_events_and_closes_sockets_on_shutdown (launcher + uvicorn + websockets + composition root + MissionService + SQLite)
+# api_contract: test_valid_token_receives_mission_events_without_content, test_slow_client_gets_1013_while_others_keep_receiving
+# permission_bypass: test_events_requires_the_token_and_closes_1008_before_accept
+# secret_leakage: test_valid_token_receives_mission_events_without_content, test_off_allowlist_events_are_never_sent
+
+[[file]]
 path = "tests/test_filesystem_tool.py"
 categories = ["unit", "integration", "tools", "permissions", "path_traversal", "permission_bypass", "prompt_injection", "forged_tool_results"]
 # path_traversal: test_real_symlink_escape_rejected, test_real_windows_junction_escape_rejected
@@ -210,6 +218,12 @@ categories = ["unit", "recovery", "forged_tool_results"]
 path = "tests/test_memory_schema.py"
 categories = ["unit", "migrations"]
 # migrations: test_real_alembic_upgrade_downgrade_reupgrade_lifecycle
+
+[[file]]
+path = "tests/test_mission_events.py"
+categories = ["unit", "integration", "secret_leakage"]
+# integration: test_complex_document_mission_publishes_ordered_correlated_events (PhoenixRuntime + FilesystemTool + PermissionEngine + LEVI + SQLite), test_service_publishes_superseded_and_linked_rerun (MissionService)
+# secret_leakage: test_complex_document_mission_publishes_ordered_correlated_events, test_waiting_permission_publishes_permission_requested, test_allowlist_refuses_content_and_unknown_fields
 
 [[file]]
 path = "tests/test_mission_service.py"

@@ -1493,6 +1493,8 @@ def test_source_architecture_and_immutability() -> None:
         ":(exclude)phoenix/persistence/missions.py",
         ":(exclude)alembic/versions/0006_missions.py",
         ":(exclude)alembic/env.py",
+        # PHX-103 (ADR-087) adds the WS /events bridge module.
+        ":(exclude)phoenix/api/event_stream.py",
     ]
     assert not subprocess.check_output(
         ["git", "diff", "origin/main", "--", *paths], cwd=ROOT

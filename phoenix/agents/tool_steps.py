@@ -18,10 +18,18 @@ check (INV-008). PHX-047 grounds LEVI's model check in the same guarded
 and final-answer checks in the guarded verified step outputs those steps saw.
 LEVI's check objects drop unknown keys (never trusted, stored or used); the top
 level stays strict. Failures are explicit (INV-021); there are no retries.
+
+PHX-103 (ADR-087): with the mission's events, a document step publishes
+tool.requested once PHOENIX has built the call, tool.started as the call enters
+ToolRegistry, then exactly one of tool.completed, tool.failed or
+permission.requested. A proposal rejected before a call exists publishes only
+tool.failed. Payloads hold IDs, statuses, codes and timings, never the path,
+the proposal or the output.
 """
 
 import asyncio
 import json
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -39,6 +47,7 @@ from pydantic import (
 
 from phoenix.agents import prompts
 from phoenix.agents.handoff import HandoffEnvelope
+from phoenix.agents.mission_events import MissionEvents, elapsed_ms
 from phoenix.agents.responders import (
     ModelBinding,
     ModelVerificationResponder,
@@ -52,6 +61,7 @@ from phoenix.agents.verifier import (
     VerificationDraft,
     VerificationRequest,
 )
+from phoenix.core.events import EventType
 from phoenix.models.provider import Identifier, NonnegativeInt
 from phoenix.security.permissions import (
     DecisionReason,
@@ -296,8 +306,17 @@ class DocumentStepRunner:
         grants: tuple[PermissionGrant, ...],
         session_id: str | None,
         record: Callable[[ToolCallRecord], None],
+        events: MissionEvents | None = None,
     ) -> tuple[str, ToolEvidence]:
         model = UntrustedContentOrigin.MODEL_OUTPUT
+        step_id = handoff.step_id
+
+        async def emit(event_type: EventType, **payload: str | int) -> None:
+            if events is not None:
+                await events.emit(
+                    event_type, agent_id=DOCUMENT_ACTOR_ID, step_id=step_id, **payload
+                )
+
         objective: _Item = (
             prompts.OBJECTIVE_ITEM,
             model,
@@ -331,9 +350,12 @@ class DocumentStepRunner:
                 )
             ),
         )
-        call, intent = self._call(
-            parse_json_object(proposal, _ToolRequestEnvelope).tool_request
-        )
+        wire = parse_json_object(proposal, _ToolRequestEnvelope).tool_request
+        try:
+            call, intent = self._call(wire)
+        except ToolStepRejected:
+            await emit(EventType.TOOL_FAILED, code="tool_rejected")
+            raise
         request = PermissionRequest(
             request_id=str(uuid4()),
             actor_id=DOCUMENT_ACTOR_ID,
@@ -345,10 +367,33 @@ class DocumentStepRunner:
             task_id=handoff.task_id,
             session_id=session_id,
         )
-        # Synchronous, bounded and read-only; a cancelled await leaves no effect.
-        result = FilesystemToolResult.model_validate(
-            await asyncio.to_thread(self._tool.execute, call, request, grants=grants)
+        ids = {"tool_id": intent.tool_id, "call_id": call.call_id}
+        await emit(
+            EventType.TOOL_REQUESTED,
+            **ids,
+            operation=call.operation.value,
+            permission_request_id=request.request_id,
         )
+        await emit(EventType.TOOL_STARTED, **ids)
+        clock = time.monotonic()
+        try:
+            # Synchronous, bounded and read-only; a cancelled await leaves no effect.
+            result = FilesystemToolResult.model_validate(
+                await asyncio.to_thread(
+                    self._tool.execute, call, request, grants=grants
+                )
+            )
+        except BaseException as interrupted:
+            code = (
+                "cancelled"
+                if isinstance(interrupted, asyncio.CancelledError)
+                else "internal_error"
+            )
+            await emit(
+                EventType.TOOL_FAILED, **ids, code=code, duration_ms=elapsed_ms(clock)
+            )
+            raise
+        ended = {**ids, "tool_status": result.status.value}
         status = result.permission_decision.status
         content: tuple[str, str] | None = None
         if status == PermissionStatus.ALLOWED and result.output is not None:
@@ -371,15 +416,37 @@ class DocumentStepRunner:
             )
         )
         if status == PermissionStatus.APPROVAL_REQUIRED:
+            await emit(
+                EventType.PERMISSION_REQUESTED,
+                **ids,
+                permission_request_id=request.request_id,
+                risk_level=intent.risk_level.value,
+            )
             raise ToolPermissionRequired(request)
+        failure: tuple[str, Exception] | None = None
         if status != PermissionStatus.ALLOWED:
-            raise ToolStepRejected("Permission was not granted")
-        if content is None or result.status != ToolResultStatus.SUCCESS:
+            failure = "tool_rejected", ToolStepRejected("Permission was not granted")
+        elif content is None or result.status != ToolResultStatus.SUCCESS:
             # FAILURE, or a truncated PARTIAL_SUCCESS listing LEVI would reject.
-            raise ToolStepFailed("Workspace request failed")
+            failure = "tool_failed", ToolStepFailed("Workspace request failed")
+        elif len(content[1]) > binding.max_output_chars:
+            failure = (
+                "tool_failed",
+                ToolStepFailed("Tool output exceeds the configured limit"),
+            )
+        if failure is not None:
+            code, error = failure
+            await emit(
+                EventType.TOOL_FAILED,
+                **ended,
+                code=code,
+                decision=status.value,
+                duration_ms=elapsed_ms(clock),
+            )
+            raise error
+        assert content is not None
         field, text = content
-        if len(text) > binding.max_output_chars:
-            raise ToolStepFailed("Tool output exceeds the configured limit")
+        await emit(EventType.TOOL_COMPLETED, **ended, duration_ms=elapsed_ms(clock))
         answer = await _generate(
             binding,
             "document_answer",

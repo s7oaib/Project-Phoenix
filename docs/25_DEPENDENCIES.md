@@ -81,6 +81,16 @@ Pillow is installed for ReportLab's declared dependency, not promoted to an OCR,
 vision or image-generation feature. Strict mypy has only a narrowly scoped external
 `reportlab`/`reportlab.*` ignore_missing_imports override; no local typing bypass.
 
+### WebSockets (Phase 10)
+
+ADR-088 promotes `websockets>=17.2,<18`, locked **17.2** (BSD-3-Clause), as a
+required Python runtime dependency for PHX-103 `WS /events`. It is uvicorn's
+WebSocket backend: with it installed, uvicorn's automatic selection uses its
+sans-I/O implementation. It has no transitive packages; every other lock record
+is unchanged. It is a direct requirement, not the `uvicorn[standard]` extra, and
+tests use its synchronous client against a real loopback server.
+See https://websockets.readthedocs.io/.
+
 ## Optional V1 runtime
 
 ### Colibri
