@@ -2046,6 +2046,8 @@ def test_scope_ast_schema_dependencies_and_protected_sources_unchanged(
             ).encode()
             assert current.count(missions) == 1
             current = current.replace(missions, b"")
+            # PHX-102 is now merged into main, so its baseline holds it too.
+            previous = previous.replace(b"\r\n", b"\n").replace(missions, b"")
         assert current == previous.replace(b"\r\n", b"\n")
     allowed = {
         "asyncio",

@@ -214,8 +214,9 @@ def test_construction_is_lazy(settings: AppSettings) -> None:
     assert not settings.data_dir.exists()
     assert get_services(app) is None
     paths = {getattr(route, "path", None) for route in app.routes}
-    assert {"/health", "/ready"} <= paths
-    assert not paths & {"/agents", "/models", "/tasks", "/chat", "/events"}
+    # PHX-103 (ADR-087) adds WS /events.
+    assert {"/health", "/ready", "/events"} <= paths
+    assert not paths & {"/agents", "/models", "/tasks", "/chat"}
 
 
 def test_lifespan_builds_services_once_and_closes_them(settings: AppSettings) -> None:

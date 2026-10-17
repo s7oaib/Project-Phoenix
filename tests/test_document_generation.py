@@ -988,20 +988,23 @@ def test_pdf_native_diagnostics_redacted_and_factory_restored(
 def test_exact_dependency_delta_external_typing_override_and_historical_sources() -> (
     None
 ):
-    def historic(path: str) -> str:
+    def historic(path: str, commit: str = MAIN) -> str:
         return subprocess.check_output(
-            ["git", "show", MAIN + ":" + path], cwd=ROOT
+            ["git", "show", commit + ":" + path], cwd=ROOT
         ).decode()
 
+    # Fixed PHX-073 history (main -> 4a70867); PHX-103's gate (ADR-087,
+    # tests/test_events_ws.py) now owns current manifest/lock exactness.
+    post = "4a70867203a70d3a85e2c141ef0dbb92bdff42e2"
     old = tomllib.loads(historic("pyproject.toml"))
-    new = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    new = tomllib.loads(historic("pyproject.toml", post))
     new["project"]["dependencies"].remove("reportlab>=5.0.1,<6")
     assert new["tool"]["mypy"].pop("overrides") == [
         {"module": ["reportlab", "reportlab.*"], "ignore_missing_imports": True}
     ]
     assert new == old
     before = tomllib.loads(historic("uv.lock"))
-    after = tomllib.loads((ROOT / "uv.lock").read_text())
+    after = tomllib.loads(historic("uv.lock", post))
     records = {x["name"]: x for x in before.pop("package")}
     current = {x["name"]: x for x in after.pop("package")}
     assert before == after
@@ -1019,6 +1022,20 @@ def test_exact_dependency_delta_external_typing_override_and_historical_sources(
             ):
                 entries[:] = [x for x in entries if x["name"] != "reportlab"]
         assert retained == record, name
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert "reportlab>=5.0.1,<6" in project["project"]["dependencies"]
+    assert project["tool"]["mypy"]["overrides"] == [
+        {"module": ["reportlab", "reportlab.*"], "ignore_missing_imports": True}
+    ]
+    locked = {
+        x["name"]: x["version"]
+        for x in tomllib.loads((ROOT / "uv.lock").read_text())["package"]
+    }
+    assert {n: locked[n] for n in ("reportlab", "pillow", "charset-normalizer")} == {
+        "reportlab": "5.0.1",
+        "pillow": "12.3.0",
+        "charset-normalizer": "3.5.2",
+    }
     assert (
         version("reportlab") == "5.0.1"
         and version("python-docx") == "1.2.0"

@@ -1864,6 +1864,8 @@ def test_no_action_persistence_or_dependency_change() -> None:
             ":(exclude)phoenix/persistence/missions.py",
             ":(exclude)alembic/versions/0006_missions.py",
             ":(exclude)alembic/env.py",
+            # PHX-103 (ADR-087) adds the WS /events bridge module.
+            ":(exclude)phoenix/api/event_stream.py",
         ],
         cwd=ROOT,
     )

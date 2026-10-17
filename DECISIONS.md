@@ -4032,3 +4032,109 @@ Design:
   the change also affects `document_chunks`.
 
 No routes (PHX-104) and no events (PHX-103). No new dependencies.
+
+## ADR-087 — Content-free runtime events and the `WS /events` stream
+
+Status: Proposed (owner decisions 2026-10-17; recommendations R1–R16 in
+`tickets/PHX-103-runtime-events-ws.md` await confirmation)
+Date: 2026-10-17
+Ticket: PHX-103
+
+This supersedes ADR-081's "Events. None" for the runtime. The 32-type vocabulary
+is unchanged.
+
+Owner decisions:
+
+- **The runtime publishes.** `PhoenixRuntime(events=...)` takes an optional sink
+  (default none, so behaviour without one is unchanged). Events are live, use
+  only existing types, and are correlated by the mission (request) ID and the
+  task ID. Publishing never blocks or fails a mission (INV-021, INV-022).
+  MissionService publishes coarse mission events.
+- **Slow clients are disconnected.** `WS /events` is authenticated by the
+  PHX-101 helper. Each connection has a bounded buffer; a full buffer closes
+  that client with 1013, and the client reloads state over REST, the source of
+  truth. There is no replay in v1.
+- **Payloads hold IDs, states, codes and timings only**, enforced by an
+  allowlist schema.
+
+Design:
+
+- **Modules.** `phoenix/agents/mission_events.py` (new) holds `EventSink`, the
+  payload allowlist, `mission_event`, `check_event`, `EventPublisher` and the
+  per-mission `MissionEvents`. It imports no API, persistence, tool or
+  provider module. `phoenix/api/event_stream.py` (new) holds `EventStream`, the
+  sink and fan-out. `runtime.py`, `tool_steps.py`, `missions.py` and `server.py`
+  change; `responders.py` is byte-identical.
+- **Mapping.** End events also carry `duration_ms`.
+
+  | Event | When | Payload (besides IDs) |
+  | --- | --- | --- |
+  | `task.created` | COMPLEX task created | `path` |
+  | `task.state_changed` (`scope=task`) | every task transition | `from_state`, `to_state`, `failure_code`/`responder_error` on failure |
+  | `task.state_changed` (`scope=mission`) | every MissionService status change | `mission_status`, `failure_code`, `responder_error`, `rerun_of` |
+  | `agent.started` / `agent.completed` / `agent.failed` | PHOENIX direct, AIZEN planner, PHOENIX assignment, each step's producer | `role`, `step_id`, `outcome` (`completed` or `waiting_permission`), `code` |
+  | `step.started` / `step.completed` | each task step; completed only after LEVI passes it | `step_id`, `domain`, `final` |
+  | `tool.requested` / `tool.started` / `tool.completed` / `tool.failed` | a document step's one call | `tool_id`, `call_id`, `operation`, `permission_request_id`, `tool_status`, `decision`, `code` |
+  | `permission.requested` | the call needs the user's approval | `tool_id`, `call_id`, `permission_request_id`, `risk_level` |
+  | `verification.started` / `verification.passed` / `verification.failed` | LEVI per step | `step_id`, `verification_id`, `verdict`, `code` |
+
+  A DIRECT mission publishes only `phoenix`'s agent events (it has no task),
+  plus the mission events. Unused: `phoenix.*`, `permission.approved/denied`,
+  `model.*`, `provider.unavailable`, `recovery.*`, `memory.created`,
+  `document.indexed` and `voice.*`.
+- **Allowlist.** Every published type has a complete key list, and every key a
+  kind: an ID (`[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`), a closed value set,
+  integer milliseconds or a boolean. Correlation, task and agent IDs must be
+  ID-shaped. No text, path, prompt, output or secret can pass. The bridge
+  re-checks every event before sending (`rejected_events`).
+- **Never blocking, never failing.** `EventPublisher` swallows anything a sink
+  or the allowlist raises (only cancellation propagates) and counts it in
+  `PhoenixRuntime.dropped_events` / `MissionService.dropped_events`. The
+  production sink, `EventStream.publish`, never raises: a bus that refuses
+  because a subscriber is full is counted in `EventStream.dropped_events`.
+  Nothing reaches `MissionResult` or `MissionTrace`.
+- **Bridge.** `EventBus` publication is all-or-none, so no client may own a
+  queue the publisher can fill. Each connection gets its own subscription,
+  drained at once into a per-client buffer (`ServerConfig.event_client_buffer`,
+  default 256). A full buffer closes the client with 1013 and releases its
+  subscription; the others are unaffected. Closes wait at most 5 s. Frames are
+  JSON envelopes (eight fields), server to client only; client frames are
+  ignored. Without running services the socket is accepted and closed 1013.
+- **Shutdown.** The lifespan exit closes remaining sockets with 1001 and
+  refuses new ones; under the launcher uvicorn closes them with 1012 first.
+  `launcher.py` is unchanged.
+- **Frozen files.** `runtime.py` and `tool_steps.py` (PHX-047 pin), `server.py`
+  (PHX-102 pin) and `missions.py` (`origin/main`) are pinned to the PHX-103
+  implementation commit (`PHX_103_COMMIT` / `PHX_103_PATHS`), landed as an
+  implementation commit and then a pin commit; the PR must merge with a merge
+  commit. `prompts.py` stays on PHX-047 and `alembic/env.py` on PHX-102. The
+  two `git diff origin/main` guards exclude `phoenix/api/event_stream.py`.
+
+Limitations: the ID kind cannot tell an ID from a short ID-shaped name (such as
+`notes.txt`); only runtime-generated IDs are placed in ID fields. A phase cut
+short by the mission or planning deadline reports `cancelled`; the task's
+terminal event carries `timeout`. No connection limit and no replay.
+
+## ADR-088 — `websockets` as uvicorn's WebSocket backend
+
+Status: Accepted (owner decision 2026-10-17)
+Date: 2026-10-17
+Ticket: PHX-103
+
+Real-uvicorn WebSockets needed a new dependency (ADR-084 Q3). The owner chose
+`websockets`.
+
+- **Requirement.** `websockets>=17.2,<18`, locked **17.2** (released
+  2026-10-03, BSD-3-Clause), following the bounded style of `uvicorn>=0.30,<1`.
+  It has no transitive packages, so the lock gains exactly one record and the
+  `phoenix` record's two references; every other record is unchanged. It is a
+  direct requirement, not the `uvicorn[standard]` extra.
+- **Backend.** uvicorn 0.54's `ws="auto"` selects
+  `WebSocketsSansIOProtocol` when `websockets` is importable. No uvicorn option
+  changes.
+- **Guards.** Following the PHX-088 precedent, the workspace byte pins for
+  `pyproject.toml` and `uv.lock` move to the PHX-103 implementation commit;
+  the other files in that map stay on `4a70867`. The PHX-073 exactness gate
+  (`tests/test_document_generation.py`) becomes fixed history plus retention
+  checks, and the new PHX-103 gate (`tests/test_events_ws.py`) owns current
+  manifest and lock exactness against `4a70867`.

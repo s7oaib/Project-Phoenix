@@ -2,15 +2,19 @@
 
 build_server_app() wraps the transport from create_app() with a lifespan that
 migrates SQLite to head, builds every backend service exactly once, keeps them in
-one typed container on ``app.state.phoenix`` and closes them on exit. The only
-route added is ``GET /ready``, and every route requires local API security
-(PHX-101); the interactive docs and OpenAPI schema are removed. Migrations run
+one typed container on ``app.state.phoenix`` and closes them on exit. The routes
+added are ``GET /ready`` and ``WS /events``, and every route requires local API
+security (PHX-101); the interactive docs and OpenAPI schema are removed. Migrations run
 under an exclusive, bounded data-directory lock. Readiness probes are bounded,
 with at most one database check in flight; a failing provider reports as
 unavailable and the backend as degraded, never as a crash (INV-021, INV-022). No
 filesystem workspace is configured here (PHX-108). PHX-102 (ADR-086) adds the
 persisted MissionService: it starts with the lifespan, and the shutdown path stops
-it, so queued and running missions are recorded as interrupted.
+it, so queued and running missions are recorded as interrupted. PHX-103 (ADR-087)
+adds ``WS /events``: the runtime and the mission service publish content-free
+events to the EventStream, which fans them out to authenticated WebSocket
+clients with a bounded buffer each (a slow client is closed with 1013) and
+closes every connection when the backend stops.
 """
 
 import asyncio
@@ -26,7 +30,7 @@ from typing import IO, Literal
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine
@@ -36,8 +40,18 @@ from alembic import command
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.runtime import ModelTierTable, PhoenixRuntime, default_tier_table
 from phoenix.api.app import create_app
+from phoenix.api.event_stream import (
+    DEFAULT_CLIENT_BUFFER,
+    EVENTS_PATH,
+    WS_TRY_AGAIN_LATER,
+    EventStream,
+)
 from phoenix.api.missions import MissionService
-from phoenix.api.security import LocalApiSecurity, install_local_api_security
+from phoenix.api.security import (
+    LocalApiSecurity,
+    accept_websocket,
+    install_local_api_security,
+)
 from phoenix.core.config import AppSettings
 from phoenix.core.event_bus import EventBus
 from phoenix.models.lifecycle import ModelLifecycleManager
@@ -100,6 +114,10 @@ class ServerConfig(BaseModel):
     )
     migration_lock_timeout_seconds: float = Field(
         default=30.0, gt=0, le=600, allow_inf_nan=False
+    )
+    # PHX-103: events buffered per WebSocket client before it counts as slow.
+    event_client_buffer: int = Field(
+        default=DEFAULT_CLIENT_BUFFER, strict=True, ge=1, le=4096
     )
     alembic_ini: Path = ALEMBIC_INI
 
@@ -176,6 +194,7 @@ class BackendServices:
     providers: tuple[ModelProvider, ...]
     structured_providers: tuple[ModelProvider, ...]
     event_bus: EventBus
+    event_stream: EventStream
     tool_registry: ToolRegistry
     permission_policy: PermissionPolicy
     audit_trail: AuditTrail
@@ -369,6 +388,8 @@ async def open_services(
         lifecycle = ModelLifecycleManager()
         session_factory = create_session_factory(engine)
         tools = ToolRegistry(filesystem_tool_definitions())
+        bus = EventBus()
+        stream = EventStream(bus, client_buffer=config.event_client_buffer)
         runtime = PhoenixRuntime(
             providers=provider_set.providers,
             structured_providers=provider_set.structured,
@@ -376,6 +397,7 @@ async def open_services(
             lifecycle=lifecycle,
             agent_registry=agents,
             tier_table=table,
+            events=stream,
         )
         services = BackendServices(
             settings=settings,
@@ -389,7 +411,8 @@ async def open_services(
             lifecycle=lifecycle,
             providers=provider_set.providers,
             structured_providers=provider_set.structured,
-            event_bus=EventBus(),
+            event_bus=bus,
+            event_stream=stream,
             tool_registry=tools,
             permission_policy=PermissionPolicy(),
             audit_trail=AuditTrail(session_factory, tools),
@@ -398,13 +421,17 @@ async def open_services(
                 runtime=runtime,
                 store=MissionStore(session_factory),
                 tool_registry=tools,
+                events=stream,
             ),
         )
         try:
             await services.missions.start()
             yield services
         finally:
-            await cancel_active_missions(services)
+            try:
+                await cancel_active_missions(services)
+            finally:
+                await stream.close()  # 1001 to every remaining client
 
 
 def get_services(app: FastAPI) -> BackendServices | None:
@@ -475,7 +502,7 @@ def build_server_app(
     config: ServerConfig | None = None,
     provider_factory: ProviderFactory | None = None,
 ) -> FastAPI:
-    """create_app() plus the owning lifespan and GET /ready; no other routes.
+    """create_app() plus the owning lifespan, GET /ready and WS /events.
 
     Local API security is mandatory (PHX-101): every route, including /health
     and /ready, requires the bound Host, an allowed Origin and the token.
@@ -504,5 +531,16 @@ def build_server_app(
         )
         code = 503 if report.status == ReadinessStatus.UNAVAILABLE else 200
         return JSONResponse(report.model_dump(mode="json"), status_code=code)
+
+    @app.websocket(EVENTS_PATH)
+    async def events(websocket: WebSocket) -> None:
+        """PHX-103: live, content-free events; REST stays the source of truth."""
+        if not await accept_websocket(websocket):
+            return  # closed 1008 before accept (PHX-101)
+        services = get_services(websocket.app)
+        if services is None:
+            await websocket.close(code=WS_TRY_AGAIN_LATER)
+            return
+        await services.event_stream.serve(websocket)
 
     return app

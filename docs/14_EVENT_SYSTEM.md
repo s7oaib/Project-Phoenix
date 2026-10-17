@@ -42,3 +42,31 @@ Provide observable real-time state for orchestration, UI, logging, and evaluatio
 ## Envelope
 
 event_id, event_type, timestamp, task_id optional, agent_id optional, payload, severity, correlation_id.
+
+## Published events (PHX-103, ADR-087)
+
+The runtime and the mission service publish 15 of the 32 types; none is added.
+Every payload holds IDs, closed states and codes, booleans and integer
+millisecond timings only, checked against an allowlist
+(`phoenix/agents/mission_events.py`). Message text, prompts, model and tool
+output, file content, paths and secrets never appear.
+
+- `correlation_id`: the mission (request) ID. `task_id`: the runtime task
+  (COMPLEX only). `agent_id`: the internal agent ID.
+- `task.created`, then `task.state_changed` (`scope=task`) for every task
+  transition, with the failure code on failure.
+- `agent.started`, then `agent.completed` (`outcome` `completed` or
+  `waiting_permission`) or `agent.failed` (`code`): PHOENIX direct, AIZEN
+  planning, PHOENIX assignment and each step's producer.
+- `step.started`; `step.completed` only after LEVI passes the step.
+- A document step's call: `tool.requested`, `tool.started`, then
+  `tool.completed`, `tool.failed` or `permission.requested`.
+- LEVI: `verification.started`, then `verification.passed` or
+  `verification.failed`.
+- MissionService: `task.state_changed` with `scope=mission` for every recorded
+  status (queued, running, completed, failed, cancelled, waiting_permission,
+  superseded), with closed failure codes (including `interrupted` and
+  `permission_denied`) and `rerun_of`.
+
+Publishing never blocks or fails a mission; refusals are counted, not reported
+in results. `WS /events` streams the events (`docs/13_API_CONTRACTS.md`).

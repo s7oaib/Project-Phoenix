@@ -19,6 +19,14 @@ purges chat history older than the retention window and starts the runner and
 an hourly purge. ``stop`` marks queued missions interrupted, cancels the running
 one and records it interrupted too.
 
+Events (PHX-103, ADR-087): with an optional sink, every status change the
+service records is published as a ``task.state_changed`` event with
+``scope="mission"``, the mission ID as correlation ID, and the status, closed
+codes and ``rerun_of`` only: queued, running, each settled outcome,
+superseded, cancelled, failed (including ``interrupted`` and
+``permission_denied``). Publishing never blocks or fails the service; refusals
+are counted in ``dropped_events``.
+
 This module is application logic for the backend process, not transport: it
 imports no FastAPI, and PHX-104 routes will call it.
 """
@@ -31,8 +39,9 @@ from enum import StrEnum
 from typing import Literal, ParamSpec, TypeVar
 from uuid import uuid4
 
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
+from phoenix.agents.mission_events import EventPublisher, EventSink
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
 from phoenix.agents.runtime import (
     MissionKind,
@@ -41,10 +50,12 @@ from phoenix.agents.runtime import (
     PhoenixRuntime,
 )
 from phoenix.agents.tool_steps import document_grants
+from phoenix.core.events import EventType
 from phoenix.persistence.missions import (
     ACTIVE_STATUSES,
     INTERNAL_ERROR,
     INTERRUPTED,
+    PERMISSION_DENIED,
     ConversationRecord,
     GrantRecord,
     InvalidStateError,
@@ -121,6 +132,7 @@ class MissionService:
         purge_interval_seconds: float = DEFAULT_PURGE_INTERVAL_SECONDS,
         shutdown_grace_seconds: float = DEFAULT_SHUTDOWN_GRACE_SECONDS,
         clock: Callable[[], datetime] = _utcnow,
+        events: EventSink | None = None,
     ) -> None:
         if retention <= timedelta(0):
             raise ValueError("Retention must be positive")
@@ -146,6 +158,7 @@ class MissionService:
         self._record_failures = 0
         self._skipped_grants = 0
         self._writers = 0  # submit/approve/run_again calls between check and enqueue
+        self._events = EventPublisher(events)
 
     @property
     def session_id(self) -> str:
@@ -172,6 +185,11 @@ class MissionService:
         return self._skipped_grants
 
     @property
+    def dropped_events(self) -> int:
+        """Mission events the sink refused (PHX-103); observable, not raised."""
+        return self._events.dropped
+
+    @property
     def running_mission_id(self) -> str | None:
         current = self._current
         return None if current is None else current.mission_id
@@ -192,12 +210,46 @@ class MissionService:
         if self._state != "running":
             raise ServiceNotRunningError("Mission service is not running")
 
+    async def _status(
+        self,
+        mission_id: str,
+        status: MissionStatus,
+        *,
+        failure_code: str | None = None,
+        responder_error: str | None = None,
+        rerun_of: str | None = None,
+    ) -> None:
+        """Publish one recorded status change; content-free (PHX-103)."""
+        if not self._events.enabled:
+            return
+        payload: dict[str, JsonValue] = {
+            "scope": "mission",
+            "mission_status": status.value,
+        }
+        for key, value in (
+            ("failure_code", failure_code),
+            ("responder_error", responder_error),
+            ("rerun_of", rerun_of),
+        ):
+            if value is not None:
+                payload[key] = value
+        await self._events.publish(
+            EventType.TASK_STATE_CHANGED, payload, correlation_id=mission_id
+        )
+
+    async def _interrupted(self, mission_ids: tuple[str, ...]) -> None:
+        for mission_id in mission_ids:
+            await self._status(
+                mission_id, MissionStatus.FAILED, failure_code=INTERRUPTED
+            )
+
     # ---- lifecycle
 
     async def start(self) -> None:
         if self._state != "new":
             raise ServiceNotRunningError("Mission service can start only once")
         self._recovered = await self._io(self._store.interrupt, self._now())
+        await self._interrupted(self._recovered)
         await self._io(self._store.purge, self._now() - self._retention)
         self._state = "running"
         self._runner = asyncio.create_task(self._run_loop())
@@ -239,9 +291,11 @@ class MissionService:
         # Shutdown must finish even if the database is gone; rows left active
         # are marked interrupted by the next start instead (owner decision 4).
         try:
-            await self._io(self._store.interrupt, self._now(), statuses)
+            interrupted = await self._io(self._store.interrupt, self._now(), statuses)
         except Exception:
             self._record_failures += 1
+            return
+        await self._interrupted(interrupted)
 
     async def _run_loop(self) -> None:
         while True:
@@ -277,6 +331,7 @@ class MissionService:
                 return
             if claimed is None:
                 return  # cancelled or deleted while queued
+            await self._status(mission_id, MissionStatus.RUNNING)
             try:
                 found = await self._io(self._store.active_grants, self._session_id)
                 self._skipped_grants += found.skipped
@@ -299,7 +354,13 @@ class MissionService:
             # The run is over: a cancel from here on finds nothing to cancel.
             self._current = None
             try:
-                await self._io(self._store.settle, mission_id, outcome, self._now())
+                if await self._io(self._store.settle, mission_id, outcome, self._now()):
+                    await self._status(
+                        mission_id,
+                        outcome.status,
+                        failure_code=outcome.failure_code,
+                        responder_error=outcome.responder_error,
+                    )
             except Exception:
                 if outcome is _INTERNAL_ERROR:
                     raise  # counted by the run loop
@@ -316,9 +377,14 @@ class MissionService:
     ) -> None:
         """Best-effort internal_error record; a failure is counted, not raised."""
         try:
-            await self._io(function, mission_id, INTERNAL_ERROR, self._now())
+            recorded = await self._io(function, mission_id, INTERNAL_ERROR, self._now())
         except Exception:
             self._record_failures += 1
+            return
+        if recorded:
+            await self._status(
+                mission_id, MissionStatus.FAILED, failure_code=INTERNAL_ERROR
+            )
 
     @staticmethod
     def _usable(stored: tuple[PermissionGrant, ...]) -> tuple[PermissionGrant, ...]:
@@ -386,6 +452,7 @@ class MissionService:
             raise InvalidRequestError("Invalid mission text or path") from None
         await self._write_and_enqueue(
             mission_id,
+            None,
             self._store.submit,
             conversation_id=conversation_id,
             mission_id=mission_id,
@@ -401,13 +468,14 @@ class MissionService:
         self._require_running()
         new_id = str(uuid4())
         await self._write_and_enqueue(
-            new_id, self._store.rerun, mission_id, new_id, self._now()
+            new_id, mission_id, self._store.rerun, mission_id, new_id, self._now()
         )
         return new_id
 
     async def cancel(self, mission_id: str) -> CancelOutcome:
         """Cancel a queued mission now, or ask the running one to stop."""
         if await self._io(self._store.cancel_queued, mission_id, self._now()):
+            await self._status(mission_id, MissionStatus.CANCELLED)
             return CancelOutcome.CANCELLED  # the runner's claim will now fail
         record = await self._io(self._store.get_mission, mission_id)
         if record is None:
@@ -512,13 +580,23 @@ class MissionService:
             ) from None
         new_id = str(uuid4())
         await self._write_and_enqueue(
-            new_id, self._store.approve, request_id, grant, new_id
+            new_id, record.mission_id, self._store.approve, request_id, grant, new_id
         )
+        await self._status(record.mission_id, MissionStatus.SUPERSEDED)
         return new_id
 
     async def deny(self, request_id: str) -> None:
         """The user denied: the mission fails ``permission_denied``."""
+        record = None
+        if self._events.enabled:
+            record = await self._io(self._store.get_permission_request, request_id)
         await self._guarded(self._store.deny, request_id, self._now())
+        if record is not None:
+            await self._status(
+                record.mission_id,
+                MissionStatus.FAILED,
+                failure_code=PERMISSION_DENIED,
+            )
 
     async def revoke(self, grant_id: str) -> bool:
         """Revoke a grant; later runs no longer receive it. False if already.
@@ -531,6 +609,7 @@ class MissionService:
     async def _write_and_enqueue(
         self,
         queued_id: str,
+        rerun_of: str | None,
         function: Callable[_P, object],
         /,
         *args: _P.args,
@@ -539,12 +618,14 @@ class MissionService:
         """Write a queued row, then enqueue it only if still running.
 
         Once stop() begins nothing new is enqueued; stop() waits for writes in
-        flight and its final sweep marks their rows interrupted.
+        flight and its final sweep marks their rows interrupted. The queued
+        event is published inside that window, so it precedes the sweep's.
         """
         self._require_running()
         self._writers += 1
         try:
             await self._guarded(function, *args, **kwargs)
+            await self._status(queued_id, MissionStatus.QUEUED, rerun_of=rerun_of)
         finally:
             self._writers -= 1
         if self._state == "running":

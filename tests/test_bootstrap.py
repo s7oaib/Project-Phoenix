@@ -44,4 +44,5 @@ def test_distribution_has_foundation_runtime_dependencies() -> None:
         "reportlab",
         "sqlalchemy",
         "uvicorn",
+        "websockets",  # PHX-103 (ADR-088)
     }
