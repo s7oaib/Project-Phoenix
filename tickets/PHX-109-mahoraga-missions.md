@@ -61,7 +61,7 @@ Each item below is applied under the owner's overnight instruction (2026-10-18).
   - `test_vocabulary_stays_32_and_mapping_uses_existing_types` lists the three recovery types.
 
   The two provider-error runtime tests now take the 2 s default backoff.
-- **R16 — Pins.** `runtime.py` and `mission_events.py` move from the PHX-105 pin to the PHX-109 implementation commit (`PHX_109_COMMIT` / `PHX_109_PATHS`) in a separate pin commit, so each path keeps exactly one baseline. `mission_recovery.py` is new, so it is protected once it is on `origin/main`. The PR must merge with a merge commit.
+- **R16 — Pins.** `runtime.py` and `mission_events.py` move from the PHX-105 pin to the PHX-109 implementation commit (`PHX_109_COMMIT` / `PHX_109_PATHS`, `2cf01ae286b4b74140769fba925a1b46a1a255e3`) in a separate pin commit, so each path keeps exactly one baseline. `mission_recovery.py` is new, so it is protected once it is on `origin/main`. The PR must merge with a merge commit.
 
 ## Requirements
 
