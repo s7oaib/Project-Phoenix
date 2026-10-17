@@ -82,7 +82,9 @@ def _workspace(directory: Path) -> Path:
     root = directory / "workspace"
     root.mkdir()
     (root / SMOKE_FILE).write_bytes(SMOKE_CONTENT.encode("utf-8"))
-    return root
+    # PHX-048: FilesystemTool refuses a root that is not its own real path, and a
+    # temp directory can be spelled differently (e.g. an 8.3 short name).
+    return root.resolve(strict=True)
 
 
 def _filesystem_tool(root: Path) -> FilesystemTool:
