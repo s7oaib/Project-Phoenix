@@ -1,6 +1,6 @@
 # PHX-048 — FilesystemTool root hardening
 
-Status: IN_PROGRESS (R1–R7 applied under the owner's overnight instruction of 2026-10-18, "do which is recommended"; awaiting the owner's review)
+Status: DONE (R1–R7 applied under the owner's overnight instruction of 2026-10-18, "do which is recommended"; the owner reviews them in the PR, and merging confirms them)
 Phase: 4 — Tools, Permissions & Security (follow-up from PHX-104, scheduled before PHX-112)
 Branch: `feature/PHX-048-filesystem-root-hardening` (local commits only; no push, no PR)
 Base: `origin/main` `1b51f26` (PHX-105, PR #79)
