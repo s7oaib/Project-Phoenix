@@ -68,7 +68,7 @@ from phoenix.models.provider import (
 from phoenix.persistence.database import create_engine_for_settings
 from phoenix.tools.filesystem import filesystem_tool_definitions
 
-HEAD = "0006_missions"
+HEAD = "0007_app_settings"
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = secrets.token_urlsafe(32)
 PORT = 48765  # Host-header identity for in-process clients; nothing binds it
@@ -216,7 +216,21 @@ def test_construction_is_lazy(settings: AppSettings) -> None:
     paths = {getattr(route, "path", None) for route in app.routes}
     # PHX-103 (ADR-087) adds WS /events.
     assert {"/health", "/ready", "/events"} <= paths
-    assert not paths & {"/agents", "/models", "/tasks", "/chat"}
+    # PHX-104 (ADR-089) includes the REST routers (tests/test_rest_api.py owns
+    # the exact table); docs and the deferred PHX-110 routes stay absent.
+    included = {
+        getattr(route, "path", None)
+        for router in app.routes
+        for route in getattr(getattr(router, "original_router", None), "routes", ())
+    }
+    assert {"/chat", "/missions", "/agents", "/models", "/settings"} <= included
+    assert not (paths | included) & {
+        "/tasks",
+        "/files/upload",
+        "/memory/search",
+        "/docs",
+        "/openapi.json",
+    }
 
 
 def test_lifespan_builds_services_once_and_closes_them(settings: AppSettings) -> None:

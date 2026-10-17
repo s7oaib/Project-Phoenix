@@ -81,7 +81,7 @@ from phoenix.tools.filesystem import FilesystemTool, filesystem_tool_definitions
 from phoenix.tools.registry import ToolRegistry
 
 ROOT = Path(__file__).resolve().parents[1]
-HEAD = "0006_missions"
+HEAD = "0007_app_settings"
 MODELS = ("qwen3.5:2b", "qwen3.5:4b", "qwen3.5:9b", "qwen2.5-coder:7b")
 PASS = '{"checks":[{"criterion":"Correct","passed":true,"evidence_summary":"Fine."}]}'
 NOTES = "Project codename: PELICAN-7. SENTINEL-CONTENT-93\n"

@@ -37,6 +37,12 @@ planned `tasks`), `mission_traces`, `permission_requests` and
 answer; traces hold hashes, lengths, IDs and statuses only. Chat history is
 deleted after 30 days; grants are kept until revoked.
 
+## Settings table (PHX-104, ADR-089)
+
+Migration `0007_app_settings` adds `app_settings` (the planned table): one
+key-value row per user-writable setting. In v1 the only key is
+`workspace_root`, the validated document workspace folder.
+
 ## Rules
 
 - Stable IDs.

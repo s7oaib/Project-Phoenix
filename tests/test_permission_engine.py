@@ -944,7 +944,7 @@ def test_static_separation_and_immutable_schema_events() -> None:
     root = Path(__file__).resolve().parents[1]
     assert ScriptDirectory.from_config(
         Config(str(root / "alembic.ini"))
-    ).get_heads() == ["0006_missions"]
+    ).get_heads() == ["0007_app_settings"]
     assert len(EventType) == 32
     forbidden = {
         "eval",

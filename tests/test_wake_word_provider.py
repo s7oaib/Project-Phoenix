@@ -1296,7 +1296,7 @@ def test_prior_production_manifests_migrations_frontend_events_unchanged() -> No
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0006_missions"]
+    ).get_heads() == ["0007_app_settings"]
 
 
 def test_repository_credential_signature_scan() -> None:

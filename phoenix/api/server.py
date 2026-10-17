@@ -3,18 +3,22 @@
 build_server_app() wraps the transport from create_app() with a lifespan that
 migrates SQLite to head, builds every backend service exactly once, keeps them in
 one typed container on ``app.state.phoenix`` and closes them on exit. The routes
-added are ``GET /ready`` and ``WS /events``, and every route requires local API
-security (PHX-101); the interactive docs and OpenAPI schema are removed. Migrations run
+added are ``GET /ready``, ``WS /events`` and the PHX-104 REST routes, and every
+route requires local API security (PHX-101); the interactive docs and OpenAPI
+schema are removed. Migrations run
 under an exclusive, bounded data-directory lock. Readiness probes are bounded,
 with at most one database check in flight; a failing provider reports as
-unavailable and the backend as degraded, never as a crash (INV-021, INV-022). No
-filesystem workspace is configured here (PHX-108). PHX-102 (ADR-086) adds the
+unavailable and the backend as degraded, never as a crash (INV-021, INV-022).
+PHX-102 (ADR-086) adds the
 persisted MissionService: it starts with the lifespan, and the shutdown path stops
 it, so queued and running missions are recorded as interrupted. PHX-103 (ADR-087)
 adds ``WS /events``: the runtime and the mission service publish content-free
 events to the EventStream, which fans them out to authenticated WebSocket
 clients with a bounded buffer each (a slow client is closed with 1013) and
-closes every connection when the backend stops.
+closes every connection when the backend stops. PHX-104 (ADR-089) adds the REST
+API v1 routes (``phoenix.api.routes``) and the document workspace: the stored
+root is re-validated at startup, and setting it builds a FilesystemTool and a
+runtime that missions starting afterwards use (``WorkspaceService``).
 """
 
 import asyncio
@@ -55,6 +59,7 @@ from phoenix.api.security import (
     error_response,
     install_local_api_security,
 )
+from phoenix.api.workspace import WorkspaceService
 from phoenix.core.config import AppSettings
 from phoenix.core.event_bus import EventBus
 from phoenix.models.lifecycle import ModelLifecycleManager
@@ -72,9 +77,10 @@ from phoenix.persistence.database import (
     prepare_data_directory,
 )
 from phoenix.persistence.missions import MissionStore
+from phoenix.persistence.settings import SettingsStore
 from phoenix.security.audit import AuditTrail
 from phoenix.security.permissions import PermissionPolicy
-from phoenix.tools.filesystem import filesystem_tool_definitions
+from phoenix.tools.filesystem import FilesystemTool, filesystem_tool_definitions
 from phoenix.tools.registry import ToolRegistry
 
 if sys.platform == "win32":
@@ -205,8 +211,10 @@ class BackendServices:
     tool_registry: ToolRegistry
     permission_policy: PermissionPolicy
     audit_trail: AuditTrail
-    runtime: PhoenixRuntime
+    runtime: PhoenixRuntime  # the runtime built at startup (no workspace)
     missions: MissionService
+    settings_store: SettingsStore
+    workspace: WorkspaceService
 
 
 class ReadinessStatus(StrEnum):
@@ -361,10 +369,14 @@ async def cancel_active_missions(services: BackendServices) -> int:
     one are recorded failed/interrupted. Any other runtime mission is cancelled.
     """
     await services.missions.stop()
-    request_ids = services.runtime.active_request_ids
-    for request_id in request_ids:
-        await services.runtime.cancel(request_id)
-    return len(request_ids)
+    cancelled = 0
+    # PHX-104: after a workspace change missions run on a newer runtime.
+    for runtime in dict.fromkeys((services.runtime, services.missions.runtime)):
+        request_ids = runtime.active_request_ids
+        for request_id in request_ids:
+            await runtime.cancel(request_id)
+        cancelled += len(request_ids)
+    return cancelled
 
 
 @asynccontextmanager
@@ -401,15 +413,32 @@ async def open_services(
             client_buffer=config.event_client_buffer,
             max_connections=config.event_max_connections,
         )
-        runtime = PhoenixRuntime(
-            providers=provider_set.providers,
-            structured_providers=provider_set.structured,
-            capability_registry=capabilities,
-            lifecycle=lifecycle,
-            agent_registry=agents,
-            tier_table=table,
+        policy = PermissionPolicy()
+        audit = AuditTrail(session_factory, tools)
+
+        def build_runtime(workspace_root: str | None = None) -> PhoenixRuntime:
+            """PHX-104: one runtime per workspace root; None has no documents."""
+            return PhoenixRuntime(
+                providers=provider_set.providers,
+                structured_providers=provider_set.structured,
+                capability_registry=capabilities,
+                lifecycle=lifecycle,
+                agent_registry=agents,
+                tier_table=table,
+                filesystem_tool=None
+                if workspace_root is None
+                else FilesystemTool(workspace_root, tools, policy, audit),
+                events=stream,
+            )
+
+        runtime = build_runtime()
+        missions = MissionService(
+            runtime=runtime,
+            store=MissionStore(session_factory),
+            tool_registry=tools,
             events=stream,
         )
+        settings_store = SettingsStore(session_factory)
         services = BackendServices(
             settings=settings,
             engine=engine,
@@ -425,17 +454,20 @@ async def open_services(
             event_bus=bus,
             event_stream=stream,
             tool_registry=tools,
-            permission_policy=PermissionPolicy(),
-            audit_trail=AuditTrail(session_factory, tools),
+            permission_policy=policy,
+            audit_trail=audit,
             runtime=runtime,
-            missions=MissionService(
-                runtime=runtime,
-                store=MissionStore(session_factory),
-                tool_registry=tools,
-                events=stream,
+            missions=missions,
+            settings_store=settings_store,
+            workspace=WorkspaceService(
+                store=settings_store,
+                missions=missions,
+                build_runtime=build_runtime,
+                data_dir=settings.data_dir,
             ),
         )
         try:
+            await services.workspace.load()  # before the first mission runs
             await services.missions.start()
             yield services
         finally:
@@ -525,16 +557,22 @@ def build_server_app(
     config: ServerConfig | None = None,
     provider_factory: ProviderFactory | None = None,
 ) -> FastAPI:
-    """create_app() plus the owning lifespan, GET /ready and WS /events.
+    """create_app() plus the owning lifespan, GET /ready, WS /events and the
+    PHX-104 REST routes.
 
     Local API security is mandatory (PHX-101): every route, including /health
     and /ready, requires the bound Host, an allowed Origin and the token.
     """
+    # The routes import this module (BackendServices, probes), so they are
+    # imported here, after it has fully loaded.
+    from phoenix.api.routes import install_api_routes
+
     options = ServerConfig() if config is None else config
     factory = ollama_providers if provider_factory is None else provider_factory
     app = create_app()
     _remove_interactive_docs(app)
     install_local_api_security(app, security)
+    install_api_routes(app, probe_timeout_seconds=options.probe_timeout_seconds)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
