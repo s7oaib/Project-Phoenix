@@ -28,6 +28,7 @@ from phoenix.agents.registry import build_default_agent_registry
 from phoenix.agents.responders import ResponderErrorCode
 from phoenix.agents.router import RoutingDomain
 from phoenix.agents.task_graph import TaskState
+from phoenix.agents.triage import TRIAGE_ROLE, TriageFallbackReason, TriageOutcome
 from phoenix.agents.verifier import VerificationVerdict
 from phoenix.core.events import EventEnvelope, EventSeverity, EventType
 from phoenix.security.permissions import PermissionStatus
@@ -115,7 +116,15 @@ AGENT_IDS: Final = frozenset(
     agent.internal_id for agent in build_default_agent_registry().agents
 )
 AGENT_ROLES: Final = frozenset(
-    {"direct", "planner", "assignment", "specialist", "document", "final_answer"}
+    {
+        "direct",
+        "planner",
+        "assignment",
+        "specialist",
+        "document",
+        "final_answer",
+        TRIAGE_ROLE,  # PHX-105
+    }
 )
 AGENT_OUTCOMES: Final = frozenset({"completed", "waiting_permission"})
 SCOPES: Final = frozenset({"task", "mission"})
@@ -123,6 +132,12 @@ SCOPES: Final = frozenset({"task", "mission"})
 _STEP: dict[str, _Kind] = {"step_id": STEP}
 _TOOL: dict[str, _Kind] = {**_STEP, "tool_id": TOOL_IDS, "call_id": UUID}
 _ROLE: dict[str, _Kind] = {"role": AGENT_ROLES, "step_id": STEP}
+# PHX-105 (ADR-090): PHOENIX's triage ends with the path and who decided it,
+# plus the closed fallback reason when triage failed.
+_TRIAGE: dict[str, _Kind] = {
+    "path": _values(OrchestrationPath),
+    "triage_outcome": _values(TriageOutcome),
+}
 
 # Every event type PHX-103 publishes, with its complete payload allowlist.
 PAYLOAD_FIELDS: Final[Mapping[EventType, Mapping[str, _Kind]]] = MappingProxyType(
@@ -146,12 +161,15 @@ PAYLOAD_FIELDS: Final[Mapping[EventType, Mapping[str, _Kind]]] = MappingProxyTyp
         EventType.AGENT_STARTED: _ROLE,
         EventType.AGENT_COMPLETED: {
             **_ROLE,
+            **_TRIAGE,
             "outcome": AGENT_OUTCOMES,
             "duration_ms": MILLISECONDS,
         },
         EventType.AGENT_FAILED: {
             **_ROLE,
+            **_TRIAGE,
             "code": FAILURE_CODES,
+            "triage_reason": _values(TriageFallbackReason),
             "duration_ms": MILLISECONDS,
         },
         EventType.TOOL_REQUESTED: {

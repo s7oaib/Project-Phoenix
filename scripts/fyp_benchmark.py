@@ -83,7 +83,11 @@ NOT_RUNNABLE_CONFIGS: tuple[dict[str, str], ...] = (
 # Every docs/24 metric: measured from baseline reports, or NOT_RUNNABLE + reason.
 METRICS: tuple[tuple[str, str | None], ...] = (
     ("task_success", None),
-    ("routing_accuracy", "Needs model-backed PHOENIX routing (configuration 2/3)."),
+    (
+        "routing_accuracy",
+        "Measured separately by scripts/routing_benchmark.py (PHX-105) on"
+        " benchmarks/routing/routing-v1.toml; not part of this baseline run.",
+    ),
     ("verification_catch_rate", "Needs a model-backed LEVI responder."),
     ("recovery_success", "Needs model-backed MAHORAGA/KAIDO execution."),
     ("memory_retrieval_accuracy", "Needs an end-to-end RAG answering flow."),

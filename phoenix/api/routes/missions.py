@@ -3,7 +3,9 @@
 ``POST /chat`` is asynchronous: it queues a mission through
 ``MissionService.submit`` and returns 202 with the mission and conversation IDs
 at once. Progress arrives over ``WS /events``; the answer comes from
-``GET /missions/{id}``. No request is held open for a mission.
+``GET /missions/{id}``. No request is held open for a mission. Without a
+``path`` PHOENIX triages the request (PHX-105); missions report the path and
+who decided it (``triage_outcome``).
 """
 
 import contextlib
@@ -62,6 +64,7 @@ def _summary_fields(record: MissionRecord) -> dict[str, object]:
         "conversation_id": record.conversation_id,
         "status": record.status,
         "path": record.path,
+        "triage_outcome": record.triage_outcome,
         "failure_code": record.failure_code,
         "responder_error": record.responder_error,
         "rerun_of": record.rerun_of,

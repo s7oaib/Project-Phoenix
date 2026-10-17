@@ -91,6 +91,8 @@ class ScriptedProvider(ModelProvider):
     def __init__(self) -> None:
         super().__init__("ollama")
         self.replies: dict[str, str | Callable[[GenerationRequest], str]] = {
+            # PHX-105: a chat without a path is triaged first.
+            "triage": '{"path": "direct"}',
             "direct": lambda request: f"Answer: {request.messages[1].text}",
             "planner": json.dumps(
                 {
@@ -472,6 +474,56 @@ def test_chat_is_asynchronous_and_get_returns_the_answer(
         "user",
         "phoenix",
     ]
+
+
+def test_chat_path_is_optional_triage_decides_or_client_chooses(
+    backend: Backend, client: TestClient
+) -> None:
+    # PHX-105 (ADR-090): omitted, PHOENIX triages; given, the client decides.
+    roles = backend.provider.roles
+    triaged = wait_for(client, chat(client, "Say hello.")["mission_id"])
+    assert (triaged["status"], triaged["path"], triaged["triage_outcome"]) == (
+        "completed",
+        "direct",
+        "decided",
+    )
+    assert roles == ["triage", "direct"]
+    for path in ("direct", None):  # an explicit null is the same as omitted
+        roles.clear()
+        body = wait_for(client, chat(client, "Hi.", path=path)["mission_id"])
+        assert body["status"] == "completed"
+        if path:
+            assert (body["path"], body["triage_outcome"]) == ("direct", "client")
+            assert roles == ["direct"]  # the client's path bypasses triage
+        else:
+            assert (body["path"], body["triage_outcome"]) == ("direct", "decided")
+            assert roles == ["triage", "direct"]
+    listed = client.get("/missions").json()["items"]
+    assert [item["triage_outcome"] for item in listed] == [
+        "decided",
+        "client",
+        "decided",
+    ]
+
+
+def test_triaged_mission_rerun_after_approval_reuses_the_decision(
+    backend: Backend, client: TestClient
+) -> None:
+    set_workspace(client, backend.workspace)
+    backend.provider.replies["triage"] = '{"path": "complex"}'
+    accepted = chat(client, QUESTION)
+    waiting = wait_for(client, accepted["mission_id"])
+    assert waiting["status"] == "waiting_permission", waiting
+    assert (waiting["path"], waiting["triage_outcome"]) == ("complex", "decided")
+    request_id = waiting["permission_request"]["request_id"]
+    approved = client.post(
+        f"/permissions/{request_id}/approve", json={"duration": "session"}
+    ).json()
+    rerun = wait_for(client, approved["mission_id"])
+    assert rerun["status"] == "completed", rerun
+    assert (rerun["path"], rerun["triage_outcome"]) == ("complex", "decided")
+    # Triage ran once, for the original; the re-run reused its decision.
+    assert backend.provider.roles.count("triage") == 1
 
 
 @pytest.mark.parametrize(
