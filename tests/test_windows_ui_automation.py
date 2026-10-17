@@ -1462,7 +1462,7 @@ def test_source_architecture_and_immutability() -> None:
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0007_app_settings"]
+    ).get_heads() == ["0008_mission_triage"]
     # PHX-080 owns only App.tsx/styles.css; every other apps path stays protected.
     paths = [
         "phoenix/security",
@@ -1508,6 +1508,10 @@ def test_source_architecture_and_immutability() -> None:
         ":(exclude)phoenix/api/routes/system.py",
         ":(exclude)phoenix/persistence/settings.py",
         ":(exclude)alembic/versions/0007_app_settings.py",
+        # PHX-105 (ADR-090) adds the mission triage migration (the changed
+        # missions.py, routes and schemas are excluded above and hash-pinned in
+        # test_prompt_injection_defenses.py).
+        ":(exclude)alembic/versions/0008_mission_triage.py",
         # PHX-106/107 (ADR-091, ADR-092) change these desktop files (hash-pinned in
         # test_prompt_injection_defenses.py) and add the sidecar, proxy and adapters.
         ":(exclude)apps/desktop/package.json",

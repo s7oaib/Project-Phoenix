@@ -1503,7 +1503,7 @@ def test_static_boundary_schema_event_and_dependency() -> None:
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0007_app_settings"]
+    ).get_heads() == ["0008_mission_triage"]
     assert '"playwright>=1,<2"' in (ROOT / "pyproject.toml").read_text()
 
 

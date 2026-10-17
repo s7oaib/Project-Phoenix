@@ -43,6 +43,14 @@ Migration `0007_app_settings` adds `app_settings` (the planned table): one
 key-value row per user-writable setting. In v1 the only key is
 `workspace_root`, the validated document workspace folder.
 
+## Mission triage (PHX-105, ADR-090)
+
+Migration `0008_mission_triage` makes `missions.path` nullable (`NULL` until
+PHOENIX triages a request submitted without a path) and adds
+`missions.triage_outcome` (`decided`, `fallback` or `client`), set together
+with the path. Earlier rows become `client`. A `fallback` always has the
+`complex` path.
+
 ## Rules
 
 - Stable IDs.

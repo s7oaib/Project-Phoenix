@@ -107,9 +107,9 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-102 Mission persistence and runner — DONE
 - PHX-103 Runtime events and WS — DONE
 - PHX-104 REST API v1 — DONE
-- PHX-105 Request triage — TODO
-- PHX-106 Tauri backend sidecar — IN_PROGRESS (implemented with PHX-107; R1–R12 await owner confirmation; live demo pending)
-- PHX-107 Frontend port adapters — IN_PROGRESS (implemented with PHX-106; R1–R11 await owner confirmation; live demo pending)
+- PHX-105 Request triage — DONE
+- PHX-106 Tauri backend sidecar — DONE (R1–R12 confirmed by the owner 2026-10-18)
+- PHX-107 Frontend port adapters — DONE (R1–R11 confirmed by the owner 2026-10-18)
 - PHX-108 Settings and onboarding — TODO
 - PHX-109 MAHORAGA/KAIDO in missions — TODO
 - PHX-110 Memory and RAG in missions — TODO

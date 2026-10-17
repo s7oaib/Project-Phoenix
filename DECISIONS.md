@@ -4249,6 +4249,97 @@ Limitations: pages are cut in memory from the store's lists;
 conversation's messages on each poll; new error codes carry the envelope's
 generic message. No new dependencies and no new event types.
 
+## ADR-090 — Request triage: a routing hint with an observable COMPLEX fallback
+
+Status: Accepted (owner decisions 2026-10-18; the owner approved the `TRIAGE_SYSTEM`
+text, the routing-set labels and recommendations R1–R14 in
+`tickets/PHX-105-request-triage.md` on 2026-10-18; live routing accuracy 85%)
+Date: 2026-10-18
+Ticket: PHX-105
+
+This replaces ADR-081's "Path. The caller supplies DIRECT or COMPLEX. Triage is
+deferred."
+
+Owner decisions:
+
+- **Triage model.** `qwen3.5:4b` with thinking off returns exactly
+  `{"path": "direct" | "complex"}` for every request without an explicit path.
+  A new `triage` row in the tier table (T1 4B, then T0 2B) runs on the
+  structured providers. The input is the user's request text only. The
+  decision is a routing hint: it grants nothing (INV-003), and PHOENIX runs
+  the chosen path with all its checks (INV-001).
+- **Fallback: COMPLEX.** Any triage failure except cancellation (not JSON,
+  schema, truncated, oversized, invalid text, timeout, provider unavailable or
+  error, no eligible model, an internal error) takes the COMPLEX path, AIZEN
+  planning plus LEVI verification. It is observable (INV-022): `MissionTrace`
+  records `triage_outcome` (`decided`, `fallback`, `client`) and
+  `triage_reason`, and PHOENIX's triage agent events carry them.
+- **Labelled routing set.** `benchmarks/routing/routing-v1.toml`, 60 harmless
+  labelled requests, versioned and checksummed like PHX-091.
+- **Client override kept.** `POST /chat` `path` is optional. Omitted, triage
+  decides; given, it is used as is. Missions record who decided.
+
+Design:
+
+- **Modules.** New `phoenix/agents/triage.py`: `ModelTriageResponder` (the
+  frozen responders' `_generate` and `parse_json_object`, a strict
+  `extra="forbid"` wire model), `TriageOutcome`, `TriageFallbackReason` and
+  `fallback_reason`. `responders.py` is byte-identical.
+- **Prompt.** `phoenix-prompts-v4` adds `TRIAGE_SYSTEM` (`PHOENIX ROLE:
+  triage`); every v3 constant is unchanged (hash-pinned). Unsure means
+  `complex`, matching the fallback.
+- **No guard on the request.** The request is the user message, as for the
+  DIRECT and planning roles (ADR-081). `PromptInjectionGuard` has origins only
+  for untrusted third-party content; labelling the user's own request as one,
+  and letting its blocking signals turn ordinary wording into a fallback, would
+  misuse it. The prompt says the request is data, and the decision cannot
+  grant anything.
+- **Runtime.** `PhoenixRuntime.run(request, path=None)` triages inside the
+  mission deadline, as one `phoenix` agent phase (role `triage`) bounded by
+  the new `RuntimeLimits.triage_timeout_seconds` (60 s), which covers the health
+  probe, model selection and the generation. Health is still probed once per
+  mission: the triage probe serves the chosen path. `decided_by` lets a re-run
+  record a reused decision; it changes nothing else.
+- **Trace.** `MissionTrace.path` may be `None` only when no decision was made
+  (cancelled, or the mission deadline, during triage). `triage_outcome` is
+  `None` only then and in traces stored before PHX-105; a reason appears only
+  with `fallback`, and a fallback always has the `complex` path.
+- **Events.** No new event types. The allowlist gains the role `triage`,
+  `path` and `triage_outcome` on `agent.completed` and `agent.failed`, and
+  `triage_reason` on `agent.failed`, all closed enums. A decision publishes
+  `agent.completed`; a fallback `agent.failed` (warning) with the mapped
+  `code`, then the COMPLEX path's own events. Cancellation publishes
+  `agent.failed` with `code="cancelled"` and no decision.
+- **Persistence.** Migration `0008_mission_triage` makes `missions.path`
+  nullable and adds `triage_outcome`, with checks: the path and outcome are
+  set together, the outcome is one of the three values, and `fallback` means
+  `complex`. Existing rows become `client`. `settle` fills a NULL path from the
+  run's decision; a decided path never changes. Re-runs (`run_again`, and the
+  re-run an approval queues) copy the path and outcome, so they never re-triage
+  unless the original never got a decision.
+- **REST.** `ChatRequest.path` is optional (`null` = omitted); mission summaries
+  and detail add `triage_outcome`, and `path` is `null` until triage decides.
+- **Routing benchmark.** `scripts/routing_benchmark.py` (added to the
+  `mypy-scripts` gate) runs `ModelTriageResponder` alone with the runtime's
+  limits on Ollama with thinking off. It reports accuracy, a confusion
+  matrix, per-category accuracy, latency and fallbacks to the gitignored
+  `.routing-bench/`. `--dry-run` validates the set. `fyp_benchmark.py`'s
+  `routing_accuracy` reason points to it.
+- **Frozen files.** `prompts.py` (from the PHX-047 pin), `runtime.py` and
+  `mission_events.py` (from the PHX-103 pin), `api/missions.py` (from the
+  PHX-104 pin) and `persistence/missions.py`, `api/routes/missions.py` and
+  `api/routes/schemas.py` (from `origin/main`) move to the PHX-105
+  implementation commit (`PHX_105_COMMIT` / `PHX_105_PATHS`, `e34142ca0062dc14c05a5a1d18720b64446cdaa7`), landed as an
+  implementation commit then a pin commit. Head expectations move to
+  `0008_mission_triage`; the two `git diff origin/main` guards exclude the
+  new migration by name.
+
+Limitations: triage adds one generation (and its latency) to every request
+without a path. A mission interrupted by a crash before it settles has no
+recorded decision, so its re-run triages again. Triage accuracy is not yet
+measured live (the routing benchmark is the instrument). No new dependencies
+and no new event types.
+
 ## ADR-091 — The desktop shell owns the backend and proxies the webview's traffic
 
 Status: Proposed (implemented for the 2026-10-21 review demo; recommendations

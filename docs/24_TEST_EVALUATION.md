@@ -74,6 +74,28 @@ behaviour.
   measures only the visible-text interval. Report thinking-on throughput as
   output tokens ÷ total latency instead (ADR-079).
 
+### Routing benchmark (PHX-105)
+
+`python scripts/routing_benchmark.py` measures the `routing_accuracy` metric:
+PHOENIX's triage responder alone (`TRIAGE_SYSTEM`, `phoenix-prompts-v4`, one
+thinking-off generation per case on `qwen3.5:4b` by default) against the fixed
+routing set `benchmarks/routing/routing-v1.toml` (`phoenix-routing` 1.0.0, 60
+harmless requests labelled `direct` or `complex`, each with a one-line
+rationale, in six categories: factual, rewrite_format, workspace_files,
+multi_step, ambiguous and adversarial).
+
+- It writes `.routing-bench/routing-benchmark-results.json` (schema-versioned)
+  and a Markdown summary: accuracy, a confusion matrix, per-category accuracy,
+  latency (median, p95, min, max) and the fallback count with reasons.
+- A triage failure counts as the product's fallback, `complex`; accuracy over
+  the cases triage itself decided is reported separately.
+- The set is versioned and its sha256 is pinned in `tests/test_routing_benchmark.py`;
+  changing any case requires a new version and file.
+- `--dry-run` validates the set without models. Like the FYP runner, a live
+  run records Ollama's placement and refuses CPU-only runs unless `--allow-cpu`.
+- `scripts/fyp_benchmark.py` keeps reporting `routing_accuracy` as NOT RUNNABLE
+  in its baseline run and points to this script.
+
 ## Automated test matrix (PHX-090)
 
 `python scripts/test_matrix.py` runs every required gate declared in

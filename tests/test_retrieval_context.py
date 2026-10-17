@@ -1986,7 +1986,7 @@ def test_scope_ast_schema_dependencies_and_protected_sources_unchanged(
     database: Engine,
 ) -> None:
     scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
-    assert scripts.get_heads() == ["0007_app_settings"] and len(EventType) == 32
+    assert scripts.get_heads() == ["0008_mission_triage"] and len(EventType) == 32
     assert inspect(database).get_table_names() == [
         "alembic_version",
         # PHX-104 (ADR-089) adds app_settings in 0007_app_settings.

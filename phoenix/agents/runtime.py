@@ -16,6 +16,12 @@ events; see mission_events), correlated by the mission's request ID and task
 ID. Events carry IDs, states, codes and timings only. Publishing never blocks
 or fails a mission: refusals are counted, never reported in the result.
 
+PHX-105 (ADR-090): a request run without a path is triaged first (see triage):
+one structured generation on the triage tier proposes DIRECT or COMPLEX, and
+any triage failure except cancellation falls back to COMPLEX. MissionTrace
+records who decided (``triage_outcome``) and, on fallback, the reason code;
+PHOENIX's triage agent events carry the same closed values.
+
 Task state is task-level: intermediate step verification runs while RUNNING, and
 VERIFYING is the final-answer verification phase. Callers refresh capability
 records; provider health is probed once per mission. No resource monitor exists
@@ -105,6 +111,13 @@ from phoenix.agents.tool_steps import (
 
 # Re-exported for callers that build document-step grants (PHX-046).
 from phoenix.agents.tool_steps import DOCUMENT_TOOL_REASON as DOCUMENT_TOOL_REASON
+from phoenix.agents.triage import (
+    TRIAGE_ROLE,
+    ModelTriageResponder,
+    TriageFallbackReason,
+    TriageOutcome,
+    fallback_reason,
+)
 from phoenix.agents.verifier import (
     LeviVerifier,
     VerificationResponder,
@@ -177,6 +190,8 @@ def default_tier_table() -> ModelTierTable:
                 "phoenix": refs(t1, t0),
                 # PHX-047 (ADR-083): PHOENIX's step assignment runs on T2.
                 "assignment": refs(t2, t1, t0),
+                # PHX-105 (ADR-090): PHOENIX's request triage, thinking off.
+                TRIAGE_ROLE: refs(t1, t0),
                 "strategist": refs(t2, t1, t0),
                 "verifier": refs(t2, t1, t0),
                 "build_engineer": refs(code, t2, t1, t0),
@@ -201,6 +216,8 @@ class RuntimeLimits(_Value):
     verification_timeout_seconds: float = Field(
         default=300.0, gt=0, allow_inf_nan=False
     )
+    # PHX-105: health probe, model selection and the one triage generation.
+    triage_timeout_seconds: float = Field(default=60.0, gt=0, allow_inf_nan=False)
 
 
 class ControlRoleModelSelector:
@@ -259,16 +276,40 @@ class StepVerification(_Value):
 
 
 class MissionTrace(_Value):
-    """Observable evidence without prompts or outputs (hashes/counts only)."""
+    """Observable evidence without prompts or outputs (hashes/counts only).
+
+    PHX-105: ``triage_outcome`` says who decided ``path``. It is None in traces
+    stored before PHX-105, and for a mission that ended before triage decided
+    (cancelled, or the mission deadline), whose ``path`` is None too.
+    ``triage_reason`` is a fallback's closed code, set only by the triage that
+    fell back (a re-run that reuses that decision carries none).
+    """
 
     prompt_set_version: Identifier
-    path: OrchestrationPath
+    path: OrchestrationPath | None
     task_id: Identifier | None = None
     states: tuple[TaskState, ...] = ()
     provider_health: tuple[ProviderRouteHealth, ...] = ()
     generations: tuple[GenerationRecord, ...] = ()
     verifications: tuple[StepVerification, ...] = ()
     tool_calls: tuple[ToolCallRecord, ...] = ()
+    triage_outcome: TriageOutcome | None = None
+    triage_reason: TriageFallbackReason | None = None
+
+    @model_validator(mode="after")
+    def consistent_triage(self) -> Self:
+        if self.triage_reason is not None and (
+            self.triage_outcome != TriageOutcome.FALLBACK
+        ):
+            raise ValueError("Only a triage fallback carries a reason")
+        if self.triage_outcome is not None and self.path is None:
+            raise ValueError("A triage outcome requires a path")
+        if (
+            self.triage_outcome == TriageOutcome.FALLBACK
+            and self.path != OrchestrationPath.COMPLEX
+        ):
+            raise ValueError("A triage fallback takes the complex path")
+        return self
 
 
 class MissionResult(_Value):
@@ -324,7 +365,9 @@ class _Mission:
 
 @dataclass
 class _Evidence:
-    path: OrchestrationPath
+    path: OrchestrationPath | None
+    triage_outcome: TriageOutcome | None = None
+    triage_reason: TriageFallbackReason | None = None
     machine: TaskStateMachine | None = None
     health: tuple[ProviderRouteHealth, ...] = ()
     generations: list[GenerationRecord] = field(default_factory=list)
@@ -369,6 +412,8 @@ class _Evidence:
                 generations=tuple(self.generations),
                 verifications=tuple(self.verifications),
                 tool_calls=tuple(self.tool_calls),
+                triage_outcome=self.triage_outcome,
+                triage_reason=self.triage_reason,
             ),
         )
 
@@ -376,8 +421,9 @@ class _Evidence:
 class PhoenixRuntime:
     """One process/event loop, one active mission per caller task, no workers.
 
-    The caller supplies the path (DIRECT or COMPLEX). Cancellation is cooperative:
-    a runtime cancel() yields a CANCELLED result; outside cancellation propagates.
+    The caller supplies the path (DIRECT or COMPLEX), or none and PHOENIX
+    triages the request (PHX-105). Cancellation is cooperative: a runtime
+    cancel() yields a CANCELLED result; outside cancellation propagates.
     Callers may add their own deadlines on top of RuntimeLimits.
 
     structured_providers optionally serve the structured roles (PHOENIX direct
@@ -466,17 +512,32 @@ class PhoenixRuntime:
     async def run(
         self,
         request: PhoenixRequest,
-        path: OrchestrationPath,
+        path: OrchestrationPath | None = None,
         *,
         grants: Sequence[PermissionGrant] = (),
         session_id: str | None = None,
+        decided_by: TriageOutcome = TriageOutcome.CLIENT,
     ) -> MissionResult:
-        """grants and session_id are caller (user) evidence for document steps."""
+        """grants and session_id are caller (user) evidence for document steps.
+
+        Without a path PHOENIX triages the request (PHX-105). With one,
+        decided_by records who chose it: the caller (default), or an earlier
+        triage whose decision a re-run reuses (DECIDED, or FALLBACK for
+        COMPLEX). It is recorded only and changes nothing else.
+        """
         self._bind_loop()
         if type(request) is not PhoenixRequest:
             raise PhoenixRuntimeError("Expected a PhoenixRequest")
         request = PhoenixRequest.model_validate(request)
-        directive = _path.validate_python(path)
+        directive = None if path is None else _path.validate_python(path)
+        try:
+            decider = TriageOutcome(decided_by)
+        except ValueError:
+            raise PhoenixRuntimeError("Invalid path decision") from None
+        if (directive is None and decider != TriageOutcome.CLIENT) or (
+            decider == TriageOutcome.FALLBACK and directive != OrchestrationPath.COMPLEX
+        ):
+            raise PhoenixRuntimeError("Inconsistent path decision")
         try:
             accepted = document_grants(grants)
             session = (
@@ -494,9 +555,13 @@ class PhoenixRuntime:
         mission = _Mission(task)
         self._active[request.request_id] = mission
         evidence = _Evidence(directive)
+        if directive is not None:
+            evidence.triage_outcome = decider
         events = MissionEvents(self._events, request.request_id)
         try:
             async with asyncio.timeout(self._limits.mission_timeout_seconds):
+                if directive is None:
+                    directive = await self._triage(request, evidence, events)
                 if directive == OrchestrationPath.DIRECT:
                     text = await self._direct(request, evidence, events)
                 else:
@@ -564,6 +629,9 @@ class PhoenixRuntime:
         )
 
     async def _health(self, evidence: _Evidence) -> dict[str, ProviderHealthStatus]:
+        if evidence.health:
+            # Probed once per mission: triage's probe also serves its path.
+            return _healthy({item.provider_id: item.status for item in evidence.health})
         statuses: dict[str, ProviderHealthStatus] = {}
         for identity, provider in self._providers.items():
             try:
@@ -580,9 +648,7 @@ class PhoenixRuntime:
             ProviderRouteHealth(provider_id=identity, status=status)
             for identity, status in statuses.items()
         )
-        if ProviderHealthStatus.HEALTHY not in statuses.values():
-            raise ProviderUnavailableError("No healthy model provider")
-        return statuses
+        return _healthy(statuses)
 
     def _binding(
         self,
@@ -652,6 +718,40 @@ class PhoenixRuntime:
                 permission_risk=PermissionRisk.P1 if documents else PermissionRisk.P0,
             )
         )
+
+    async def _triage(
+        self, request: PhoenixRequest, evidence: _Evidence, events: MissionEvents
+    ) -> OrchestrationPath:
+        """PHOENIX's path for a request without one (PHX-105, ADR-090).
+
+        Any failure but cancellation falls back to COMPLEX: recorded in the
+        trace and published as agent.failed (role triage) with the reason.
+        """
+        async with _agent_phase(events, "phoenix", TRIAGE_ROLE) as phase:
+            try:
+                async with asyncio.timeout(self._limits.triage_timeout_seconds):
+                    health = await self._health(evidence)
+                    responder = ModelTriageResponder(
+                        self._control("phoenix", health, evidence, tier=TRIAGE_ROLE)
+                    )
+                    path = await responder.classify(request)
+            except Exception as error:
+                reason = fallback_reason(error)
+                path = OrchestrationPath.COMPLEX
+                evidence.triage_outcome = TriageOutcome.FALLBACK
+                evidence.triage_reason = reason
+                phase.done = EventType.AGENT_FAILED
+                phase.result = {
+                    "code": _event_code(error),
+                    "triage_outcome": TriageOutcome.FALLBACK.value,
+                    "triage_reason": reason.value,
+                }
+            else:
+                evidence.triage_outcome = TriageOutcome.DECIDED
+                phase.result["triage_outcome"] = TriageOutcome.DECIDED.value
+            phase.result["path"] = path.value
+            evidence.path = path
+        return path
 
     async def _direct(
         self, request: PhoenixRequest, evidence: _Evidence, events: MissionEvents
@@ -879,6 +979,14 @@ class PhoenixRuntime:
             )
         await _transition(events, machine, TaskState.COMPLETED)
         return outputs[FINAL_STEP_ID]
+
+
+def _healthy(
+    statuses: dict[str, ProviderHealthStatus],
+) -> dict[str, ProviderHealthStatus]:
+    if ProviderHealthStatus.HEALTHY not in statuses.values():
+        raise ProviderUnavailableError("No healthy model provider")
+    return statuses
 
 
 def _by_id(providers: Sequence[ModelProvider]) -> dict[str, ModelProvider]:

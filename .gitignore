@@ -55,6 +55,7 @@ coverage/
 .DS_Store
 Thumbs.db
 
-# Local benchmark and live smoke output (PHX-091, PHX-046)
+# Local benchmark and live smoke output (PHX-091, PHX-046, PHX-105)
 .fyp-bench/
 .phoenix-smoke/
+.routing-bench/
