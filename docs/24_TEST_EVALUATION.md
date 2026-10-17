@@ -59,8 +59,26 @@ summary. `--think {default,on,off}` sets the Ollama thinking control (PHX-017,
 ADR-080) and is recorded in the results; `default` keeps each model's own
 behaviour.
 
-- Configurations (2) and (3) are reported as NOT RUNNABLE until model-backed
-  PHOENIX responders exist.
+- Configuration (2) runs separately with `--config phoenix-multi-agent`
+  (`scripts/fyp_multi_agent.py`). It sends each v1 case through
+  `PhoenixRuntime.run` (default path COMPLEX; `--path direct|complex|triage`,
+  where `triage` is a no-op until PHX-105) with a default and a `think=False`
+  Ollama provider and the runtime tier table. It uses its own mission loop
+  rather than BenchmarkRunner (single-lease deadlock, PHX-029). It scores the
+  final answer with the same exact/contains rules and reports accuracy, outcome
+  counts, mission latency, generations, tokens, LEVI verdicts, failure codes,
+  per-category accuracy and the prompt set version to
+  `.fyp-bench/fyp-multi-agent-results.json` plus a summary.
+  - `--compare <config1-results.json>` (repeatable) adds a side-by-side table;
+    `--from-results` re-renders it without models.
+  - Defaults: 0 warm-up and 1 measured run. A run takes about 20–35 minutes
+    (16 missions of 1–2 minutes).
+  - Configuration (2) mixes models by role and thinking varies by role; the
+    report states this.
+  - Verification catch rate stays NOT RUNNABLE (needs fault-injected cases);
+    routing accuracy belongs to PHX-105.
+- Configuration (3) is reported as NOT RUNNABLE: the runtime has no adaptive
+  routing or Colibri deep-tier path.
 - Every metric above is reported either as measured or as NOT RUNNABLE with a
   reason (ADR-079).
 - Changing any case requires a new task-set version.

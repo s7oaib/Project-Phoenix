@@ -1,6 +1,6 @@
 # PHX-091 — FYP benchmark suite
 
-Status: DONE (configuration 1 baseline; configurations 2 and 3 continue in a follow-up per PHX-029 D1)
+Status: DONE (configuration 1 baseline); continuation IN_PROGRESS (configuration 2 runner built, live GPU run pending); configuration 3 NOT RUNNABLE
 Phase: 9 — Validation & Release
 Branch: feature/PHX-091-fyp-benchmark-suite
 Starting main/base SHA: e9a5c393b2fd615b2664a0804a889f236d404877
@@ -215,3 +215,91 @@ Observations (deterministic: every listed failure occurred in 3 of 3 measured ru
 **Closure.** Configuration (1) is measured on BLAZE-6 in both thinking modes. Configurations (2) and (3) stay NOT RUNNABLE in this ticket, reported with their reasons.
 - **Configuration (2):** needs PHX-029 and PHX-046, then a runner mode under the PHX-091 continuation.
 - **Configuration (3):** the owner decided on 2026-10-15 to install Colibri and run it in that continuation.
+
+## Continuation: configuration (2) runner — IN_PROGRESS (2026-10-18)
+
+Branch `feature/PHX-091-config2-runner`, base main `f8aaef0`. This is the
+PHX-029 "PHX-091 configuration (2)" follow-up, after PHX-029, PHX-046 and
+PHX-047 landed. The FYP review is on 2026-10-21.
+
+**Delivered (no live model calls):**
+- `scripts/fyp_multi_agent.py`, reached through
+  `scripts/fyp_benchmark.py --config phoenix-multi-agent`. The baseline script
+  only gains the dispatch and a corrected configuration (2) reason.
+  - Each v1 case runs as one mission through `PhoenixRuntime.run`. The runtime
+    is built as in `scripts/phoenix_mission_smoke.py`: a default
+    `OllamaProvider` plus a `think=False` one for the structured roles, the
+    default tier table and only the installed models. It is text-only (no
+    filesystem tool).
+  - It has its own sequential loop, not `BenchmarkRunner` (PHX-029 finding 9).
+  - `--path complex` (default), `direct` or `triage`. `triage` is a no-op
+    until PHX-105: it runs COMPLEX and records the requested and used paths.
+  - `--warmup 0 --runs 1` by default; both are recorded.
+  - Scoring: the unchanged `ScoringRule.score` on `MissionResult.text`. A
+    mission without text (failed, cancelled, waiting) counts as not passed.
+  - A runtime defect (unexpected exception) is recorded as `error` /
+    `runtime_defect` with the exception type only. The run continues, and the
+    exit code is then 1.
+  - The CPU-only placement guard checks every tier model before the run.
+- **Metrics:**
+  - accuracy and success rate;
+  - completed, failed, waiting_permission, cancelled and error counts;
+  - mission latency (median/min/max over completed missions, plus over all
+    missions);
+  - generations per mission;
+  - summed input and output tokens;
+  - LEVI passed/failed verdicts, in total and per mission;
+  - a failure-code histogram (`code/responder_error`);
+  - the prompt set version;
+  - per-category accuracy;
+  - generations by role and model, with each role's thinking mode;
+  - RAM/VRAM sampled at mission boundaries.
+- **NOT RUNNABLE, with reasons:** routing accuracy (owned by PHX-105),
+  verification catch rate (needs fault-injected cases), recovery,
+  memory/research/computer control, Colibri I/O, user intervention, and
+  configuration (3).
+- **Comparison:** `--compare <config1-results.json>` (repeatable) writes
+  `.fyp-bench/fyp-comparison.md` and a `comparison` section. Each
+  configuration (1) tier (best first per file) sits next to configuration (2),
+  with accuracy, success, median latency, tokens per task, a same-task-set
+  check and the evidence directory. `--from-results` re-renders from a saved
+  results file without models.
+- **Privacy:** as ADR-029, hashes and lengths only, never prompts or answers.
+- **Tests:** `tests/test_fyp_multi_agent.py` (11 tests).
+  - It uses a real `PhoenixRuntime` with a scripted model. The same fake also
+    drives the configuration (1) harness for `--compare`.
+  - It is mapped in `tests/matrix.toml`, and the script was added to the
+    `mypy-scripts` gate.
+- **Read-only check:** `--compare` was exercised offline against the three
+  real configuration (1) GPU evidence files with a scripted configuration (2)
+  run (scratch output only). All three parse, and the task-set hashes match.
+
+**Framing the comparison honestly:**
+- **Models:** configuration (2) mixes models by role. Per the tier table,
+  planner, assignment and LEVI run on 9B; specialists and the final answer on
+  4B; build_engineering on coder 7B; 2B is the fallback.
+- **Thinking:** structured roles use `think=False`. Specialist and
+  final_answer use the model default, so Qwen3.5 thinks.
+- **Latency:** configuration (2) latency is whole-mission time over about 6–12
+  generations, including model swaps on the 6 GB GPU. Compare it with
+  single-generation latency only with that caveat.
+- **Exact-match cases:** they may lose points to verbose synthesis. This is
+  reported, not tuned away (PHX-029).
+
+**Live run.** The owner or main session runs it on the GPU, with headless
+`ollama serve` as for the configuration (1) GPU baselines:
+
+```text
+python scripts/fyp_benchmark.py --config phoenix-multi-agent \
+  --compare <validation>/PHX-091-fyp-gpu-think-off-20261015-154843/fyp-benchmark-results.json \
+  --compare <validation>/PHX-091-fyp-gpu-think-default-rerun-T1T2-20261015-173438/fyp-benchmark-results.json
+```
+
+- **Expected duration:** about 16 cases × 1–2 min ≈ 20–35 min per measured run,
+  plus model loads for the placement checks.
+- **Optional third `--compare`:** run 2 (`...think-default-20261015-155753`)
+  for the thinking-on T0 and T2-code rows. Its T1 and T2 rows are superseded
+  by run 3.
+
+**Remaining:** the live GPU run and its evidence. This section then becomes
+DONE.

@@ -29,7 +29,7 @@ timeout = 1200
 [[gate]]
 # pyproject.toml is guard-pinned, so scripts/ get their own strict mypy gate.
 id = "mypy-scripts"
-command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py"]
+command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/fyp_multi_agent.py"]
 timeout = 600
 
 [[gate]]
@@ -194,6 +194,12 @@ path = "tests/test_fyp_benchmark.py"
 categories = ["unit", "integration"]
 # PHX-091 FYP runner; integration: test_full_run_with_fake_provider (real
 # BenchmarkRunner + ModelLifecycleManager driving the fixed task set)
+
+[[file]]
+path = "tests/test_fyp_multi_agent.py"
+categories = ["unit", "integration"]
+# PHX-091 configuration (2) runner; integration: the fixed task set runs
+# through a real PhoenixRuntime (planner, router, LEVI) with a scripted model
 
 [[file]]
 path = "tests/test_hardware.py"

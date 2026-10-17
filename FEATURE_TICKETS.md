@@ -96,7 +96,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 
 ## Phase 9 — Validation & Release
 - PHX-090 Automated test matrix — DONE
-- PHX-091 FYP benchmark suite — DONE (configuration 1 GPU baselines; configurations 2/3 in a follow-up)
+- PHX-091 FYP benchmark suite — DONE (configuration 1 GPU baselines); configuration 2 runner IN_PROGRESS (live GPU run pending); configuration 3 NOT RUNNABLE
 - PHX-092 Packaging/install workflow — TODO
 - PHX-093 Final demo scenarios — TODO
 - PHX-094 Release evidence package — TODO

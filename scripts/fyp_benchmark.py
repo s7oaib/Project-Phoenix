@@ -13,6 +13,9 @@ Usage::
     python scripts/fyp_benchmark.py                    # all baseline tiers (Ollama)
     python scripts/fyp_benchmark.py --model T1=qwen3.5:4b --runs 1
     python scripts/fyp_benchmark.py --think off        # thinking-off row (PHX-017)
+    python scripts/fyp_benchmark.py --config phoenix-multi-agent --help  # config (2)
+
+``--config phoenix-multi-agent`` dispatches to ``scripts/fyp_multi_agent.py``.
 """
 
 from __future__ import annotations
@@ -71,7 +74,8 @@ NOT_RUNNABLE_CONFIGS: tuple[dict[str, str], ...] = (
         "id": "phoenix-multi-agent",
         "fyp_configuration": "2",
         "description": "Phoenix multi-agent orchestration",
-        "reason": INTEGRATION_GAP,
+        "reason": "Not part of a baseline run; measured separately with "
+        "--config phoenix-multi-agent (PHX-091 continuation).",
     },
     {
         "id": "phoenix-adaptive-deep",
@@ -349,12 +353,32 @@ def _num(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.0f}"
 
 
+CONFIGS = ("baseline", "phoenix-multi-agent")
+
+
+def _multi_agent(argv: list[str]) -> int:
+    scripts = str(Path(__file__).resolve().parent)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import fyp_multi_agent
+
+    return fyp_multi_agent.main(argv)
+
+
 def main(
     argv: list[str] | None = None,
     provider_factory: ProviderFactory | None = None,
     compute_probe: ComputeProbe | None = None,
 ) -> int:
+    dispatch = argparse.ArgumentParser(add_help=False)
+    dispatch.add_argument("--config", choices=CONFIGS, default="baseline")
+    known, rest = dispatch.parse_known_args(argv)
+    if known.config == "phoenix-multi-agent":
+        return _multi_agent(rest)
     parser = argparse.ArgumentParser(description="PHOENIX FYP benchmark suite")
+    parser.add_argument(
+        "--config", choices=CONFIGS, default="baseline", help="FYP configuration"
+    )
     parser.add_argument("--tasks", type=Path, default=DEFAULT_TASKS)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--model", action="append", default=[], help="TIER=model")

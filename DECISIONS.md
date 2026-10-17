@@ -3321,6 +3321,29 @@ Their evidence is in the PHX-091 ticket.
   move to the PHX-091 continuation after PHX-029 and PHX-046. The owner chose,
   on 2026-10-15, to install Colibri for configuration (3).
 
+Amendment (2026-10-18, PHX-091 continuation): configuration (2) is runnable.
+- **Runner:** `scripts/fyp_benchmark.py --config phoenix-multi-agent`
+  dispatches to `scripts/fyp_multi_agent.py`. It runs each v1 case through
+  `PhoenixRuntime.run`, COMPLEX by default, with a default and a `think=False`
+  `OllamaProvider` and the runtime tier table. It uses its own mission loop,
+  because BenchmarkRunner would deadlock on the single lifecycle lease.
+- **Path:** `--path direct|complex|triage`. `triage` is a no-op until PHX-105
+  and is recorded as requested `triage`, used `complex`.
+- **Scoring:** unchanged; the same deterministic rules on the final answer.
+  Missions without an answer count as not passed.
+- **Trials:** 0 warm-up and 1 measured run by default, because a mission takes
+  about 1–2 minutes. Both are recorded in the results.
+- **Reported:** outcome counts, mission latency, generations, tokens, LEVI
+  verdicts, failure codes, per-category accuracy and the prompt set version.
+- **NOT_RUNNABLE:** verification catch rate, until fault-injected cases exist.
+  Routing accuracy belongs to PHX-105. Configuration (3) also stays
+  NOT_RUNNABLE.
+- **Comparison:** `--compare` sets configuration (1) tiers beside
+  configuration (2). It states that (2) mixes models and thinking modes by role
+  and that its latency is whole-mission time.
+- **Privacy:** unchanged (ADR-029): hashes and lengths only.
+- **Product code:** `phoenix/` is unchanged.
+
 ## ADR-080 — Explicit Ollama thinking control at provider construction
 
 Status: Accepted

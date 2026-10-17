@@ -1,0 +1,457 @@
+"""PHX-091 configuration (2) runner tests (scripted model only; no network/models).
+
+Every PHOENIX collaborator is real; the model is a scripted provider answering
+by the system prompt's role marker, as in tests/test_phoenix_runtime.py.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from itertools import cycle
+from pathlib import Path
+from types import ModuleType, TracebackType
+from typing import Any, Self
+
+import pytest
+
+from phoenix.agents.runtime import PhoenixRuntime, RuntimeLimits
+from phoenix.models.benchmark import GpuReading, ResourceSnapshot
+from phoenix.models.lifecycle import ModelLifecycleManager
+from phoenix.models.provider import (
+    CancellationResult,
+    CancellationStatus,
+    GenerationChunk,
+    GenerationRequest,
+    GenerationResponse,
+    ModelCapabilities,
+    ModelProvider,
+    ProviderHealth,
+    ProviderHealthStatus,
+    TokenUsage,
+)
+from phoenix.models.registry import ModelCapabilityRegistry
+
+ROOT = Path(__file__).resolve().parents[1]
+TASKS = ROOT / "benchmarks" / "fyp" / "tasks-v1.toml"
+MODELS = ("qwen3.5:2b", "qwen3.5:4b", "qwen3.5:9b", "qwen2.5-coder:7b")
+PASS = '{"checks":[{"criterion":"Correct","passed":true,"evidence_summary":"Fine."}]}'
+FAIL = '{"checks":[{"criterion":"Correct","passed":false,"evidence_summary":"No."}]}'
+
+
+def _load(name: str, file: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / file)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+fyp = _load("phoenix_fyp_benchmark_c2", "fyp_benchmark.py")
+multi = _load("phoenix_fyp_multi_agent", "fyp_multi_agent.py")
+
+
+def _cases() -> list[tuple[str, str]]:
+    """(prompt, correct answer) in suite order; unscored cases get free text."""
+    suite, _ = fyp.load_task_set(TASKS)
+    return [
+        (case.messages[-1].text, case.scoring.expected or "A short plan.")
+        for case in suite.cases
+    ]
+
+
+class ScriptedProvider(ModelProvider):
+    """Answers PHOENIX roles by marker; final answers follow the suite order.
+
+    stream() answers the raw task prompt, so the same fake also drives the
+    configuration (1) harness for --compare tests.
+    """
+
+    def __init__(self, wrong: frozenset[int] = frozenset()) -> None:
+        super().__init__("ollama")
+        cases = _cases()
+        self.by_prompt = dict(cases)
+        self.answers = cycle(
+            "wrong" if index in wrong else answer
+            for index, (_, answer) in enumerate(cases)
+        )
+        self.current = ""
+        self.replies: dict[str, str] = {
+            "planner": json.dumps({"steps": [{"objective": "Answer it."}]}),
+            "assignment": json.dumps(
+                {"assignments": [{"step_id": "s1", "domain": "intelligence"}]}
+            ),
+            "specialist": "Step answer.",
+            "verifier": PASS,
+            "step_verifier": PASS,
+            "final_verifier": PASS,
+        }
+        self.roles: list[str] = []
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        return None
+
+    async def health(self) -> ProviderHealth:
+        return ProviderHealth(
+            provider_id=self.provider_id, status=ProviderHealthStatus.HEALTHY
+        )
+
+    async def capabilities(self, model_id: str) -> ModelCapabilities:
+        return ModelCapabilities(
+            provider_id=self.provider_id,
+            model_id=model_id,
+            supports_streaming=True,
+            supports_structured_output=False,
+            supports_tool_use=True,
+            supports_vision=False,
+            supports_cancellation=True,
+            context_limit_tokens=16384,
+        )
+
+    async def generate(self, request: GenerationRequest) -> GenerationResponse:
+        role = request.messages[0].text.splitlines()[0].removeprefix("PHOENIX ROLE: ")
+        self.roles.append(role)
+        if role in ("planner", "direct"):  # first generation of every mission
+            self.current = next(self.answers)
+        text = (
+            self.current if role in ("final_answer", "direct") else self.replies[role]
+        )
+        return GenerationResponse(
+            operation_id=request.operation_id,
+            provider_id=self.provider_id,
+            model_id=request.model_id,
+            text=text,
+            finish_reason="stop",
+            usage=TokenUsage(input_tokens=5, output_tokens=3),
+        )
+
+    async def stream(
+        self, request: GenerationRequest
+    ) -> AsyncIterator[GenerationChunk]:
+        yield GenerationChunk(
+            provider_id=self.provider_id,
+            model_id=request.model_id,
+            operation_id=request.operation_id,
+            text=self.by_prompt.get(request.messages[-1].text, "unknown"),
+            is_final=True,
+            usage=TokenUsage(input_tokens=10, output_tokens=4),
+        )
+
+    async def cancel(self, operation_id: str) -> CancellationResult:
+        return CancellationResult(
+            provider_id=self.provider_id,
+            operation_id=operation_id,
+            status=CancellationStatus.NOT_FOUND,
+        )
+
+
+def scripted_factory(provider: ScriptedProvider) -> Any:
+    @asynccontextmanager
+    async def factory(limits: RuntimeLimits) -> AsyncIterator[Any]:
+        store = ModelCapabilityRegistry()
+        for model in MODELS:
+            store.register(await provider.capabilities(model))
+        yield multi.LiveRuntime(
+            PhoenixRuntime(
+                providers=(provider,),
+                capability_registry=store,
+                lifecycle=ModelLifecycleManager(),
+                limits=limits,
+            ),
+            MODELS,
+        )
+
+    return factory
+
+
+class FixedProbe:
+    def sample(self) -> ResourceSnapshot:
+        return ResourceSnapshot(
+            system_ram_used_bytes=8_000_000_000,
+            gpus=(GpuReading(index=0, name="fixture", used_mib=4000, total_mib=6144),),
+        )
+
+
+def _run(
+    tmp_path: Path, provider: ScriptedProvider, *extra: str
+) -> tuple[int, dict[str, Any], Path]:
+    out = tmp_path / "out"
+    code = multi.main(
+        ["--out", str(out), *extra],
+        runtime_factory=scripted_factory(provider),
+        resource_probe=FixedProbe(),
+    )
+    path = out / multi.RESULTS_NAME
+    results = json.loads(path.read_text("utf-8")) if path.exists() else {}
+    return code, results, out
+
+
+def test_multi_agent_runs_task_set_through_runtime(tmp_path: Path) -> None:
+    provider = ScriptedProvider()
+    code, results, _ = _run(tmp_path, provider)
+    assert code == 0
+    s = results["summary"]
+    assert s["measured_missions"] == 16
+    assert s["outcomes"] == {
+        "completed": 16,
+        "failed": 0,
+        "cancelled": 0,
+        "waiting_permission": 0,
+        "error": 0,
+    }
+    assert (s["score_accuracy"], s["success_rate"], s["scorable_missions"]) == (
+        1.0,
+        1.0,
+        14,
+    )
+    # One-step plan: planner, assignment, specialist, verifier, final, final verifier.
+    assert provider.roles[:6] == [
+        "planner",
+        "assignment",
+        "specialist",
+        "verifier",
+        "final_answer",
+        "final_verifier",
+    ]
+    gens = s["generations_per_mission"]
+    assert (gens["median"], gens["total"]) == (6, 96)
+    assert (s["input_tokens"], s["output_tokens"]) == (16 * 30, 16 * 18)
+    assert (s["levi"]["passed"], s["levi"]["failed"]) == (32, 0)
+    assert s["prompt_set_versions"] == ["phoenix-prompts-v3"]
+    assert s["roles"]["planner"]["thinking"] == "off"
+    assert s["roles"]["specialist"]["thinking"] == "model_default"
+    assert s["roles"]["planner"]["models"] == {"qwen3.5:9b": 16}
+    assert s["mission_latency_ms"]["count"] == 16
+    assert (s["max_ram_used_bytes"], s["max_gpu_used_mib"]) == (8_000_000_000, 4000)
+    assert results["path"] == {"requested": "complex", "used": "complex", "note": None}
+    assert results["trials"] == {"warmup": 0, "measured": 1}
+
+
+def test_failures_feed_codes_levi_counts_and_category_accuracy(
+    tmp_path: Path,
+) -> None:
+    provider = ScriptedProvider(wrong=frozenset({0}))  # instruction-exact-token
+    code, results, _ = _run(tmp_path, provider, "--warmup", "1")
+    assert code == 0
+    s = results["summary"]
+    assert s["measured_missions"] == 16 and len(results["trials_detail"]) == 32
+    assert s["passed_scores"] == 13 and s["score_accuracy"] == pytest.approx(13 / 14)
+    assert s["category_accuracy"]["instruction"] == {
+        "passed": 2,
+        "n": 3,
+        "accuracy": pytest.approx(2 / 3),
+    }
+    assert s["failure_codes"] == {}
+
+    failing = ScriptedProvider()
+    failing.replies["final_verifier"] = FAIL
+    _, failed, _ = _run(tmp_path / "f", failing)
+    fs = failed["summary"]
+    assert fs["outcomes"]["failed"] == 16 and fs["outcomes"]["completed"] == 0
+    assert fs["failure_codes"] == {"verification_failed": 16}
+    assert (fs["levi"]["passed"], fs["levi"]["failed"]) == (16, 16)
+    assert fs["levi"]["missions_with_failed_check"] == 16
+    assert fs["score_accuracy"] == 0.0 and fs["mission_latency_ms"]["count"] == 0
+
+
+def test_runtime_defect_is_recorded_and_fails_the_run(tmp_path: Path) -> None:
+    @asynccontextmanager
+    async def broken(limits: RuntimeLimits) -> AsyncIterator[Any]:
+        class Boom:
+            async def run(self, *args: Any) -> Any:
+                raise RuntimeError("secret text must not be recorded")
+
+        yield multi.LiveRuntime(Boom(), MODELS)
+
+    out = tmp_path / "o"
+    code = multi.main(["--out", str(out)], runtime_factory=broken)
+    assert code == 1
+    text = (out / multi.RESULTS_NAME).read_text("utf-8")
+    results = json.loads(text)
+    assert results["summary"]["outcomes"]["error"] == 16
+    assert results["summary"]["failure_codes"] == {"runtime_defect": 16}
+    assert results["trials_detail"][0]["error_type"] == "RuntimeError"
+    assert "secret text" not in text
+
+
+def test_output_schema_privacy_and_metric_coverage(tmp_path: Path) -> None:
+    code, results, out = _run(tmp_path, ScriptedProvider())
+    assert code == 0
+    assert results["schema_version"] == 1 and results["tool"] == multi.TOOL
+    assert results["fyp_configuration"] == "2"
+    assert results["suite"]["version"] == "1.0.0"
+    assert len(results["suite"]["sha256"]) == 64
+    assert results["model_policy"]["models_registered"] == list(MODELS)
+    assert results["model_policy"]["structured_roles_think"] is False
+    assert "not one model" in results["model_policy"]["note"]
+    assert results["not_runnable"][0]["fyp_configuration"] == "3"
+    assert results["not_runnable"][0]["reason"]
+    trial = results["trials_detail"][0]
+    assert trial["answer_chars"] == len("PHOENIX_READY")
+    assert len(trial["answer_sha256"]) == 64
+    # Privacy (ADR-029): no answers or prompts verbatim, anywhere.
+    dumped = (out / multi.RESULTS_NAME).read_text("utf-8")
+    dumped += (out / multi.SUMMARY_NAME).read_text("utf-8")
+    for prompt, answer in _cases():
+        assert prompt not in dumped
+        assert len(answer) < 4 or answer not in dumped
+    # Every docs/24 metric: measured or NOT_RUNNABLE with a reason.
+    doc = (ROOT / "docs" / "24_TEST_EVALUATION.md").read_text(encoding="utf-8")
+    section = doc.split("## Metrics")[1].split("##")[0]
+    documented = [
+        line[2:].strip().replace("/", "_").replace(" ", "_").lower()
+        for line in section.splitlines()
+        if line.startswith("- ")
+    ]
+    rows = {row["id"]: row for row in results["metrics"]}
+    assert len(rows) == len(documented) == 12
+    for row in rows.values():
+        assert row["status"] in {"MEASURED", "NOT_RUNNABLE"}
+        assert (row.get("source") or row.get("reason") or "").strip()
+    assert rows["routing_accuracy"]["status"] == "NOT_RUNNABLE"
+    assert "PHX-105" in rows["routing_accuracy"]["reason"]
+    assert "fault-injected" in rows["verification_catch_rate"]["reason"]
+    measured = {k for k, r in rows.items() if r["status"] == "MEASURED"}
+    assert measured == {"task_success", "ttft_latency", "ram_vram", "token_usage"}
+    summary = (out / multi.SUMMARY_NAME).read_text("utf-8")
+    assert "configuration (2)" in summary and "NOT RUNNABLE" in summary
+
+
+def _config1(tmp_path: Path, think: str) -> Path:
+    out = tmp_path / f"c1-{think}"
+    code = fyp.main(
+        ["--out", str(out), "--model", "T1=qwen3.5:4b", "--model", "T0=qwen3.5:2b"]
+        + ["--warmup", "0", "--runs", "1", "--think", think],
+        provider_factory=lambda: ScriptedProvider(),
+    )
+    assert code == 0
+    return out / "fyp-benchmark-results.json"
+
+
+def test_compare_builds_side_by_side_table(tmp_path: Path) -> None:
+    off, on = _config1(tmp_path, "off"), _config1(tmp_path, "default")
+    code, results, out = _run(
+        tmp_path, ScriptedProvider(), "--compare", str(off), "--compare", str(on)
+    )
+    assert code == 0
+    rows = results["comparison"]
+    assert [r["fyp_configuration"] for r in rows] == ["1", "1", "1", "1", "2"]
+    assert [r["thinking"] for r in rows] == [
+        "off",
+        "off",
+        "model default",
+        "model default",
+        "mixed by role",
+    ]
+    assert sum(r["best"] for r in rows) == 2 and rows[0]["best"]
+    assert all(r["same_task_set"] for r in rows)
+    assert rows[0]["output_tokens_per_task"] == 4.0
+    assert rows[-1]["output_tokens_per_task"] == 18.0
+    assert rows[-1]["score_accuracy"] == 1.0
+    table = (out / multi.COMPARISON_NAME).read_text("utf-8")
+    assert "| (2) | PHOENIX multi-agent (complex) | mixed by role | 100% |" in table
+    assert "(best)" in table and "not one model" in table
+    assert "| yes | c1-off |" in table and "| yes | c1-default |" in table
+    assert "Comparison with configuration (1)" in (out / multi.SUMMARY_NAME).read_text(
+        "utf-8"
+    )
+
+    # Re-render later from saved results, without running missions again.
+    again = tmp_path / "again"
+    code = multi.main(
+        [
+            "--out",
+            str(again),
+            "--from-results",
+            str(out / multi.RESULTS_NAME),
+            "--compare",
+            str(off),
+        ]
+    )
+    assert code == 0
+    assert "| (2) |" in (again / multi.COMPARISON_NAME).read_text("utf-8")
+
+
+def test_compare_rejects_wrong_file_before_running(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"tool": "other"}), encoding="utf-8")
+    provider = ScriptedProvider()
+    with pytest.raises(SystemExit):
+        _run(tmp_path, provider, "--compare", str(bad))
+    assert provider.roles == []
+
+
+def test_dispatch_flags_and_dry_run(capsys: pytest.CaptureFixture[str]) -> None:
+    assert fyp.main(["--config", "phoenix-multi-agent", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "16 cases x (0 warm-up + 1 measured) = 16 missions on path complex" in out
+    assert "phoenix-prompts-v3" in out and "qwen3.5:9b" in out
+    assert (
+        fyp.main(
+            ["--config", "phoenix-multi-agent", "--dry-run", "--path"]
+            + ["triage", "--warmup", "1", "--runs", "2"]
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "48 missions on path complex (triage requested" in out
+    assert fyp.main(["--dry-run"]) == 0  # the baseline is unchanged
+    assert "tiers: T0=qwen3.5:2b" in capsys.readouterr().out
+    for argv in (
+        ["--config", "nope", "--dry-run"],
+        ["--config", "phoenix-multi-agent", "--path", "other", "--dry-run"],
+        ["--config", "phoenix-multi-agent", "--runs", "0", "--dry-run"],
+        ["--config", "phoenix-multi-agent", "--think", "off", "--dry-run"],
+    ):
+        with pytest.raises(SystemExit):
+            fyp.main(argv)
+
+
+@pytest.mark.parametrize(
+    ("path", "first"), [("direct", "direct"), ("triage", "planner")]
+)
+def test_path_flag_selects_and_records_path(
+    tmp_path: Path, path: str, first: str
+) -> None:
+    provider = ScriptedProvider()
+    code, results, _ = _run(tmp_path, provider, "--path", path)
+    assert code == 0 and provider.roles[0] == first
+    used = "direct" if path == "direct" else "complex"
+    assert results["path"]["requested"] == path and results["path"]["used"] == used
+    assert ("PHX-105" in (results["path"]["note"] or "")) is (path == "triage")
+    assert {t["path"] for t in results["trials_detail"]} == {used}
+    assert results["summary"]["score_accuracy"] == 1.0
+
+
+def test_cpu_only_placement_refused_before_any_mission(tmp_path: Path) -> None:
+    provider = ScriptedProvider()
+    code = multi.main(
+        ["--out", str(tmp_path / "o")],
+        runtime_factory=scripted_factory(provider),
+        compute_probe=lambda model: fyp.compute_from_ps({"size": 1, "size_vram": 0}),
+    )
+    assert code == 2 and provider.roles == []
+    code, results, _ = _run(tmp_path, provider, "--allow-cpu")
+    assert code == 0 and results["compute"]["allow_cpu"] is True
+
+
+def test_preflight_models_follow_the_runtime_tier_table() -> None:
+    assert multi.tier_models() == (
+        "qwen3.5:4b",
+        "qwen3.5:2b",
+        "qwen3.5:9b",
+        "qwen2.5-coder:7b",
+    )
+    assert multi.tier_table_json()["verifier"][0] == "qwen3.5:9b"
