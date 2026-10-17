@@ -4379,8 +4379,9 @@ Decision:
   records its permission decision and a `FAILURE` outcome. The per-component
   `lstat`, link refusal and resolved-containment checks are unchanged.
 - **Frozen file.** `phoenix/tools/filesystem.py` (from `origin/main`) is pinned
-  to the PHX-048 implementation commit (`PHX_048_COMMIT` / `PHX_048_PATHS`),
-  landed as an implementation commit then a pin commit; the PR must merge with
+  to the PHX-048 implementation commit (`PHX_048_COMMIT` / `PHX_048_PATHS`,
+  `2e04e22f361f64110742dd8974dece216d567a7f`), landed as an implementation
+  commit then a pin commit; the PR must merge with
   a merge commit. The two `git diff origin/main` guards that named the file
   (`test_screenshot_vision_loop.py`, `test_windows_ui_automation.py`) drop it
   in favour of the hash pin.
