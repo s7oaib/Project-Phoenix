@@ -4342,8 +4342,9 @@ and no new event types.
 
 ## ADR-091 — The desktop shell owns the backend and proxies the webview's traffic
 
-Status: Proposed (implemented for the 2026-10-21 review demo; recommendations
-R1–R12 in `tickets/PHX-106-tauri-backend-sidecar.md` await owner confirmation)
+Status: Accepted (the owner confirmed recommendations R1–R12 in
+`tickets/PHX-106-tauri-backend-sidecar.md`, and the `ureq` and `tungstenite`
+dependencies, on 2026-10-18)
 Date: 2026-10-18
 Ticket: PHX-106
 
@@ -4393,8 +4394,8 @@ recorded `interrupted` at the next start (PHX-102).
 
 ## ADR-092 — Live port adapters behind an unchanged App
 
-Status: Proposed (implemented for the 2026-10-21 review demo; recommendations
-R1–R11 in `tickets/PHX-107-frontend-port-adapters.md` await owner confirmation)
+Status: Accepted (the owner confirmed recommendations R1–R11 in
+`tickets/PHX-107-frontend-port-adapters.md` on 2026-10-18)
 Date: 2026-10-18
 Ticket: PHX-107 (with a minimal piece of PHX-108)
 
@@ -4419,8 +4420,9 @@ Decision:
   Files and Voice stay unconnected.
 - **Minimal PHX-108.** A connection bar above App shows the backend state, sets
   the document workspace with `PATCH /settings` (validation codes explained),
-  chooses the mission path until PHX-105 triage, and offers cancel and run again
-  for the tracked mission.
+  defaults the mission path to PHX-105 triage ("Automatic", no `path`) with
+  direct and planned steps as overrides, and offers cancel and run again for
+  the tracked mission.
 
 Consequences: the frontend has no direct backend, provider or tool access
 (INV-011); decisions are only user intents that PermissionEngine evaluates

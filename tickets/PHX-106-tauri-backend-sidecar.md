@@ -1,9 +1,9 @@
 # PHX-106 — Tauri backend sidecar
 
-Status: IN_PROGRESS (implemented with PHX-107 for the 2026-10-21 review demo; recommendations R1–R12 await owner confirmation)
+Status: DONE (R1–R12 confirmed by the owner 2026-10-18, including the new `ureq` and `tungstenite` dependencies)
 Phase: 10 — Product Integration (milestone M2, desktop)
 Branch: `feature/PHX-106-107-desktop-connected` (local commits only; no push, no PR)
-Base: `origin/main` `f8aaef0` (PHX-104 merged)
+Base: `origin/main` `f8aaef0` (PHX-104 merged); main `1b51f26` (PHX-105) merged in
 
 ## Objective
 
@@ -15,7 +15,7 @@ The native PHOENIX app starts and owns the Python backend, and is the only path 
 - `docs/09_SECURITY.md` ("Local API"), `docs/13_API_CONTRACTS.md`, `docs/14_EVENT_SYSTEM.md`, `docs/21_FRONTEND.md`
 - ADR-075, ADR-077, ADR-084 to ADR-089; PHX-100 to PHX-104
 
-## Recommendations (R1–R12)
+## Recommendations (R1–R12, confirmed by the owner 2026-10-18)
 
 - **R1 — Rust proxy.** The shell holds the token and forwards HTTP and WebSocket traffic; the token never reaches webview JavaScript, any command result, event, log, command line or environment. `Token`'s `Debug` is redacted; the WebSocket header value is marked sensitive.
 - **R2 — Demo/dev launch mode.** `<python> -m phoenix.api --host 127.0.0.1 --port 0 --data-dir <dir>` as an argument array (no shell), working directory the repository root, `CREATE_NO_WINDOW`. Root: `PHOENIX_BACKEND_ROOT` at run time, else at build time, else the checkout the binary was built from. Python: `PHOENIX_BACKEND_PYTHON`, else `<root>/.venv`. Data: `PHOENIX_DATA_DIR` (the backend's own setting), else `~/.phoenix/data` (the backend default). Backend stderr goes to `<data>/phoenix.desktop-backend.log` (it never contains the token). PHX-092 replaces this with a bundled backend.

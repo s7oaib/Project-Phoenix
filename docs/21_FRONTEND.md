@@ -626,9 +626,9 @@ unconnected App. App.tsx is unchanged, so its captions still describe ports as
 caller-supplied (copy update proposed for PHX-108).
 
 Minimal PHX-108: a connection bar above App shows backend and live-stream state, sets
-the document workspace through `PATCH /settings`, chooses the mission path until
-PHX-105 triage (server default, direct, or planned steps), and offers cancel / run
-again for the tracked mission.
+the document workspace through `PATCH /settings`, sends missions to PHX-105 triage by
+default ("Automatic (PHOENIX decides)", no `path`) with direct and planned steps as
+explicit overrides, and offers cancel / run again for the tracked mission.
 
 Demo: `uv sync` in the repository, then `npm run tauri:dev --workspace @phoenix/desktop`
 (or run the release build from `npm run tauri:build --workspace @phoenix/desktop`).
