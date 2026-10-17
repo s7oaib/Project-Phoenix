@@ -1,8 +1,10 @@
 """FYP configuration (2): PHOENIX multi-agent orchestration (PHX-091, ADR-079).
 
-Runs the unchanged v1 task set through ``PhoenixRuntime.run`` (COMPLEX by
-default: AIZEN plans, PHOENIX assigns and routes, specialists answer, LEVI
-verifies every step and the final answer) against a local Ollama, with a
+Runs the unchanged v1 task set through ``PhoenixRuntime.run`` against a local
+Ollama. By default PHOENIX triages each request (PHX-105) and answers it DIRECT
+or COMPLEX; ``--path complex`` forces the full pipeline (AIZEN plans, PHOENIX
+assigns and routes, specialists answer, LEVI verifies every step and the final
+answer) as a stress test, and ``--path direct`` forces one reply. It uses a
 default provider for thinking roles and a ``think=False`` provider for the
 structured roles, exactly as ``scripts/phoenix_mission_smoke.py`` builds it.
 It has its own mission loop, not the PHX-016 ``BenchmarkRunner``: the runtime
@@ -75,16 +77,14 @@ SCHEMA_VERSION = 1
 RESULTS_NAME = "fyp-multi-agent-results.json"
 SUMMARY_NAME = "fyp-multi-agent-summary.md"
 COMPARISON_NAME = "fyp-comparison.md"
-PATHS = ("complex", "direct", "triage")
-TRIAGE_NOTE = (
-    "triage is a no-op until PHX-105 lands: PhoenixRuntime takes a caller-supplied "
-    "path, so these missions ran on COMPLEX."
-)
+# "triage" passes no path, so PHOENIX decides per request (PHX-105, ADR-090).
+PATHS = ("triage", "complex", "direct")
 # Roles served by the think=False structured provider (ADR-081 Q7, ADR-083);
 # every other role uses the default provider, i.e. the model's own default
 # (Qwen3.5 thinks). Recorded so the comparison states thinking honestly.
 STRUCTURED_ROLES = frozenset(
     {
+        "triage",
         "direct",
         "planner",
         "assignment",
@@ -99,24 +99,25 @@ STRUCTURED_ROLES = frozenset(
 MIXED_MODELS_NOTE = (
     "Configuration (2) is not one model: each role uses the PhoenixRuntime tier "
     "table (Qwen3.5 2B/4B/9B and qwen2.5-coder 7B) and thinking varies by role "
-    "(structured roles think=False; specialist and final_answer use the model "
-    "default, which thinks on Qwen3.5). Its latency is whole-mission wall time "
-    "over several generations, including model swaps on the 6 GB GPU; "
-    "configuration (1) latency is one generation by one model."
+    "(structured roles, including triage and DIRECT answers, think=False; "
+    "specialist and final_answer use the model default, which thinks on "
+    "Qwen3.5). Its latency is whole-mission wall time: triage plus one DIRECT "
+    "reply, or about 6-12 COMPLEX generations including model swaps on the 6 GB "
+    "GPU; configuration (1) latency is one generation by one model."
 )
-ESTIMATE = "about 1-2 min per mission, so 16 cases take about 20-35 min per run"
+ESTIMATE = (
+    "a COMPLEX mission takes about 1-2 min (16 forced-COMPLEX cases: about "
+    "20-35 min per run); a triaged DIRECT mission takes seconds"
+)
 # docs/24 metrics for configuration (2): measured (empty reason) or NOT_RUNNABLE.
 METRICS: tuple[tuple[str, str], ...] = (
     ("task_success", ""),
     (
         "routing_accuracy",
-        "Owned by the PHX-105 triage script; this runner uses a caller-fixed path.",
+        "Owned by the PHX-105 routing benchmark (scripts/routing_benchmark.py); "
+        "this runner records each mission's decided path and triage outcome.",
     ),
-    (
-        "verification_catch_rate",
-        "Needs fault-injected cases: the v1 set has no known-bad candidates, and "
-        "a LEVI rejection hides the rejected answer, so a catch cannot be scored.",
-    ),
+    ("verification_catch_rate", baseline.CATCH_RATE_REASON),
     (
         "recovery_success",
         "MAHORAGA/KAIDO are not model-backed; the runtime fails explicitly with "
@@ -149,8 +150,7 @@ NOT_RUNNABLE_CONFIG3 = {
     "id": "phoenix-adaptive-deep",
     "fyp_configuration": "3",
     "description": "Phoenix + adaptive model routing/deep tier",
-    "reason": "PhoenixRuntime has no adaptive routing or Colibri deep-tier (T3) "
-    "path; its tier table covers T0-T2 only.",
+    "reason": baseline.CONFIG3_REASON,
 }
 
 
@@ -246,7 +246,13 @@ def trial_record(
         "answer_chars": None if text is None else len(text),
         "answer_sha256": None if text is None else _sha256(text),
         "prompt_set_version": trace.prompt_set_version,
-        "path": trace.path.value,
+        "path": None if trace.path is None else trace.path.value,
+        "triage_outcome": None
+        if trace.triage_outcome is None
+        else trace.triage_outcome.value,
+        "triage_reason": None
+        if trace.triage_reason is None
+        else trace.triage_reason.value,
         "states": [state.value for state in trace.states],
         "generations": len(records),
         "input_tokens": sum(r.input_tokens or 0 for r in records),
@@ -276,6 +282,8 @@ def error_record(
         "answer_sha256": None,
         "prompt_set_version": None,
         "path": None,
+        "triage_outcome": None,
+        "triage_reason": None,
         "states": [],
         "generations": 0,
         "input_tokens": 0,
@@ -300,7 +308,7 @@ async def _sample(probe: ResourceProbe | None) -> dict[str, Any] | None:
 async def run_missions(
     suite: BenchmarkSuite,
     categories: dict[str, str],
-    path: OrchestrationPath,
+    path: OrchestrationPath | None,
     warmup: int,
     runs: int,
     runtime_factory: RuntimeFactory,
@@ -404,6 +412,8 @@ def summarize(trials: list[dict[str, Any]]) -> dict[str, Any]:
             role["generations"] += 1
             role["models"][record["model_id"]] += 1
     versions = sorted({t["prompt_set_version"] for t in measured} - {None})
+    decided = Counter(str(t["path"]) for t in measured)
+    triage = Counter(str(t["triage_outcome"]) for t in measured)
     return {
         "measured_missions": len(measured),
         "outcomes": {
@@ -444,6 +454,8 @@ def summarize(trials: list[dict[str, Any]]) -> dict[str, Any]:
             ],
         },
         "failure_codes": dict(sorted(failures.items())),
+        "paths": dict(sorted(decided.items())),
+        "triage_outcomes": dict(sorted(triage.items())),
         "prompt_set_versions": versions,
         "generations_by_model": dict(sorted(models.items())),
         "roles": {
@@ -570,6 +582,10 @@ def comparison_markdown(rows: list[dict[str, Any]]) -> list[str]:
     ]
 
 
+def _counts(counts: dict[str, int]) -> str:
+    return ", ".join(f"{name} {n}" for name, n in counts.items()) or "n/a"
+
+
 def write_summary(results: dict[str, Any], path: Path) -> None:
     s = results["summary"]
     o = s["outcomes"]
@@ -581,7 +597,9 @@ def write_summary(results: dict[str, Any], path: Path) -> None:
         f"{results['started_utc']} → {results['finished_utc']} on "
         f"{results['host']['platform']}. Task set {results['suite']['id']} "
         f"{results['suite']['version']} sha256 `{results['suite']['sha256'][:16]}…`. "
-        f"Path: {results['path']['used']} (requested {results['path']['requested']})."
+        f"Path: {results['path']['used']}; missions by path "
+        f"{_counts(s.get('paths', {}))}; triage outcomes "
+        f"{_counts(s.get('triage_outcomes', {}))}."
         f" Trials: {results['trials']['warmup']} warm-up, "
         f"{results['trials']['measured']} measured. Prompt set: "
         f"{', '.join(s['prompt_set_versions']) or 'n/a'}.",
@@ -616,8 +634,6 @@ def write_summary(results: dict[str, Any], path: Path) -> None:
         lines.append(
             f"- {role} (thinking {row['thinking']}): {row['generations']} — {models}"
         )
-    if results["path"].get("note"):
-        lines += ["", f"Path note: {results['path']['note']}"]
     lines += ["", f"Model policy: {MIXED_MODELS_NOTE}"]
     if results.get("comparison"):
         lines += ["", "## Comparison with configuration (1)", ""]
@@ -682,7 +698,13 @@ def main(
     )
     parser.add_argument("--tasks", type=Path, default=baseline.DEFAULT_TASKS)
     parser.add_argument("--out", type=Path, default=baseline.DEFAULT_OUT)
-    parser.add_argument("--path", choices=PATHS, default="complex")
+    parser.add_argument(
+        "--path",
+        choices=PATHS,
+        default="triage",
+        help="triage (default: PHOENIX decides per request), or force complex "
+        "(full pipeline stress test) or direct",
+    )
     parser.add_argument("--warmup", type=int, default=0)
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--base-url", default=baseline.OLLAMA_URL)
@@ -731,16 +753,14 @@ def main(
         return 0
 
     suite, categories = baseline.load_task_set(args.tasks)
-    used = "complex" if args.path == "triage" else args.path
+    used = args.path
     limits = RuntimeLimits(mission_timeout_seconds=args.mission_timeout)
     missions = len(suite.cases) * (args.warmup + args.runs)
     if args.dry_run:
-        triage = " (triage requested: no-op until PHX-105)"
         print(
             f"fyp: {CONFIG_ID}: {suite.suite_id} {suite.version}: "
             f"{len(suite.cases)} cases x ({args.warmup} warm-up + {args.runs} "
-            f"measured) = {missions} missions on path {used}"
-            f"{triage if args.path == 'triage' else ''}; prompts "
+            f"measured) = {missions} missions on path {used}; prompts "
             f"{prompts.PROMPT_SET_VERSION}; models {', '.join(tier_models())}; "
             f"expected {ESTIMATE}."
         )
@@ -762,7 +782,7 @@ def main(
         run_missions(
             suite,
             categories,
-            OrchestrationPath(used),
+            None if used == "triage" else OrchestrationPath(used),
             args.warmup,
             args.runs,
             factory,
@@ -789,7 +809,6 @@ def main(
         "path": {
             "requested": args.path,
             "used": used,
-            "note": TRIAGE_NOTE if args.path == "triage" else None,
         },
         "trials": {"warmup": args.warmup, "measured": args.runs},
         "runtime_limits": limits.model_dump(mode="json"),

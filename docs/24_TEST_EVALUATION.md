@@ -61,9 +61,11 @@ behaviour.
 
 - Configuration (2) runs separately with `--config phoenix-multi-agent`
   (`scripts/fyp_multi_agent.py`). It sends each v1 case through
-  `PhoenixRuntime.run` (default path COMPLEX; `--path direct|complex|triage`,
-  where `triage` is a no-op until PHX-105) with a default and a `think=False`
-  Ollama provider and the runtime tier table. It uses its own mission loop
+  `PhoenixRuntime.run` with a default and a `think=False` Ollama provider and
+  the runtime tier table. The default `--path triage` passes no path, so
+  PHOENIX triages each request (PHX-105) and the decided path and triage
+  outcome are recorded per mission; `--path complex` forces the full pipeline
+  as a stress test and `--path direct` forces one reply. It uses its own mission loop
   rather than BenchmarkRunner (single-lease deadlock, PHX-029). It scores the
   final answer with the same exact/contains rules and reports accuracy, outcome
   counts, mission latency, generations, tokens, LEVI verdicts, failure codes,
@@ -77,6 +79,22 @@ behaviour.
     report states this.
   - Verification catch rate stays NOT RUNNABLE (needs fault-injected cases);
     routing accuracy belongs to PHX-105.
+  - Live results (2026-10-18, BLAZE-6, evidence in the PHX-091 ticket), with
+    configuration (1)'s best at 93% / 0.3 s (4B, thinking off) and 100% / 7.2 s
+    (4B, thinking on) for comparison:
+
+    | Path | Accuracy | Success | Latency median | Main failures |
+    | --- | --- | --- | --- | --- |
+    | forced COMPLEX | 43% | 38% | 122 s | schema, truncated |
+    | triage (default) | 64% | 69% | 1.1 s | provider_unavailable, verification_failed |
+
+    On these short tasks with 6 GB of VRAM, multi-agent is slower and less
+    accurate than the best single small model. Its value is that no wrong
+    answer is ever reported as verified: every forced-COMPLEX answer that
+    passed LEVI was correct, and the one wrong triage answer
+    (`reasoning-arithmetic-chain`) came from the DIRECT path, which has no LEVI
+    check. Permissioned tool use is the other gain. The next levers are
+    constrained JSON decoding and MAHORAGA retries (PHX-109).
 - Configuration (3) is reported as NOT RUNNABLE: the runtime has no adaptive
   routing or Colibri deep-tier path.
 - Every metric above is reported either as measured or as NOT RUNNABLE with a

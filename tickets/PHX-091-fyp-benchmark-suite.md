@@ -1,6 +1,6 @@
 # PHX-091 — FYP benchmark suite
 
-Status: DONE (configuration 1 baseline); continuation IN_PROGRESS (configuration 2 runner built, live GPU run pending); configuration 3 NOT RUNNABLE
+Status: DONE (configuration 1 baseline; configuration 2 measured live 2026-10-18); configuration 3 NOT RUNNABLE
 Phase: 9 — Validation & Release
 Branch: feature/PHX-091-fyp-benchmark-suite
 Starting main/base SHA: e9a5c393b2fd615b2664a0804a889f236d404877
@@ -216,7 +216,7 @@ Observations (deterministic: every listed failure occurred in 3 of 3 measured ru
 - **Configuration (2):** needs PHX-029 and PHX-046, then a runner mode under the PHX-091 continuation.
 - **Configuration (3):** the owner decided on 2026-10-15 to install Colibri and run it in that continuation.
 
-## Continuation: configuration (2) runner — IN_PROGRESS (2026-10-18)
+## Continuation: configuration (2) runner — DONE (2026-10-18)
 
 Branch `feature/PHX-091-config2-runner`, base main `f8aaef0`. This is the
 PHX-029 "PHX-091 configuration (2)" follow-up, after PHX-029, PHX-046 and
@@ -232,8 +232,9 @@ PHX-047 landed. The FYP review is on 2026-10-21.
     default tier table and only the installed models. It is text-only (no
     filesystem tool).
   - It has its own sequential loop, not `BenchmarkRunner` (PHX-029 finding 9).
-  - `--path complex` (default), `direct` or `triage`. `triage` is a no-op
-    until PHX-105: it runs COMPLEX and records the requested and used paths.
+  - `--path triage` (default since PHX-105 merged; PHOENIX decides per
+    request), `complex` (forced full pipeline) or `direct`. See "Runner change
+    after PHX-105 merged" below.
   - `--warmup 0 --runs 1` by default; both are recorded.
   - Scoring: the unchanged `ScoringRule.score` on `MissionResult.text`. A
     mission without text (failed, cancelled, waiting) counts as not passed.
@@ -265,7 +266,7 @@ PHX-047 landed. The FYP review is on 2026-10-21.
   check and the evidence directory. `--from-results` re-renders from a saved
   results file without models.
 - **Privacy:** as ADR-029, hashes and lengths only, never prompts or answers.
-- **Tests:** `tests/test_fyp_multi_agent.py` (11 tests).
+- **Tests:** `tests/test_fyp_multi_agent.py` (11 test functions, 13 cases).
   - It uses a real `PhoenixRuntime` with a scripted model. The same fake also
     drives the configuration (1) harness for `--compare`.
   - It is mapped in `tests/matrix.toml`, and the script was added to the
@@ -280,26 +281,83 @@ PHX-047 landed. The FYP review is on 2026-10-21.
   4B; build_engineering on coder 7B; 2B is the fallback.
 - **Thinking:** structured roles use `think=False`. Specialist and
   final_answer use the model default, so Qwen3.5 thinks.
-- **Latency:** configuration (2) latency is whole-mission time over about 6–12
-  generations, including model swaps on the 6 GB GPU. Compare it with
+- **Latency:** configuration (2) latency is whole-mission time: triage plus one
+  DIRECT reply, or about 6–12 COMPLEX generations including model swaps on the
+  6 GB GPU. Compare it with
   single-generation latency only with that caveat.
 - **Exact-match cases:** they may lose points to verbose synthesis. This is
   reported, not tuned away (PHX-029).
 
-**Live run.** The owner or main session runs it on the GPU, with headless
-`ollama serve` as for the configuration (1) GPU baselines:
+**Live results (2026-10-18): the BLAZE-6 evidence for configuration (2).**
 
-```text
-python scripts/fyp_benchmark.py --config phoenix-multi-agent \
-  --compare <validation>/PHX-091-fyp-gpu-think-off-20261015-154843/fyp-benchmark-results.json \
-  --compare <validation>/PHX-091-fyp-gpu-think-default-rerun-T1T2-20261015-173438/fyp-benchmark-results.json
-```
+Setup common to both runs:
+- **Hardware and runtime:** BLAZE-6, RTX 3050 6 GB on CUDA, Ollama 0.40.4
+  desktop app, 16K context, AC power.
+- **Task set:** the unchanged v1 task set; 0 warm-up and 1 measured run (16
+  missions).
+- **Command:** `python scripts/fyp_benchmark.py --config phoenix-multi-agent`,
+  with `--compare` against the configuration (1) GPU evidence.
 
-- **Expected duration:** about 16 cases × 1–2 min ≈ 20–35 min per measured run,
-  plus model loads for the placement checks.
-- **Optional third `--compare`:** run 2 (`...think-default-20261015-155753`)
-  for the thinking-on T0 and T2-code rows. Its T1 and T2 rows are superseded
-  by run 3.
+| Run | Path | Code | Prompts | Evidence under `validation/` |
+| --- | --- | --- | --- | --- |
+| A | forced COMPLEX (`--path complex`) | branch `1fff0cd` | v3 | `PHX-091-config2-20261018-030132` |
+| B | triage (now the default) | PHX-105 + runner integration | v4 | `PHX-091-config2-triage-20261018-033220` |
 
-**Remaining:** the live GPU run and its evidence. This section then becomes
-DONE.
+| Run | Routed | Completed / failed | Accuracy | Success | Latency median | Input / output tokens | LEVI checks passed / failed |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A | 16 COMPLEX | 6 / 10 | 43% | 38% | 122 s | 39,119 / 35,038 | 13 / 2 |
+| B | 11 DIRECT, 5 COMPLEX | 11 / 5 | 64% | 69% | 1.1 s | 18,861 / 8,317 | — |
+
+Failure codes:
+- **Run A:**
+  - 4× `responder_output/schema`: planner and assignment JSON from tiny
+    outputs (6–19 tokens) on trivial tasks;
+  - 3× `responder_output/truncated`: specialist thinking hit the 4096-token
+    cap;
+  - 1× `responder_output/not_json`;
+  - 2× `verification_failed`.
+
+  All 6 completed missions were correct.
+- **Run B:**
+  - 2× `provider_unavailable`: a transient Ollama drop, possibly from
+    concurrent CPU/GPU load during an exe build;
+  - 2× `verification_failed`;
+  - 1× `responder_output/not_json`.
+
+  One DIRECT answer was wrong, on `reasoning-arithmetic-chain`. The DIRECT path
+  has no LEVI check.
+
+Comparison with configuration (1)'s best rows (same task set):
+
+| Configuration | Accuracy | Latency median |
+| --- | --- | --- |
+| (1) T1 qwen3.5:4b, thinking off | 93% | 0.3 s |
+| (1) T1 qwen3.5:4b, thinking on | 100% | 7.2 s |
+| (2) PHOENIX, triage | 64% | 1.1 s |
+| (2) PHOENIX, forced COMPLEX | 43% | 122 s |
+
+Interpretation:
+- **Single model wins here.** On these short tasks with 6 GB of VRAM,
+  multi-agent orchestration is slower and less accurate than the best single
+  small model. Most COMPLEX failures are structured-output failures (schema,
+  not_json, truncation), not wrong answers.
+- **What multi-agent adds.** No wrong answer is ever reported as verified.
+  Every forced-COMPLEX answer that passed LEVI was correct, and LEVI refused 2.
+  The one wrong triage answer came from the unverified DIRECT path.
+  Permissioned tool use (PHX-046) is the other gain; this text-only task set
+  does not exercise it.
+- **Next levers:** constrained JSON decoding, and MAHORAGA retries for
+  transient and structured-output failures (PHX-109).
+- **Caveats:** one measured run per path, so the numbers carry run-to-run
+  variance. Run B overlapped other machine load. Runs A and B use different
+  prompt sets (v3 and v4) and code.
+
+**Runner change after PHX-105 merged** (merge of `origin/main` `1b51f26`):
+- `--path triage` is real and is now the default. It passes no path, so
+  PHOENIX triages each request.
+- Each trial records the decided `path`, `triage_outcome` and `triage_reason`.
+  The summary counts missions by path and by triage outcome.
+- `--path complex` stays as the full-pipeline stress test.
+- The stale `fyp_benchmark.py` reasons were also replaced: configuration (3)
+  now says there is no adaptive routing or Colibri T3 path, and verification
+  catch rate says it needs fault-injected cases.

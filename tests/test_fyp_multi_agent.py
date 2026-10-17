@@ -11,7 +11,6 @@ import json
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from itertools import cycle
 from pathlib import Path
 from types import ModuleType, TracebackType
 from typing import Any, Self
@@ -71,15 +70,17 @@ class ScriptedProvider(ModelProvider):
     configuration (1) harness for --compare tests.
     """
 
-    def __init__(self, wrong: frozenset[int] = frozenset()) -> None:
+    def __init__(
+        self,
+        wrong: frozenset[int] = frozenset(),
+        direct: frozenset[int] = frozenset(),
+    ) -> None:
         super().__init__("ollama")
-        cases = _cases()
-        self.by_prompt = dict(cases)
-        self.answers = cycle(
-            "wrong" if index in wrong else answer
-            for index, (_, answer) in enumerate(cases)
-        )
-        self.current = ""
+        self.cases = _cases()
+        self.by_prompt = dict(self.cases)
+        self.wrong = wrong
+        self.direct = direct  # case indices triage sends DIRECT; others COMPLEX
+        self.mission = -1
         self.replies: dict[str, str] = {
             "planner": json.dumps({"steps": [{"objective": "Answer it."}]}),
             "assignment": json.dumps(
@@ -122,12 +123,20 @@ class ScriptedProvider(ModelProvider):
 
     async def generate(self, request: GenerationRequest) -> GenerationResponse:
         role = request.messages[0].text.splitlines()[0].removeprefix("PHOENIX ROLE: ")
+        previous = self.roles[-1] if self.roles else None
         self.roles.append(role)
-        if role in ("planner", "direct"):  # first generation of every mission
-            self.current = next(self.answers)
-        text = (
-            self.current if role in ("final_answer", "direct") else self.replies[role]
-        )
+        # Missions run in suite order; each starts with triage, or with planner
+        # or direct when the path is forced.
+        if role == "triage" or (role in ("planner", "direct") and previous != "triage"):
+            self.mission += 1
+        index = self.mission % len(self.cases)
+        answer = "wrong" if index in self.wrong else self.cases[index][1]
+        if role == "triage":
+            text = json.dumps({"path": "direct" if index in self.direct else "complex"})
+        elif role in ("final_answer", "direct"):
+            text = answer
+        else:
+            text = self.replies[role]
         return GenerationResponse(
             operation_id=request.operation_id,
             provider_id=self.provider_id,
@@ -198,10 +207,10 @@ def _run(
     return code, results, out
 
 
-def test_multi_agent_runs_task_set_through_runtime(tmp_path: Path) -> None:
+def test_forced_complex_runs_full_pipeline_for_every_case(tmp_path: Path) -> None:
     provider = ScriptedProvider()
-    code, results, _ = _run(tmp_path, provider)
-    assert code == 0
+    code, results, _ = _run(tmp_path, provider, "--path", "complex")
+    assert code == 0 and "triage" not in provider.roles
     s = results["summary"]
     assert s["measured_missions"] == 16
     assert s["outcomes"] == {
@@ -229,14 +238,44 @@ def test_multi_agent_runs_task_set_through_runtime(tmp_path: Path) -> None:
     assert (gens["median"], gens["total"]) == (6, 96)
     assert (s["input_tokens"], s["output_tokens"]) == (16 * 30, 16 * 18)
     assert (s["levi"]["passed"], s["levi"]["failed"]) == (32, 0)
-    assert s["prompt_set_versions"] == ["phoenix-prompts-v3"]
+    assert s["prompt_set_versions"] == [multi.prompts.PROMPT_SET_VERSION]
     assert s["roles"]["planner"]["thinking"] == "off"
     assert s["roles"]["specialist"]["thinking"] == "model_default"
     assert s["roles"]["planner"]["models"] == {"qwen3.5:9b": 16}
     assert s["mission_latency_ms"]["count"] == 16
     assert (s["max_ram_used_bytes"], s["max_gpu_used_mib"]) == (8_000_000_000, 4000)
-    assert results["path"] == {"requested": "complex", "used": "complex", "note": None}
+    assert results["path"] == {"requested": "complex", "used": "complex"}
+    assert (s["paths"], s["triage_outcomes"]) == ({"complex": 16}, {"client": 16})
     assert results["trials"] == {"warmup": 0, "measured": 1}
+
+
+def test_default_triage_records_decided_path_and_outcome(tmp_path: Path) -> None:
+    # Triage sends the three instruction cases DIRECT and the rest COMPLEX.
+    provider = ScriptedProvider(direct=frozenset({0, 1, 2}))
+    code, results, out = _run(tmp_path, provider)
+    assert code == 0
+    assert results["path"] == {"requested": "triage", "used": "triage"}
+    s = results["summary"]
+    assert s["paths"] == {"complex": 13, "direct": 3}
+    assert s["triage_outcomes"] == {"decided": 16}
+    assert s["score_accuracy"] == 1.0 and s["outcomes"]["completed"] == 16
+    first = results["trials_detail"][0]
+    assert (first["path"], first["triage_outcome"], first["triage_reason"]) == (
+        "direct",
+        "decided",
+        None,
+    )
+    assert first["generations"] == 2 and first["levi_passed"] == 0  # triage, direct
+    assert results["trials_detail"][3]["generations"] == 7
+    assert provider.roles[:3] == ["triage", "direct", "triage"]
+    assert s["roles"]["triage"] == {
+        "thinking": "off",
+        "generations": 16,
+        "models": {"qwen3.5:4b": 16},
+    }
+    summary = (out / multi.SUMMARY_NAME).read_text("utf-8")
+    assert "missions by path complex 13, direct 3" in summary
+    assert "triage outcomes decided 16" in summary
 
 
 def test_failures_feed_codes_levi_counts_and_category_accuracy(
@@ -358,30 +397,29 @@ def test_compare_builds_side_by_side_table(tmp_path: Path) -> None:
     assert sum(r["best"] for r in rows) == 2 and rows[0]["best"]
     assert all(r["same_task_set"] for r in rows)
     assert rows[0]["output_tokens_per_task"] == 4.0
-    assert rows[-1]["output_tokens_per_task"] == 18.0
+    assert rows[-1]["output_tokens_per_task"] == 21.0  # triage + 6 COMPLEX turns
     assert rows[-1]["score_accuracy"] == 1.0
     table = (out / multi.COMPARISON_NAME).read_text("utf-8")
-    assert "| (2) | PHOENIX multi-agent (complex) | mixed by role | 100% |" in table
+    assert "| (2) | PHOENIX multi-agent (triage) | mixed by role | 100% |" in table
     assert "(best)" in table and "not one model" in table
     assert "| yes | c1-off |" in table and "| yes | c1-default |" in table
     assert "Comparison with configuration (1)" in (out / multi.SUMMARY_NAME).read_text(
         "utf-8"
     )
 
-    # Re-render later from saved results, without running missions again.
+    # Re-render later from saved results, without running missions again; a
+    # results file from before PHX-105 (no path/triage counts) still renders.
+    saved = json.loads((out / multi.RESULTS_NAME).read_text("utf-8"))
+    del saved["summary"]["paths"], saved["summary"]["triage_outcomes"]
+    older = tmp_path / "older.json"
+    older.write_text(json.dumps(saved), encoding="utf-8")
     again = tmp_path / "again"
     code = multi.main(
-        [
-            "--out",
-            str(again),
-            "--from-results",
-            str(out / multi.RESULTS_NAME),
-            "--compare",
-            str(off),
-        ]
+        ["--out", str(again), "--from-results", str(older), "--compare", str(off)]
     )
     assert code == 0
     assert "| (2) |" in (again / multi.COMPARISON_NAME).read_text("utf-8")
+    assert "missions by path n/a" in (again / multi.SUMMARY_NAME).read_text("utf-8")
 
 
 def test_compare_rejects_wrong_file_before_running(tmp_path: Path) -> None:
@@ -396,17 +434,17 @@ def test_compare_rejects_wrong_file_before_running(tmp_path: Path) -> None:
 def test_dispatch_flags_and_dry_run(capsys: pytest.CaptureFixture[str]) -> None:
     assert fyp.main(["--config", "phoenix-multi-agent", "--dry-run"]) == 0
     out = capsys.readouterr().out
-    assert "16 cases x (0 warm-up + 1 measured) = 16 missions on path complex" in out
-    assert "phoenix-prompts-v3" in out and "qwen3.5:9b" in out
+    assert "16 cases x (0 warm-up + 1 measured) = 16 missions on path triage" in out
+    assert multi.prompts.PROMPT_SET_VERSION in out and "qwen3.5:9b" in out
     assert (
         fyp.main(
             ["--config", "phoenix-multi-agent", "--dry-run", "--path"]
-            + ["triage", "--warmup", "1", "--runs", "2"]
+            + ["complex", "--warmup", "1", "--runs", "2"]
         )
         == 0
     )
     out = capsys.readouterr().out
-    assert "48 missions on path complex (triage requested" in out
+    assert "48 missions on path complex;" in out
     assert fyp.main(["--dry-run"]) == 0  # the baseline is unchanged
     assert "tiers: T0=qwen3.5:2b" in capsys.readouterr().out
     for argv in (
@@ -420,18 +458,22 @@ def test_dispatch_flags_and_dry_run(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 @pytest.mark.parametrize(
-    ("path", "first"), [("direct", "direct"), ("triage", "planner")]
+    ("path", "first", "decided", "outcome"),
+    [
+        ("direct", "direct", "direct", "client"),
+        ("complex", "planner", "complex", "client"),
+        ("triage", "triage", "complex", "decided"),
+    ],
 )
 def test_path_flag_selects_and_records_path(
-    tmp_path: Path, path: str, first: str
+    tmp_path: Path, path: str, first: str, decided: str, outcome: str
 ) -> None:
     provider = ScriptedProvider()
     code, results, _ = _run(tmp_path, provider, "--path", path)
     assert code == 0 and provider.roles[0] == first
-    used = "direct" if path == "direct" else "complex"
-    assert results["path"]["requested"] == path and results["path"]["used"] == used
-    assert ("PHX-105" in (results["path"]["note"] or "")) is (path == "triage")
-    assert {t["path"] for t in results["trials_detail"]} == {used}
+    assert results["path"] == {"requested": path, "used": path}
+    assert {t["path"] for t in results["trials_detail"]} == {decided}
+    assert {t["triage_outcome"] for t in results["trials_detail"]} == {outcome}
     assert results["summary"]["score_accuracy"] == 1.0
 
 

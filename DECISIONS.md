@@ -3327,8 +3327,10 @@ Amendment (2026-10-18, PHX-091 continuation): configuration (2) is runnable.
   `PhoenixRuntime.run`, COMPLEX by default, with a default and a `think=False`
   `OllamaProvider` and the runtime tier table. It uses its own mission loop,
   because BenchmarkRunner would deadlock on the single lifecycle lease.
-- **Path:** `--path direct|complex|triage`. `triage` is a no-op until PHX-105
-  and is recorded as requested `triage`, used `complex`.
+- **Path:** `--path triage|complex|direct`. After PHX-105 merged, `triage`
+  became the default: it passes no path, so PHOENIX triages each request, and
+  each trial records the decided path and triage outcome. `--path complex`
+  stays as the full-pipeline stress test.
 - **Scoring:** unchanged; the same deterministic rules on the final answer.
   Missions without an answer count as not passed.
 - **Trials:** 0 warm-up and 1 measured run by default, because a mission takes
@@ -3343,6 +3345,24 @@ Amendment (2026-10-18, PHX-091 continuation): configuration (2) is runnable.
   and that its latency is whole-mission time.
 - **Privacy:** unchanged (ADR-029): hashes and lengths only.
 - **Product code:** `phoenix/` is unchanged.
+- **Live evidence (2026-10-18):** BLAZE-6, RTX 3050 on CUDA, Ollama 0.40.4
+  desktop app, 16K context, AC power; 16 missions per run. Details are in the
+  PHX-091 ticket.
+  - **Forced COMPLEX** (prompts v3, `validation/PHX-091-config2-20261018-030132`):
+    43% accuracy, 38% success, 122 s median latency. Failures were mostly
+    structured output (4 schema, 3 truncated, 1 not_json) plus 2
+    `verification_failed`. All 6 completed answers were correct.
+  - **Triage** (prompts v4, `validation/PHX-091-config2-triage-20261018-033220`):
+    11 DIRECT and 5 COMPLEX; 64% accuracy, 69% success, 1.1 s median latency.
+  - **Configuration (1) best, for comparison:** 4B at 93% / 0.3 s (thinking
+    off) and 100% / 7.2 s (thinking on).
+- **Interpretation:**
+  - On these short tasks with 6 GB of VRAM, multi-agent is slower and less
+    accurate than the best single small model.
+  - Its value is that no wrong answer is reported as verified, plus
+    permissioned tool use.
+  - The next levers are constrained JSON decoding and MAHORAGA retries
+    (PHX-109).
 
 ## ADR-080 — Explicit Ollama thinking control at provider construction
 

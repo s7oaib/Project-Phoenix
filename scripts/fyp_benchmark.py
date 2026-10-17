@@ -65,9 +65,13 @@ DEFAULT_TIERS: tuple[tuple[str, str], ...] = (
     ("T2", "qwen3.5:9b"),
     ("T2-code", "qwen2.5-coder:7b"),
 )
-INTEGRATION_GAP = (
-    "PhoenixOrchestrator, AizenPlanner and LeviVerifier accept injected responders "
-    "only; no model-backed responders exist yet (PHX-090 end_to_end GAP)."
+CONFIG3_REASON = (
+    "PhoenixRuntime has no adaptive model routing or Colibri deep-tier (T3) path; "
+    "its tier table covers T0-T2 only."
+)
+CATCH_RATE_REASON = (
+    "Needs fault-injected cases: the v1 set has no known-bad candidates, and a "
+    "LEVI rejection hides the rejected answer, so a catch cannot be scored."
 )
 NOT_RUNNABLE_CONFIGS: tuple[dict[str, str], ...] = (
     {
@@ -81,7 +85,7 @@ NOT_RUNNABLE_CONFIGS: tuple[dict[str, str], ...] = (
         "id": "phoenix-adaptive-deep",
         "fyp_configuration": "3",
         "description": "Phoenix + adaptive model routing/deep tier",
-        "reason": INTEGRATION_GAP + " Colibri deep tier is not installed.",
+        "reason": CONFIG3_REASON,
     },
 )
 # Every docs/24 metric: measured from baseline reports, or NOT_RUNNABLE + reason.
@@ -92,7 +96,7 @@ METRICS: tuple[tuple[str, str | None], ...] = (
         "Measured separately by scripts/routing_benchmark.py (PHX-105) on"
         " benchmarks/routing/routing-v1.toml; not part of this baseline run.",
     ),
-    ("verification_catch_rate", "Needs a model-backed LEVI responder."),
+    ("verification_catch_rate", CATCH_RATE_REASON),
     ("recovery_success", "Needs model-backed MAHORAGA/KAIDO execution."),
     ("memory_retrieval_accuracy", "Needs an end-to-end RAG answering flow."),
     ("research_evidence_quality", "Needs a model-backed URAHARA research flow."),
