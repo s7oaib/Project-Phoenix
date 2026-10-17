@@ -4153,7 +4153,7 @@ Real-uvicorn WebSockets needed a new dependency (ADR-084 Q3). The owner chose
 
 ## ADR-089 — REST API v1 and the settable document workspace
 
-Status: Proposed (owner decisions 2026-10-17; recommendations R1–R17 in
+Status: Proposed (owner decisions 2026-10-17; recommendations R1–R24 in
 `tickets/PHX-104-rest-api-v1.md` await owner confirmation)
 Date: 2026-10-17
 Ticket: PHX-104
@@ -4225,7 +4225,26 @@ Design:
   by name; the PHX-050 `env.py` byte guard strips the one new registration
   block from the file and from main.
 
-Limitations: a permission request pending from an earlier workspace can still
-be approved (its re-run asks again under the new root); pages are cut in memory
-from the store's lists; new error codes carry the envelope's generic message.
-No new dependencies and no new event types.
+- **Review fixes (2026-10-17).** The stored root is validated again before
+  every mission that would use it (a preflight given with the runtime); if it
+  fails, that mission fails `tool_rejected`, the workspace becomes
+  `unavailable` and later missions run without documents (D1). Approval is
+  refused with 409 `workspace_changed` for a resource outside the active root
+  (D2). The data-directory check uses real paths (D3). System folders also come
+  from the Windows API and fixed defaults (D4); `$Recycle.Bin`, `System Volume
+  Information` and the user's AppData tree (`workspace_app_data`) are refused,
+  and `C:\Users\Public` is allowed but recorded for the owner. The root is
+  stored in its canonical real-path spelling (D5). Request bodies are capped at
+  64 KiB (413 `payload_too_large`, new `phoenix/api/body_limit.py`); a failed
+  chat submit leaves no empty conversation; `set_root` maps FilesystemTool
+  construction failures to 422 and needs a running service.
+- **Follow-up: FilesystemTool root hardening.** FilesystemTool should `lstat`
+  its root on every call, refuse a symlink, junction or other reparse point and
+  require `realpath(root) == root`, because `_target` follows a junction that
+  replaced the root after validation. PHX-104's preflight narrows the window to
+  a swap during a mission; `filesystem.py` is frozen, so this is its own ticket.
+
+Limitations: pages are cut in memory from the store's lists;
+`/grants?include_inactive` is not bounded by retention; mission detail loads the
+conversation's messages on each poll; new error codes carry the envelope's
+generic message. No new dependencies and no new event types.

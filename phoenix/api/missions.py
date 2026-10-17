@@ -31,14 +31,16 @@ Runtime (PHX-104, ADR-089): ``use_runtime`` replaces the runtime that missions
 starting from then on run on (the backend builds a new one when the user sets
 the document workspace). A mission keeps the runtime it started on, and
 cancelling it goes to that runtime, so a running mission's workspace never
-changes.
+changes. An optional preflight, given with the runtime, runs after a mission is
+claimed and before the runtime runs it; a failure code it returns fails the
+mission with that code instead (the workspace is re-validated this way).
 
 This module is application logic for the backend process, not transport: it
 imports no FastAPI; the PHX-104 routes call it.
 """
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -85,6 +87,8 @@ USER_GRANT_DURATIONS = (GrantDuration.SESSION, GrantDuration.PERSISTENT)
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
 _Reason = Literal["user", "shutdown", "deleted"]
+# PHX-104: None to run the mission, or a failure code to fail it instead.
+Preflight = Callable[[], Awaitable[str | None]]
 
 
 class MissionServiceError(Exception):
@@ -117,6 +121,7 @@ class CancelOutcome(StrEnum):
 class _Current:
     mission_id: str
     runtime: PhoenixRuntime  # the runtime this mission started on (PHX-104)
+    preflight: Preflight | None = None
     cancel: _Reason | None = None
 
 
@@ -146,6 +151,7 @@ class MissionService:
         if purge_interval_seconds <= 0 or shutdown_grace_seconds <= 0:
             raise ValueError("Intervals must be positive")
         self._runtime = runtime
+        self._preflight: Preflight | None = None
         self._store = store
         self._tools = tool_registry
         # One ID per backend launch; SESSION grants end with it (owner decision).
@@ -201,14 +207,23 @@ class MissionService:
         """The runtime the next mission starts on (PHX-104)."""
         return self._runtime
 
-    def use_runtime(self, runtime: PhoenixRuntime) -> None:
+    @property
+    def running(self) -> bool:
+        return self._state == "running"
+
+    def use_runtime(
+        self, runtime: PhoenixRuntime, *, preflight: Preflight | None = None
+    ) -> None:
         """Run missions that start from now on with runtime (PHX-104).
 
-        A running mission keeps the runtime it started on.
+        A running mission keeps the runtime it started on. preflight, if given,
+        is awaited before each of those missions runs; a failure code it
+        returns fails that mission with the code.
         """
         if type(runtime) is not PhoenixRuntime:
             raise TypeError("Expected a PhoenixRuntime")
         self._runtime = runtime
+        self._preflight = preflight
 
     @property
     def running_mission_id(self) -> str | None:
@@ -344,7 +359,7 @@ class MissionService:
                 self._purge_failures += 1
 
     async def _execute(self, mission_id: str) -> None:
-        current = _Current(mission_id, self._runtime)
+        current = _Current(mission_id, self._runtime, self._preflight)
         self._current = current  # set before claiming so cancel can see it
         try:
             try:
@@ -357,11 +372,18 @@ class MissionService:
                 return  # cancelled or deleted while queued
             await self._status(mission_id, MissionStatus.RUNNING)
             try:
+                refused = None
+                if current.preflight is not None:
+                    refused = await current.preflight()
                 found = await self._io(self._store.active_grants, self._session_id)
                 self._skipped_grants += found.skipped
                 grants = self._usable(found.grants)
                 if current.cancel is not None:
                     outcome = self._cancelled(current, None)
+                elif refused is not None:
+                    outcome = Settlement(
+                        status=MissionStatus.FAILED, failure_code=refused
+                    )
                 else:
                     # No await between this check and run() registering the
                     # mission, so a cancel either is seen here or reaches run().

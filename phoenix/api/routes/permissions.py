@@ -4,7 +4,9 @@ Approve and deny are user decisions made through this authenticated API; they
 are the only way a grant is created (INV-003, INV-005). The path names the
 stored request and the body only the duration ("session" or "always"): the
 tool, action, resource and actor of the grant always come from the stored
-request, and a body naming any of them is refused (422).
+request, and a body naming any of them is refused (422). A request whose
+resource is outside the active workspace root cannot be approved (409
+``workspace_changed``); deny it instead.
 """
 
 from fastapi import APIRouter, Request
@@ -75,8 +77,13 @@ async def get_request(request_id: Uuid, request: Request) -> PermissionRequestOu
 async def approve(
     request_id: Uuid, body: ApproveRequest, request: Request
 ) -> ApproveResult:
-    missions = backend(request).missions
+    services = backend(request)
+    missions = services.missions
     record = await missions.get_permission_request(request_id)
+    # A request made under another (or no longer valid) workspace would store a
+    # grant outside the active root; it can only be denied.
+    if not services.workspace.covers(record.request.resource):
+        raise ApiError(409, "workspace_changed")
     rerun = await missions.approve(request_id, _DURATIONS[body.duration])
     return ApproveResult(
         request_id=request_id,

@@ -44,6 +44,7 @@ from alembic import command
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.runtime import ModelTierTable, PhoenixRuntime, default_tier_table
 from phoenix.api.app import create_app
+from phoenix.api.body_limit import BodyLimitMiddleware
 from phoenix.api.event_stream import (
     DEFAULT_CLIENT_BUFFER,
     DEFAULT_MAX_CONNECTIONS,
@@ -571,6 +572,8 @@ def build_server_app(
     factory = ollama_providers if provider_factory is None else provider_factory
     app = create_app()
     _remove_interactive_docs(app)
+    # PHX-104: added first, so it runs inside the security middleware.
+    app.add_middleware(BodyLimitMiddleware)
     install_local_api_security(app, security)
     install_api_routes(app, probe_timeout_seconds=options.probe_timeout_seconds)
 

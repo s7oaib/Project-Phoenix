@@ -2,7 +2,9 @@
 
 Real components through Starlette's TestClient: the composition root, PHX-101
 middleware, MissionService, PhoenixRuntime, FilesystemTool, PermissionEngine,
-the settings store and alembic-migrated SQLite under tmp_path. Only the model is
+the settings store and alembic-migrated SQLite in a test directory under the
+home folder (pytest's tmp_path lies inside AppData, which is not an acceptable
+workspace). Only the model is
 scripted, answering by the system prompt's role marker. No network, Ollama or
 GPU is used; an autouse guard fails any httpx send or outbound socket connection.
 """
@@ -11,9 +13,12 @@ import asyncio
 import json
 import os
 import secrets
+import shutil
 import socket
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -27,6 +32,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect, text
 
+from phoenix.api.missions import InvalidRequestError
 from phoenix.api.routes import missions as mission_routes
 from phoenix.api.routes import permissions as permission_routes
 from phoenix.api.routes import system as system_routes
@@ -39,6 +45,7 @@ from phoenix.api.server import (
 )
 from phoenix.api.workspace import (
     WorkspaceErrorCode,
+    app_data_directories,
     system_directories,
     validate_workspace_root,
 )
@@ -56,6 +63,7 @@ from phoenix.models.provider import (
     ProviderHealthStatus,
     TokenUsage,
 )
+from phoenix.tools.filesystem import FilesystemInputError
 
 TOKEN = secrets.token_urlsafe(32)
 PORT = 48766  # Host-header identity for in-process clients; nothing binds it
@@ -119,6 +127,7 @@ class ScriptedProvider(ModelProvider):
         self.open = threading.Event()
         self.open.set()
         self.waiting = 0
+        self.roles: list[str] = []
 
     async def health(self) -> ProviderHealth:
         return ProviderHealth(
@@ -144,6 +153,7 @@ class ScriptedProvider(ModelProvider):
                 await asyncio.sleep(0.005)
         finally:
             self.waiting -= 1
+        self.roles.append(role_of(request))
         reply = self.replies[role_of(request)]
         output = reply(request) if callable(reply) else reply
         return GenerationResponse(
@@ -217,9 +227,31 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(socket, "create_connection", refuse_connect)
 
 
+def remove_tree(root: Path) -> None:
+    """Delete a test tree; junctions are unlinked first, never followed."""
+    for path in sorted(root.rglob("*"), key=lambda item: -len(item.parts)):
+        try:
+            if os.lstat(path).st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                os.rmdir(path)
+        except (AttributeError, OSError):
+            continue
+    shutil.rmtree(root, ignore_errors=True)
+
+
 @pytest.fixture
-def backend(tmp_path: Path) -> Backend:
-    return Backend(tmp_path)
+def base() -> Iterator[Path]:
+    """A test directory outside AppData (pytest's tmp_path is inside it, and
+    AppData is not an acceptable workspace), canonical and removed afterwards."""
+    root = Path(os.path.realpath(tempfile.mkdtemp(prefix="phx104-", dir=Path.home())))
+    try:
+        yield root
+    finally:
+        remove_tree(root)
+
+
+@pytest.fixture
+def backend(base: Path) -> Backend:
+    return Backend(base)
 
 
 @pytest.fixture
@@ -783,6 +815,9 @@ def invalid_roots(backend: Backend) -> list[tuple[str, WorkspaceErrorCode]]:
         roots.append(
             (os.path.join(system_root, "System32"), WorkspaceErrorCode.SYSTEM_DIRECTORY)
         )
+        # pytest's own temp folder lies inside AppData\\Local (R18).
+        roots.append((tempfile.gettempdir(), WorkspaceErrorCode.APP_DATA))
+        roots.append((os.environ["APPDATA"], WorkspaceErrorCode.APP_DATA))
     else:
         roots.append(("/etc", WorkspaceErrorCode.SYSTEM_DIRECTORY))
     return roots
@@ -833,7 +868,8 @@ def test_workspace_rejects_links_and_junctions(
     assert client.get("/settings").json()["workspace"]["status"] == "unset"
 
 
-def test_validation_unit_rules(tmp_path: Path) -> None:
+def test_validation_unit_rules(base: Path) -> None:
+    tmp_path = base
     root = tmp_path / "docs"
     root.mkdir()
     data = tmp_path / "data"
@@ -842,9 +878,32 @@ def test_validation_unit_rules(tmp_path: Path) -> None:
     mixed = str(root).replace("\\", "/")
     assert validate_workspace_root(mixed, data_dir=data) == os.path.normpath(mixed)
     windows = system_directories(
-        {"SystemRoot": "C:\\Windows", "ProgramData": "relative"}, "win32"
+        {"SystemRoot": "D:\\Win", "ProgramData": "relative"}, "win32"
     )
-    assert windows == ("C:\\Windows",)
+    assert windows[0] == "D:\\Win" and "relative" not in windows
+    # A sanitised environment cannot hide the system folders (D4).
+    bare = system_directories({}, "win32")
+    for folder in ("C:\\Windows", "C:\\Program Files", "C:\\ProgramData"):
+        assert folder in bare
+    if sys.platform == "win32":
+        with pytest.raises(ValueError) as refused:
+            validate_workspace_root(
+                os.environ["SystemRoot"], data_dir=data, system=bare
+            )
+        assert str(refused.value) == "workspace_system_directory"
+        assert any(
+            folder.lower().endswith("appdata")
+            for folder in app_data_directories({"USERPROFILE": "C:\\Users\\u"}, "win32")
+        )
+    for name in ("$Recycle.Bin", "System Volume Information"):
+        special = tmp_path / name / "inner"
+        special.mkdir(parents=True)
+        with pytest.raises(ValueError) as refused:
+            validate_workspace_root(str(special), data_dir=data)
+        assert str(refused.value) == "workspace_system_directory"
+    with pytest.raises(ValueError) as refused:
+        validate_workspace_root(str(root), data_dir=data, app_data=(str(tmp_path),))
+    assert str(refused.value) == "workspace_app_data"
     assert "/etc" in system_directories({}, "linux")
     with pytest.raises(ValueError) as raised:
         validate_workspace_root(str(root), data_dir=data, system=(str(tmp_path),))
@@ -1005,3 +1064,163 @@ def test_cancel_and_shutdown_reach_a_mission_on_the_previous_runtime(
     with backend.client() as client:
         body = wait_for(client, interrupted["mission_id"])
         assert (body["status"], body["failure_code"]) == ("failed", "interrupted")
+
+
+# ---- review fixes (D1-D5 and nits)
+
+
+def junction(link: Path, target: Path) -> None:
+    subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+        check=True,
+        capture_output=True,
+    )
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="junctions are Windows-only")
+def test_root_swapped_for_a_junction_fails_the_next_mission(
+    backend: Backend, client: TestClient
+) -> None:
+    """D1: the stored root is validated again before every mission."""
+    set_workspace(client, backend.workspace)
+    _, request_id = waiting_mission(client, backend)
+    approved = client.post(
+        f"/permissions/{request_id}/approve", json={"duration": "always"}
+    ).json()
+    assert wait_for(client, approved["mission_id"])["status"] == "completed"
+    outside = backend.tmp / "outside"
+    outside.mkdir()
+    secret = "OUTSIDE-SECRET-77"
+    (outside / "notes.txt").write_text(f"Project codename: {secret}\n")
+    backend.workspace.rename(backend.tmp / "moved")
+    junction(backend.workspace, outside)
+    calls = len(backend.provider.roles)
+    swapped = chat(client, QUESTION, path="complex")
+    body = wait_for(client, swapped["mission_id"])
+    assert (body["status"], body["failure_code"]) == ("failed", "tool_rejected")
+    assert len(backend.provider.roles) == calls  # the runtime never ran it
+    workspace = client.get("/settings").json()["workspace"]
+    assert workspace["status"] == "unavailable"
+    assert workspace["root"] == str(backend.workspace)
+    # Later missions run without document steps instead of failing.
+    later = chat(client, "Still there?")
+    assert wait_for(client, later["mission_id"])["status"] == "completed"
+    assert all(secret not in text for text in backend.bodies)
+
+
+def test_approval_outside_the_active_root_is_refused(
+    backend: Backend, client: TestClient
+) -> None:
+    """D2: no grant is stored for a request made under another workspace."""
+    second = backend.tmp / "second"
+    second.mkdir()
+    set_workspace(client, backend.workspace)
+    mission_id, request_id = waiting_mission(client, backend)
+    set_workspace(client, second)
+    response = client.post(
+        f"/permissions/{request_id}/approve", json={"duration": "always"}
+    )
+    assert response.status_code == 409
+    assert error_code(response) == "workspace_changed"
+    assert client.get(f"/permissions/{request_id}").json()["status"] == "pending"
+    assert client.get("/grants", params={"include_inactive": True}).json()["total"] == 0
+    assert client.post(f"/permissions/{request_id}/deny").status_code == 200
+    assert client.get(f"/missions/{mission_id}").json()["failure_code"] == (
+        "permission_denied"
+    )
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="junctions are Windows-only")
+def test_data_directory_overlap_uses_the_real_path(base: Path) -> None:
+    """D3: a junctioned data directory still protects its real target."""
+    real = base / "realdata"
+    (real / "sub").mkdir(parents=True)
+    link = base / "datalink"
+    junction(link, real)
+    for root in (real, real / "sub", base):
+        with pytest.raises(ValueError) as refused:
+            validate_workspace_root(str(root), data_dir=link)
+        assert str(refused.value) == "workspace_data_directory"
+
+
+def test_stored_root_is_canonical(backend: Backend, client: TestClient) -> None:
+    """D5: the root is stored in its real-path spelling."""
+    given = str(backend.workspace).upper() if sys.platform == "win32" else None
+    if given is None:
+        pytest.skip("case-insensitive paths are Windows-only")
+    canonical = os.path.realpath(backend.workspace)
+    assert set_workspace(client, given)["workspace"]["root"] == canonical
+    _, request_id = waiting_mission(client, backend)
+    request = client.get(f"/permissions/{request_id}").json()
+    assert request["resource"] == os.path.join(canonical, "notes.txt")
+
+
+def test_failed_submit_leaves_no_empty_conversation(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    services = get_services(client.app)  # type: ignore[arg-type]
+    assert services is not None
+
+    async def refuse(*args: object) -> str:
+        raise InvalidRequestError("refused")
+
+    monkeypatch.setattr(services.missions, "submit", refuse)
+    response = client.post("/chat", json={"text": "hi"})
+    assert response.status_code == 422
+    assert client.get("/conversations").json()["total"] == 0
+
+
+def test_request_bodies_are_capped(backend: Backend, client: TestClient) -> None:
+    big = {"text": "x" * (64 * 1024)}
+    response = client.post("/chat", json=big)
+    assert response.status_code == 413
+    assert error_code(response) == "payload_too_large"
+
+    def chunks() -> Iterator[bytes]:
+        yield b'{"text": "'
+        for _ in range(80):
+            yield b"y" * 1024
+        yield b'"}'
+
+    response = client.post(
+        "/chat", content=chunks(), headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 413
+    assert error_code(response) == "payload_too_large"
+    padded = '{"text": "hi"' + " " * (60 * 1024) + "}"
+    response = client.post(
+        "/chat", content=padded, headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 202  # under the cap: parsed normally
+    for method, path in (("PATCH", "/settings"), ("POST", f"/grants/{UNKNOWN}/revoke")):
+        assert client.request(method, path, json=big).status_code == 413
+    # Authentication still comes first.
+    response = client.post("/chat", json=big, headers={"Authorization": "Bearer wrong"})
+    assert response.status_code == 401
+    assert client.get("/conversations").json()["total"] == 1
+
+
+def test_set_root_errors_are_explicit(
+    backend: Backend, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    services = get_services(client.app)  # type: ignore[arg-type]
+    assert services is not None
+
+    def refuse(root: str | None) -> object:
+        raise FilesystemInputError("refused")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(services.workspace, "_build", refuse)
+        response = client.patch(
+            "/settings", json={"workspace_root": str(backend.workspace)}
+        )
+        assert response.status_code == 422
+        assert error_code(response) == "workspace_invalid"
+    assert client.get("/settings").json()["workspace"]["status"] == "unset"
+    assert client.portal is not None
+    client.portal.call(services.missions.stop)
+    response = client.patch(
+        "/settings", json={"workspace_root": str(backend.workspace)}
+    )
+    assert response.status_code == 503
+    assert error_code(response) == "service_unavailable"

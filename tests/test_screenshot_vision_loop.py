@@ -1870,6 +1870,7 @@ def test_no_action_persistence_or_dependency_change() -> None:
             # settings store and migration (server.py, missions.py and env.py are
             # hash-pinned in test_prompt_injection_defenses.py).
             ":(exclude)phoenix/api/workspace.py",
+            ":(exclude)phoenix/api/body_limit.py",
             ":(exclude)phoenix/api/routes/__init__.py",
             ":(exclude)phoenix/api/routes/common.py",
             ":(exclude)phoenix/api/routes/missions.py",

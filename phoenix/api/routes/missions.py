@@ -6,6 +6,8 @@ at once. Progress arrives over ``WS /events``; the answer comes from
 ``GET /missions/{id}``. No request is held open for a mission.
 """
 
+import contextlib
+
 from fastapi import APIRouter, Request, Response
 
 from phoenix.api.missions import CancelOutcome, MissionService
@@ -106,10 +108,19 @@ async def _detail(
 @router.post("/chat", status_code=202, response_model=MissionAccepted)
 async def chat(body: ChatRequest, request: Request) -> MissionAccepted:
     missions = services(request).missions
-    conversation_id = body.conversation_id
-    if conversation_id is None:
-        conversation_id = await missions.create_conversation()
-    mission_id = await missions.submit(conversation_id, body.text, body.path)
+    if body.conversation_id is not None:
+        mission_id = await missions.submit(body.conversation_id, body.text, body.path)
+        return MissionAccepted(
+            mission_id=mission_id, conversation_id=body.conversation_id
+        )
+    conversation_id = await missions.create_conversation()
+    try:
+        mission_id = await missions.submit(conversation_id, body.text, body.path)
+    except Exception:
+        # Leave no empty conversation behind (best effort; the error stands).
+        with contextlib.suppress(Exception):
+            await missions.delete_conversation(conversation_id)
+        raise
     return MissionAccepted(mission_id=mission_id, conversation_id=conversation_id)
 
 
