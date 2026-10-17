@@ -304,6 +304,17 @@ categories = ["unit", "integration", "secret_leakage"]
 # secret_leakage: test_rejected_or_malformed_policy_never_opens_session
 
 [[file]]
+path = "tests/test_rest_api.py"
+categories = ["unit", "integration", "api_contract", "migrations", "permissions", "path_traversal", "permission_bypass", "secret_leakage"]
+# integration: test_waiting_permission_approve_reruns_and_supersedes (REST + composition root + MissionService + PhoenixRuntime + FilesystemTool + PermissionEngine + SQLite)
+# api_contract: test_route_table_is_exact_and_deferred_routes_do_not_exist, test_chat_is_asynchronous_and_get_returns_the_answer
+# migrations: test_workspace_persists_and_unavailable_root_is_reported
+# permissions: test_revoked_grant_is_no_longer_used, test_workspace_change_applies_to_later_missions_only
+# path_traversal: test_workspace_validation_rejects_bad_roots, test_workspace_rejects_links_and_junctions
+# permission_bypass: test_every_route_requires_the_token, test_approve_body_cannot_set_scope
+# secret_leakage: test_waiting_permission_approve_reruns_and_supersedes
+
+[[file]]
 path = "tests/test_retrieval_context.py"
 categories = ["unit", "integration", "prompt_injection"]
 # prompt_injection: test_explicit_authority_precedence_never_inferred

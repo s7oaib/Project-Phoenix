@@ -23,6 +23,9 @@ from phoenix.persistence.memory import (
 from phoenix.persistence.missions import (
     MissionRow,  # noqa: F401 — register target metadata (PHX-102)
 )
+from phoenix.persistence.settings import (
+    SettingRow,  # noqa: F401 — register target metadata (PHX-104)
+)
 
 
 def run_migrations() -> None:

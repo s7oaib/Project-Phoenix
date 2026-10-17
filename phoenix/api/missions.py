@@ -27,12 +27,20 @@ superseded, cancelled, failed (including ``interrupted`` and
 ``permission_denied``). Publishing never blocks or fails the service; refusals
 are counted in ``dropped_events``.
 
+Runtime (PHX-104, ADR-089): ``use_runtime`` replaces the runtime that missions
+starting from then on run on (the backend builds a new one when the user sets
+the document workspace). A mission keeps the runtime it started on, and
+cancelling it goes to that runtime, so a running mission's workspace never
+changes. An optional preflight, given with the runtime, runs after a mission is
+claimed and before the runtime runs it; a failure code it returns fails the
+mission with that code instead (the workspace is re-validated this way).
+
 This module is application logic for the backend process, not transport: it
-imports no FastAPI, and PHX-104 routes will call it.
+imports no FastAPI; the PHX-104 routes call it.
 """
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -79,6 +87,8 @@ USER_GRANT_DURATIONS = (GrantDuration.SESSION, GrantDuration.PERSISTENT)
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
 _Reason = Literal["user", "shutdown", "deleted"]
+# PHX-104: None to run the mission, or a failure code to fail it instead.
+Preflight = Callable[[], Awaitable[str | None]]
 
 
 class MissionServiceError(Exception):
@@ -110,6 +120,8 @@ class CancelOutcome(StrEnum):
 @dataclass
 class _Current:
     mission_id: str
+    runtime: PhoenixRuntime  # the runtime this mission started on (PHX-104)
+    preflight: Preflight | None = None
     cancel: _Reason | None = None
 
 
@@ -139,6 +151,7 @@ class MissionService:
         if purge_interval_seconds <= 0 or shutdown_grace_seconds <= 0:
             raise ValueError("Intervals must be positive")
         self._runtime = runtime
+        self._preflight: Preflight | None = None
         self._store = store
         self._tools = tool_registry
         # One ID per backend launch; SESSION grants end with it (owner decision).
@@ -188,6 +201,29 @@ class MissionService:
     def dropped_events(self) -> int:
         """Mission events the sink refused (PHX-103); observable, not raised."""
         return self._events.dropped
+
+    @property
+    def runtime(self) -> PhoenixRuntime:
+        """The runtime the next mission starts on (PHX-104)."""
+        return self._runtime
+
+    @property
+    def running(self) -> bool:
+        return self._state == "running"
+
+    def use_runtime(
+        self, runtime: PhoenixRuntime, *, preflight: Preflight | None = None
+    ) -> None:
+        """Run missions that start from now on with runtime (PHX-104).
+
+        A running mission keeps the runtime it started on. preflight, if given,
+        is awaited before each of those missions runs; a failure code it
+        returns fails that mission with the code.
+        """
+        if type(runtime) is not PhoenixRuntime:
+            raise TypeError("Expected a PhoenixRuntime")
+        self._runtime = runtime
+        self._preflight = preflight
 
     @property
     def running_mission_id(self) -> str | None:
@@ -270,7 +306,7 @@ class MissionService:
         current, active = self._current, self._active
         if current is not None and current.cancel is None:
             current.cancel = "shutdown"
-            await self._runtime.cancel(current.mission_id)
+            await current.runtime.cancel(current.mission_id)
         await self._record_interrupted((MissionStatus.QUEUED,))
         if active is not None:
             _, pending = await asyncio.wait({active}, timeout=self._grace)
@@ -323,7 +359,7 @@ class MissionService:
                 self._purge_failures += 1
 
     async def _execute(self, mission_id: str) -> None:
-        current = _Current(mission_id)
+        current = _Current(mission_id, self._runtime, self._preflight)
         self._current = current  # set before claiming so cancel can see it
         try:
             try:
@@ -336,15 +372,22 @@ class MissionService:
                 return  # cancelled or deleted while queued
             await self._status(mission_id, MissionStatus.RUNNING)
             try:
+                refused = None
+                if current.preflight is not None:
+                    refused = await current.preflight()
                 found = await self._io(self._store.active_grants, self._session_id)
                 self._skipped_grants += found.skipped
                 grants = self._usable(found.grants)
                 if current.cancel is not None:
                     outcome = self._cancelled(current, None)
+                elif refused is not None:
+                    outcome = Settlement(
+                        status=MissionStatus.FAILED, failure_code=refused
+                    )
                 else:
                     # No await between this check and run() registering the
                     # mission, so a cancel either is seen here or reaches run().
-                    result = await self._runtime.run(
+                    result = await current.runtime.run(
                         PhoenixRequest(request_id=mission_id, text=claimed.text),
                         OrchestrationPath(claimed.path),
                         grants=grants,
@@ -498,7 +541,7 @@ class MissionService:
     ) -> CancelOutcome:
         if current.cancel is None or reason == "deleted":
             current.cancel = reason
-        await self._runtime.cancel(current.mission_id)  # NOT_FOUND before run()
+        await current.runtime.cancel(current.mission_id)  # NOT_FOUND before run()
         return CancelOutcome.CANCELLING
 
     async def get_mission(self, mission_id: str) -> MissionRecord:
@@ -530,6 +573,12 @@ class MissionService:
 
     async def list_pending_permissions(self) -> tuple[PermissionRequestRecord, ...]:
         return await self._io(self._store.list_pending_requests)
+
+    async def get_permission_request(self, request_id: str) -> PermissionRequestRecord:
+        record = await self._io(self._store.get_permission_request, request_id)
+        if record is None:
+            raise NotFoundError("Unknown permission request")
+        return record
 
     async def list_grants(
         self, *, include_inactive: bool = False

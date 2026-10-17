@@ -51,6 +51,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-045 Secrets boundary — DONE
 - PHX-046 Permissioned tool steps in mission runtime — DONE
 - PHX-047 Grounded document verification — DONE
+- PHX-048 FilesystemTool root hardening — TODO
 
 ## Phase 5 — Computer & Web
 - PHX-050 Playwright browser tool — DONE
@@ -105,7 +106,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-101 Local API security — DONE
 - PHX-102 Mission persistence and runner — DONE
 - PHX-103 Runtime events and WS — DONE
-- PHX-104 REST API v1 — TODO
+- PHX-104 REST API v1 — DONE
 - PHX-105 Request triage — TODO
 - PHX-106 Tauri backend sidecar — TODO
 - PHX-107 Frontend port adapters — TODO

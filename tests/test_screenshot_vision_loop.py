@@ -1824,7 +1824,7 @@ def test_no_action_persistence_or_dependency_change() -> None:
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0006_missions"]
+    ).get_heads() == ["0007_app_settings"]
     # PHX-072 separately owns the exact parser manifest/lock promotion.
     # PHX-080 owns only App.tsx/styles.css; every other apps path stays protected.
     assert not subprocess.check_output(
@@ -1866,6 +1866,19 @@ def test_no_action_persistence_or_dependency_change() -> None:
             ":(exclude)alembic/env.py",
             # PHX-103 (ADR-087) adds the WS /events bridge module.
             ":(exclude)phoenix/api/event_stream.py",
+            # PHX-104 (ADR-089) adds the REST routes, the workspace service, the
+            # settings store and migration (server.py, missions.py and env.py are
+            # hash-pinned in test_prompt_injection_defenses.py).
+            ":(exclude)phoenix/api/workspace.py",
+            ":(exclude)phoenix/api/body_limit.py",
+            ":(exclude)phoenix/api/routes/__init__.py",
+            ":(exclude)phoenix/api/routes/common.py",
+            ":(exclude)phoenix/api/routes/missions.py",
+            ":(exclude)phoenix/api/routes/permissions.py",
+            ":(exclude)phoenix/api/routes/schemas.py",
+            ":(exclude)phoenix/api/routes/system.py",
+            ":(exclude)phoenix/persistence/settings.py",
+            ":(exclude)alembic/versions/0007_app_settings.py",
         ],
         cwd=ROOT,
     )

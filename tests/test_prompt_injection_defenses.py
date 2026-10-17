@@ -1720,23 +1720,34 @@ PHX_017_PATHS = ("phoenix/models/ollama.py",)
 PHX_047_COMMIT = "47aa471712c6c5ea3452cf5a45c3ed390470e185"
 PHX_047_PATHS = ("phoenix/agents/prompts.py",)
 # PHX-102 (ADR-086) intentionally changed server.py (MissionService wiring) and
-# alembic/env.py (row registration); env.py stays pinned at the PHX-102
-# implementation commit, and PHX-103 moved server.py to its own pin (below).
+# alembic/env.py (row registration); PHX-103 moved server.py and PHX-104 moved
+# env.py to their own pins (below), so nothing stays on the PHX-102 commit.
 PHX_102_COMMIT = "9ccc5d4522c513832f85da49c44a236284aab7b7"
-PHX_102_PATHS = ("alembic/env.py",)
+PHX_102_PATHS: tuple[str, ...] = ()
 # PHX-103 (ADR-087) intentionally changed runtime.py and tool_steps.py (event
 # publishing), server.py (WS /events wiring) and missions.py (mission events).
 # After PHX-103 merged, its flake fix changed event_stream.py and
-# mission_events.py (then on main). All six stay pinned, at the latest PHX-103
-# implementation commit (earlier rounds: 829670b, 10c1723).
+# mission_events.py (then on main). runtime.py, tool_steps.py,
+# mission_events.py and event_stream.py stay pinned, at the latest PHX-103
+# implementation commit (earlier rounds: 829670b, 10c1723). PHX-104 moved
+# server.py and missions.py to its own pin (below).
 PHX_103_COMMIT = "023be4ea7cd71ff8ff5c74b0ff8992cf7bb0c134"
 PHX_103_PATHS = (
     "phoenix/agents/runtime.py",
     "phoenix/agents/tool_steps.py",
     "phoenix/agents/mission_events.py",
+    "phoenix/api/event_stream.py",
+)
+# PHX-104 (ADR-089) intentionally changed server.py (REST routes, settings
+# store and workspace wiring), missions.py (use_runtime; a mission keeps its
+# runtime) and alembic/env.py (settings row registration); all three stay
+# pinned, at the latest PHX-104 implementation commit (review fixes; the first
+# round was f9a075c).
+PHX_104_COMMIT = "7af605e26afcaf0e7000ee44d312e741a9107b2b"
+PHX_104_PATHS = (
     "phoenix/api/server.py",
     "phoenix/api/missions.py",
-    "phoenix/api/event_stream.py",
+    "alembic/env.py",
 )
 
 
@@ -1754,12 +1765,14 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_047_PATHS
         and path not in PHX_102_PATHS
         and path not in PHX_103_PATHS
+        and path not in PHX_104_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
     baselines += [(PHX_047_COMMIT, path) for path in PHX_047_PATHS]
     baselines += [(PHX_102_COMMIT, path) for path in PHX_102_PATHS]
     baselines += [(PHX_103_COMMIT, path) for path in PHX_103_PATHS]
+    baselines += [(PHX_104_COMMIT, path) for path in PHX_104_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
@@ -1771,10 +1784,11 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         ).strip()
         assert actual == expected, path
     assert len(EventType) == 32
-    # PHX-102 (ADR-086) adds migration 0006_missions.
+    # PHX-102 (ADR-086) adds migration 0006_missions; PHX-104 (ADR-089) adds
+    # 0007_app_settings.
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0006_missions"]
+    ).get_heads() == ["0007_app_settings"]
 
 
 def test_credential_signature_scan_new_sources() -> None:

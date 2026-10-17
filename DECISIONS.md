@@ -4150,3 +4150,101 @@ Real-uvicorn WebSockets needed a new dependency (ADR-084 Q3). The owner chose
   (`tests/test_document_generation.py`) becomes fixed history plus retention
   checks, and the new PHX-103 gate (`tests/test_events_ws.py`) owns current
   manifest and lock exactness against `4a70867`.
+
+## ADR-089 — REST API v1 and the settable document workspace
+
+Status: Accepted (owner decisions 2026-10-17; the owner confirmed recommendations
+R1–R24 in `tickets/PHX-104-rest-api-v1.md` on 2026-10-17)
+Date: 2026-10-17
+Ticket: PHX-104
+
+Owner decisions:
+
+- **Asynchronous chat.** `POST /chat` queues a mission through
+  `MissionService.submit` and returns 202 with the mission and conversation IDs
+  at once. Progress arrives over `WS /events`; the answer comes from
+  `GET /missions/{id}`. No request is held open for a mission (INV-019).
+- **Scope.** Chat, missions (list, get, cancel, run again), permissions (list
+  pending, approve with `session` or `always`, deny, list grants, revoke),
+  agents, models, settings (GET; PATCH for the workspace only) and
+  conversations (list, messages, delete, clear all). `/files/upload` and
+  `/memory/search` are deferred to PHX-110 and do not exist.
+- **Only the workspace folder is writable.** It is validated as an existing
+  local directory, stored in the database (migration 0007), and used by
+  missions that start afterwards, never by one already running. Model tiers,
+  ports and retention are read-only. Changing it does not re-validate or carry
+  over grants for paths outside the new root.
+
+Design:
+
+- **Modules.** `phoenix/api/routes/` (new: `common`, `schemas`, `missions`,
+  `permissions`, `system`), `phoenix/api/workspace.py` (new: validation and
+  `WorkspaceService`) and `phoenix/persistence/settings.py` (new:
+  `app_settings` row and `SettingsStore`). The routes are thin; MissionService
+  and WorkspaceService own behaviour. `build_server_app` imports the routes
+  when it runs, because they import `server.py`.
+- **Contract.** Pydantic schemas with `extra="forbid"` for every body and
+  response; canonical lowercase UUIDs in paths (else 422); limit/offset
+  pagination (1–200, default 50; offset at most 1,000,000) returning
+  `{"items", "limit", "offset", "total"}`. Errors use the PHX-101 envelope: 404
+  `not_found`, 409 `invalid_state`, 422 `invalid_request` or `workspace_*`, 503
+  `service_unavailable`. The full table is in `docs/13_API_CONTRACTS.md`.
+- **Content.** Responses carry the user's message text and PHOENIX's final
+  answer, IDs, statuses, codes, timestamps, and a pending permission's tool,
+  action, absolute resource path and risk level. Never raw model output, tool
+  output or file content; mission detail exposes only the trace's task ID and
+  task states.
+- **Approvals (INV-003, INV-005).** Approve takes only a duration (`session` →
+  SESSION for this launch, `always` → PERSISTENT until revoked); deny takes no
+  fields. The grant's tool, action, resource and actor come from the stored
+  request; a body naming them is refused.
+- **Workspace validation.** Text rules first (absolute, no `..`, not UNC or a
+  device path, no control characters, at most 4,096 characters), so no network
+  path is touched; then existing directory; no symlink, junction or reparse
+  point, and a real path equal to the given one; not a drive root; not inside
+  the OS or program directories; not overlapping the PHOENIX data directory.
+  FilesystemTool still checks every read.
+- **Storage.** Migration `0007_app_settings`: `app_settings(key, value,
+  updated_at)` with `key IN ('workspace_root')`, the table docs/12 planned.
+- **Reconfiguration.** FilesystemTool is immutable and the runtime takes it at
+  construction, so a new root builds a new tool and runtime (`runtime.py` is
+  unchanged). `MissionService.use_runtime` makes missions that start afterwards
+  use it; each mission keeps the runtime it started on, which also receives its
+  cancel and shutdown. At startup the stored root is validated again before the
+  first mission; an invalid one is reported `unavailable` and documents stay
+  off.
+- **Grants across a change.** Untouched. They match exact absolute resources,
+  and every resource a document step can request is inside the current root,
+  so a grant for a path outside it never applies.
+- **Frozen files.** `phoenix/api/server.py` and `phoenix/api/missions.py` (from
+  the PHX-103 pin) and `alembic/env.py` (from the PHX-102 pin) are pinned to
+  the PHX-104 implementation commit (`PHX_104_COMMIT` / `PHX_104_PATHS`,
+  review round `7af605e26afcaf0e7000ee44d312e741a9107b2b`; first round `f9a075c`), landed as an implementation commit then a pin commit; the PR must merge with
+  a merge commit after PHX-103. Head expectations move to `0007_app_settings`.
+  The two `git diff origin/main` guards exclude the new modules and migration
+  by name; the PHX-050 `env.py` byte guard strips the one new registration
+  block from the file and from main.
+
+- **Review fixes (2026-10-17).** The stored root is validated again before
+  every mission that would use it (a preflight given with the runtime); if it
+  fails, that mission fails `tool_rejected`, the workspace becomes
+  `unavailable` and later missions run without documents (D1). Approval is
+  refused with 409 `workspace_changed` for a resource outside the active root
+  (D2). The data-directory check uses real paths (D3). System folders also come
+  from the Windows API and fixed defaults (D4); `$Recycle.Bin`, `System Volume
+  Information` and the user's AppData tree (`workspace_app_data`) are refused,
+  and `C:\Users\Public` is allowed but recorded for the owner. The root is
+  stored in its canonical real-path spelling (D5). Request bodies are capped at
+  64 KiB (413 `payload_too_large`, new `phoenix/api/body_limit.py`); a failed
+  chat submit leaves no empty conversation; `set_root` maps FilesystemTool
+  construction failures to 422 and needs a running service.
+- **Follow-up: FilesystemTool root hardening.** FilesystemTool should `lstat`
+  its root on every call, refuse a symlink, junction or other reparse point and
+  require `realpath(root) == root`, because `_target` follows a junction that
+  replaced the root after validation. PHX-104's preflight narrows the window to
+  a swap during a mission; `filesystem.py` is frozen, so this is its own ticket.
+
+Limitations: pages are cut in memory from the store's lists;
+`/grants?include_inactive` is not bounded by retention; mission detail loads the
+conversation's messages on each poll; new error codes carry the envelope's
+generic message. No new dependencies and no new event types.

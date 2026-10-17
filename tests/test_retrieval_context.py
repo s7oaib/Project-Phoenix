@@ -1986,9 +1986,11 @@ def test_scope_ast_schema_dependencies_and_protected_sources_unchanged(
     database: Engine,
 ) -> None:
     scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
-    assert scripts.get_heads() == ["0006_missions"] and len(EventType) == 32
+    assert scripts.get_heads() == ["0007_app_settings"] and len(EventType) == 32
     assert inspect(database).get_table_names() == [
         "alembic_version",
+        # PHX-104 (ADR-089) adds app_settings in 0007_app_settings.
+        "app_settings",
         "audit_events",
         # PHX-102 (ADR-086) adds the mission tables in 0006_missions.
         "conversations",
@@ -2049,6 +2051,16 @@ def test_scope_ast_schema_dependencies_and_protected_sources_unchanged(
             # Once PHX-102 is on main its baseline holds the block too; strip it
             # there as well so only the rest of the environment is compared.
             previous = previous.replace(b"\r\n", b"\n").replace(missions, b"")
+            # PHX-104 (ADR-089) adds exactly one more registration, stripped the
+            # same way (from main too once PHX-104 is merged).
+            settings = (
+                "from phoenix.persistence.settings import (\n"
+                "    SettingRow,  # noqa: F401 — register target metadata (PHX-104)\n"
+                ")\n"
+            ).encode()
+            assert current.count(settings) == 1
+            current = current.replace(settings, b"")
+            previous = previous.replace(settings, b"")
         assert current == previous.replace(b"\r\n", b"\n")
     allowed = {
         "asyncio",

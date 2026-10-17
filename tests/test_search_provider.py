@@ -972,8 +972,8 @@ def test_all_prior_runtime_tests_schema_desktop_dependencies_unchanged() -> None
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0006_missions"]
-    assert len(list((ROOT / "alembic/versions").glob("000*.py"))) == 6
+    ).get_heads() == ["0007_app_settings"]
+    assert len(list((ROOT / "alembic/versions").glob("000*.py"))) == 7
 
 
 def test_repository_known_credential_signatures_absent() -> None:

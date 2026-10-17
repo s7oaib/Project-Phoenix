@@ -1714,7 +1714,7 @@ def test_static_subsystem_separation() -> None:
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0006_missions"]
+    ).get_heads() == ["0007_app_settings"]
     assert not (ROOT / "alembic" / "versions" / "0006.py").exists()
 
 
