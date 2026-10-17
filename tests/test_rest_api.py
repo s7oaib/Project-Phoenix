@@ -868,7 +868,11 @@ def invalid_roots(backend: Backend) -> list[tuple[str, WorkspaceErrorCode]]:
             (os.path.join(system_root, "System32"), WorkspaceErrorCode.SYSTEM_DIRECTORY)
         )
         # pytest's own temp folder lies inside AppData\\Local (R18).
-        roots.append((tempfile.gettempdir(), WorkspaceErrorCode.APP_DATA))
+        # Use the canonical spelling: on runners the temp dir is an 8.3 short
+        # name (e.g. RUNNER~1), which is refused earlier as a non-real path.
+        roots.append(
+            (os.path.realpath(tempfile.gettempdir()), WorkspaceErrorCode.APP_DATA)
+        )
         roots.append((os.environ["APPDATA"], WorkspaceErrorCode.APP_DATA))
     else:
         roots.append(("/etc", WorkspaceErrorCode.SYSTEM_DIRECTORY))
