@@ -4218,8 +4218,8 @@ Design:
   so a grant for a path outside it never applies.
 - **Frozen files.** `phoenix/api/server.py` and `phoenix/api/missions.py` (from
   the PHX-103 pin) and `alembic/env.py` (from the PHX-102 pin) are pinned to
-  the PHX-104 implementation commit (`PHX_104_COMMIT` / `PHX_104_PATHS`),
-  landed as an implementation commit then a pin commit; the PR must merge with
+  the PHX-104 implementation commit (`PHX_104_COMMIT` / `PHX_104_PATHS`,
+  `f9a075c41ecf56f01f268b0ab75505fb723ae133`), landed as an implementation commit then a pin commit; the PR must merge with
   a merge commit after PHX-103. Head expectations move to `0007_app_settings`.
   The two `git diff origin/main` guards exclude the new modules and migration
   by name; the PHX-050 `env.py` byte guard strips the one new registration
