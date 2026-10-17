@@ -1,6 +1,6 @@
 # PHX-109 — MAHORAGA bounded recovery in missions
 
-Status: IN_PROGRESS (implemented with the recommended defaults; R1–R16 await the owner's review)
+Status: DONE (recommended defaults applied under the owner's overnight instruction of 2026-10-18; the owner reviews R1–R16 in the PR, and merging confirms them)
 Phase: 10 — Product Integration (milestone M3, capabilities)
 Branch: `feature/PHX-109-mahoraga-recovery` (local commits only; no push, no PR)
 Base: `origin/main` `1b51f26` (PHX-105, PR #79)
@@ -106,3 +106,34 @@ New `tests/test_mahoraga_missions.py` (unit, integration, recovery, secret_leaka
 - [x] Targeted tests, ruff, ruff format and strict mypy pass
 - [ ] Owner reviews R1–R16
 - [ ] Live FYP configuration 2 re-run (main session)
+
+## Live evidence (2026-10-18, BLAZE-6)
+
+**Setup:**
+- FYP configuration (2), default triage path.
+- PHX-109 plus the PHX-091 configuration (2) runner, run as a local integration.
+- RTX 3050 on CUDA, Ollama 0.40.4, 16K context, AC power.
+- The machine was idle.
+- Evidence: `validation/PHX-109-config2-triage-mahoraga-20261018-045627`.
+
+**Results** (16 missions, 1 measured run):
+- **Completed:** 12; **failed:** 4.
+- **Accuracy:** 50%; **success:** 75%.
+- **Failures:** 1 not_json, 1 schema (after their retries) and 2 verification_failed. LEVI rejections are never retried (INV-008).
+- **No provider_unavailable failures.**
+- **One planner schema failure was recovered by the observable DIRECT fallback** and answered correctly.
+
+**Comparison with the earlier triage run without MAHORAGA:**
+
+| Run | Accuracy | Success | provider_unavailable |
+|---|---|---|---|
+| Without MAHORAGA | 64% | 69% | 2 |
+| With MAHORAGA | 50% | 75% | 0 |
+
+The earlier run was made while an exe build ran in parallel.
+
+**Reading:**
+- Success is higher.
+- Accuracy is lower, because 3 DIRECT-routed answers were wrong (arithmetic chain, word count, code one-liner). DIRECT answers depend on triage and the model, not on MAHORAGA.
+- With 16 tasks and one run, run-to-run variance exceeds the effect.
+- A 3-run comparison with and without MAHORAGA is being measured for the FYP report.
