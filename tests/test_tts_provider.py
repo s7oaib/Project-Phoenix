@@ -1269,7 +1269,7 @@ def test_prior_sources_dependencies_events_migrations_unchanged() -> None:
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0007_app_settings"]
+    ).get_heads() == ["0008_mission_triage"]
     assert (
         DEFAULT_WAKE_PHRASE.phrase_id == "rise_phoenix"
         and DEFAULT_WAKE_PHRASE.text == "Rise, Phoenix"

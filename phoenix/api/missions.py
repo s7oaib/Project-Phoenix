@@ -35,13 +35,19 @@ changes. An optional preflight, given with the runtime, runs after a mission is
 claimed and before the runtime runs it; a failure code it returns fails the
 mission with that code instead (the workspace is re-validated this way).
 
+Triage (PHX-105, ADR-090): a mission submitted without a path is stored with
+none, and PHOENIX triages it when it runs; the run's decision (path and who
+decided) is recorded when it settles. A re-run, from ``run_again`` or an
+approval, reuses the original's decision; one that never got a decision (it
+was interrupted before triage finished) is triaged again.
+
 This module is application logic for the backend process, not transport: it
 imports no FastAPI; the PHX-104 routes call it.
 """
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Literal, ParamSpec, TypeVar
@@ -58,6 +64,7 @@ from phoenix.agents.runtime import (
     PhoenixRuntime,
 )
 from phoenix.agents.tool_steps import document_grants
+from phoenix.agents.triage import TriageOutcome
 from phoenix.core.events import EventType
 from phoenix.persistence.missions import (
     ACTIVE_STATUSES,
@@ -387,11 +394,17 @@ class MissionService:
                 else:
                     # No await between this check and run() registering the
                     # mission, so a cancel either is seen here or reaches run().
+                    # PHX-105: no stored path means PHOENIX triages; a stored
+                    # one is reused with who decided it (client, or a re-run's
+                    # original triage).
                     result = await current.runtime.run(
                         PhoenixRequest(request_id=mission_id, text=claimed.text),
-                        OrchestrationPath(claimed.path),
+                        None
+                        if claimed.path is None
+                        else OrchestrationPath(claimed.path),
                         grants=grants,
                         session_id=self._session_id,
+                        decided_by=TriageOutcome(claimed.triage_outcome or "client"),
                     )
                     outcome = self._settlement(current, result)
             except Exception:
@@ -454,6 +467,14 @@ class MissionService:
         return Settlement(status=MissionStatus.CANCELLED, trace=dump)
 
     def _settlement(self, current: _Current, result: MissionResult) -> Settlement:
+        """The run's outcome plus its path decision (PHX-105), if it made one."""
+        outcome = self._outcome(current, result)
+        path, decided = result.trace.path, result.trace.triage_outcome
+        if path is None or decided is None:
+            return outcome
+        return replace(outcome, path=path.value, triage_outcome=decided.value)
+
+    def _outcome(self, current: _Current, result: MissionResult) -> Settlement:
         trace = result.trace.model_dump(mode="json")
         if result.kind == MissionKind.COMPLETED:
             return Settlement(
@@ -486,13 +507,20 @@ class MissionService:
         return conversation_id
 
     async def submit(
-        self, conversation_id: str, text: str, path: OrchestrationPath | str
+        self,
+        conversation_id: str,
+        text: str,
+        path: OrchestrationPath | str | None = None,
     ) -> str:
-        """Store the user's message and queue a mission for it; returns its ID."""
+        """Store the user's message and queue a mission for it; returns its ID.
+
+        Without a path PHOENIX triages the request when it runs (PHX-105); a
+        given path is the client's choice and is used as is.
+        """
         self._require_running()
         mission_id = str(uuid4())
         try:
-            directive = OrchestrationPath(path)
+            directive = None if path is None else OrchestrationPath(path)
             request = PhoenixRequest(request_id=mission_id, text=text)
         except (ValueError, ValidationError):
             raise InvalidRequestError("Invalid mission text or path") from None
@@ -504,7 +532,7 @@ class MissionService:
             mission_id=mission_id,
             message_id=str(uuid4()),
             text=request.text,
-            path=directive.value,
+            path=None if directive is None else directive.value,
             now=self._now(),
         )
         return mission_id

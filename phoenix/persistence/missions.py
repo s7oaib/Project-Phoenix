@@ -72,6 +72,12 @@ class RequestStatus(StrEnum):
     DENIED = "denied"
 
 
+MissionPath = Literal["direct", "complex"]
+# Mirrors phoenix.agents.triage.TriageOutcome (tests assert equality); the
+# persistence layer imports no agents module.
+TriageDecider = Literal["decided", "fallback", "client"]
+TRIAGE_OUTCOMES: tuple[TriageDecider, ...] = ("decided", "fallback", "client")
+
 # Failure codes the store and service add to the runtime's MissionFailureCode.
 PERMISSION_DENIED = "permission_denied"
 INTERRUPTED = "interrupted"
@@ -134,6 +140,20 @@ class MissionRow(Base):
             ["rerun_of"], ["missions.id"], name="fk_missions_rerun_of_missions"
         ),
         CheckConstraint("path IN ('direct', 'complex')", name="ck_missions_path"),
+        # PHX-105 (ADR-090): a NULL path is still to be triaged; once a path is
+        # set, triage_outcome records who decided it.
+        CheckConstraint(
+            "triage_outcome IN ('decided', 'fallback', 'client')",
+            name="ck_missions_triage_outcome",
+        ),
+        CheckConstraint(
+            "(path IS NULL) = (triage_outcome IS NULL)",
+            name="ck_missions_triage_decided",
+        ),
+        CheckConstraint(
+            "triage_outcome <> 'fallback' OR path = 'complex'",
+            name="ck_missions_triage_fallback",
+        ),
         CheckConstraint(
             "status IN ('queued', 'running', 'completed', 'failed', 'cancelled', "
             "'waiting_permission', 'superseded')",
@@ -165,7 +185,8 @@ class MissionRow(Base):
     conversation_id: Mapped[str] = mapped_column(String, nullable=False)
     message_id: Mapped[str] = mapped_column(String, nullable=False)
     answer_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    path: Mapped[str] = mapped_column(String, nullable=False)
+    path: Mapped[str | None] = mapped_column(String, nullable=True)
+    triage_outcome: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False)
     failure_code: Mapped[str | None] = mapped_column(String, nullable=True)
     responder_error: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -302,7 +323,8 @@ class MissionRecord(_Record):
     conversation_id: str
     message_id: str
     answer_message_id: str | None
-    path: Literal["direct", "complex"]
+    path: MissionPath | None  # None until triage decides (PHX-105)
+    triage_outcome: TriageDecider | None
     status: MissionStatus
     failure_code: str | None
     responder_error: str | None
@@ -334,7 +356,8 @@ class ActiveGrants(_Record):
 class ClaimedMission(_Record):
     mission_id: str
     text: str
-    path: Literal["direct", "complex"]
+    path: MissionPath | None  # None: PHOENIX triages the request (PHX-105)
+    triage_outcome: TriageDecider | None
 
 
 class PurgeCounts(_Record):
@@ -345,7 +368,11 @@ class PurgeCounts(_Record):
 
 @dataclass(frozen=True)
 class Settlement:
-    """A finished run, recorded only if the mission is still RUNNING."""
+    """A finished run, recorded only if the mission is still RUNNING.
+
+    ``path`` and ``triage_outcome`` (PHX-105) are the decision the run made;
+    they are recorded only on a mission still waiting for triage's decision.
+    """
 
     status: MissionStatus
     trace: dict[str, Any] | None = None
@@ -353,6 +380,8 @@ class Settlement:
     failure_code: str | None = None
     responder_error: str | None = None
     pending: PermissionRequest | None = None
+    path: str | None = None
+    triage_outcome: str | None = None
 
 
 class MissionStoreError(Exception):
@@ -412,9 +441,10 @@ class MissionStore:
         mission_id: str,
         message_id: str,
         text: str,
-        path: str,
+        path: str | None,
         now: datetime,
     ) -> None:
+        """Store the message and queue its mission; a None path is triaged."""
         with self._transaction() as session:
             conversation = session.get(ConversationRow, conversation_id)
             if conversation is None:
@@ -436,6 +466,7 @@ class MissionStore:
                     conversation_id=conversation_id,
                     message_id=message_id,
                     path=path,
+                    triage_outcome=None if path is None else "client",
                     status=MissionStatus.QUEUED.value,
                     created_at=now,
                 )
@@ -471,7 +502,10 @@ class MissionStore:
                 id=new_mission_id,
                 conversation_id=original.conversation_id,
                 message_id=original.message_id,
+                # PHX-105: a re-run reuses the original's decision; one that
+                # never got one is triaged again.
                 path=original.path,
+                triage_outcome=original.triage_outcome,
                 status=MissionStatus.QUEUED.value,
                 rerun_of=original.id,
                 created_at=now,
@@ -501,6 +535,7 @@ class MissionStore:
                 mission_id=mission_id,
                 text=message.text,
                 path=_path(mission.path),
+                triage_outcome=_decider(mission.triage_outcome),
             )
 
     def settle(self, mission_id: str, outcome: Settlement, now: datetime) -> bool:
@@ -511,6 +546,14 @@ class MissionStore:
             mission = session.get(MissionRow, mission_id)
             if mission is None or mission.status != MissionStatus.RUNNING.value:
                 return False
+            # PHX-105: triage's decision fills a NULL path once; a decided
+            # path never changes.
+            decision: dict[str, str] = {}
+            if mission.path is None and outcome.path is not None:
+                path, decider = _path(outcome.path), _decider(outcome.triage_outcome)
+                if path is None or decider is None:
+                    raise ValueError("A decided path needs its triage outcome")
+                decision = {"path": path, "triage_outcome": decider}
             answer_id: str | None = None
             if outcome.status == MissionStatus.COMPLETED:
                 if outcome.answer_text is None:
@@ -540,6 +583,7 @@ class MissionStore:
                     finished_at=None
                     if outcome.status == MissionStatus.WAITING_PERMISSION
                     else now,
+                    **decision,
                 )
                 .execution_options(synchronize_session=False)
             )
@@ -974,12 +1018,23 @@ def _same(column: Any, value: str | None) -> ColumnElement[bool]:
     return column.is_(None) if value is None else column == value  # type: ignore[no-any-return]
 
 
-def _path(value: str) -> Literal["direct", "complex"]:
+def _path(value: str | None) -> MissionPath | None:
+    if value is None:
+        return None
     if value == "direct":
         return "direct"
     if value == "complex":
         return "complex"
     raise ValueError("Unknown mission path")
+
+
+def _decider(value: str | None) -> TriageDecider | None:
+    if value is None:
+        return None
+    for known in TRIAGE_OUTCOMES:
+        if value == known:
+            return known
+    raise ValueError("Unknown triage outcome")
 
 
 def _delete_missions(session: Session, selected: Any) -> int:
@@ -1065,6 +1120,7 @@ def _record(row: MissionRow, request: PermissionRequestRow | None) -> MissionRec
         message_id=row.message_id,
         answer_message_id=row.answer_message_id,
         path=_path(row.path),
+        triage_outcome=_decider(row.triage_outcome),
         status=MissionStatus(row.status),
         failure_code=row.failure_code,
         responder_error=row.responder_error,

@@ -1293,8 +1293,8 @@ def test_architecture_inert_source_exact_vocabulary_schema_and_dependencies() ->
     assert len(EventType) == 32
     scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
     assert (
-        scripts.get_heads() == ["0007_app_settings"]
-        and len(list(scripts.walk_revisions())) == 7
+        scripts.get_heads() == ["0008_mission_triage"]
+        and len(list(scripts.walk_revisions())) == 8
     )
     tree = ast.parse(inspect.getsource(module))
     imports = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}

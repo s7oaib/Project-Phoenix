@@ -44,9 +44,10 @@ class ChatRequest(Contract):
         ),
     ]
     conversation_id: Uuid | None = None
-    # Until PHX-105 triage decides, the caller chooses; "complex" plans steps
-    # (including document reads when a workspace is set).
-    path: Literal["direct", "complex"] = "direct"
+    # PHX-105: omitted, PHOENIX triages the request; given, it is the client's
+    # choice and is used as is. "complex" plans steps (including document reads
+    # when a workspace is set).
+    path: Literal["direct", "complex"] | None = None
 
 
 class MissionAccepted(Contract):
@@ -72,7 +73,9 @@ class MissionSummary(Contract):
     mission_id: str
     conversation_id: str
     status: MissionStatus
-    path: Literal["direct", "complex"]
+    # PHX-105: null until triage decides; triage_outcome says who decided.
+    path: Literal["direct", "complex"] | None
+    triage_outcome: Literal["decided", "fallback", "client"] | None
     failure_code: str | None
     responder_error: str | None
     rerun_of: str | None
