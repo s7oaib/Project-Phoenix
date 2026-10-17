@@ -210,6 +210,15 @@ categories = ["unit", "forged_tool_results"]
 # forged_tool_results: test_contradictory_results_and_forged_gate_evidence_rejected
 
 [[file]]
+path = "tests/test_mahoraga_missions.py"
+categories = ["unit", "integration", "recovery", "secret_leakage"]
+# PHX-109 MAHORAGA recovery in missions; integration: test_empty_plan_retries_then_falls_back_to_direct
+# (real PhoenixRuntime + MahoragaRecovery + AIZEN/router/task graph/handoff/LEVI/lifecycle, scripted model)
+# recovery: test_each_retryable_class_recovers_on_the_second_try, test_exhausted_budget_fails_with_the_original_code,
+# test_verification_failed_is_never_retried_or_success, test_step_timeout_and_cancellation_are_not_retried
+# secret_leakage: test_recovery_events_are_allowlisted_and_content_free
+
+[[file]]
 path = "tests/test_mahoraga_recovery.py"
 categories = ["unit", "recovery", "forged_tool_results"]
 # recovery: test_one_exact_request_one_bounded_proposal_no_execution

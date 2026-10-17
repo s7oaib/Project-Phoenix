@@ -5,7 +5,7 @@ composes PhoenixOrchestrator, AIZEN, the router, task graph, handoffs and LEVI
 without changing them. Steps are text-only unless the caller supplies a
 FilesystemTool: then PHX-046 document steps may make one read-only P1 call through
 ToolRegistry and PermissionEngine, with caller grants only (see tool_steps). No
-persistence, recovery or fail-safe behavior exists here. Every failure is
+persistence or fail-safe (KAIDO) behavior exists here. Every failure is
 explicit (INV-021); COMPLETED requires every required LEVI verification to pass
 (INV-008). WAITING_PERMISSION is a non-terminal outcome: the task stays there,
 and a rerun with a grant is a new mission.
@@ -22,6 +22,13 @@ any triage failure except cancellation falls back to COMPLEX. MissionTrace
 records who decided (``triage_outcome``) and, on fallback, the reason code;
 PHOENIX's triage agent events carry the same closed values.
 
+PHX-109 (ADR-093): a generation that fails transiently or structurally is
+retried once, only with MAHORAGA's approval within its finite mission budget
+(INV-009; see mission_recovery), and an AIZEN plan that still fails its schema
+falls back to the DIRECT path. LEVI's rejection is never retried (INV-008).
+MissionTrace records every recovery decision and recovery.* events publish them,
+with closed values only (INV-022); exhaustion keeps the original failure code.
+
 Task state is task-level: intermediate step verification runs while RUNNING, and
 VERIFYING is the final-answer verification phase. Callers refresh capability
 records; provider health is probed once per mission. No resource monitor exists
@@ -30,11 +37,12 @@ yet, so every registered candidate is treated as resource eligible.
 
 import asyncio
 import time
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Literal, Self
+from typing import Literal, Self, TypeVar
 from uuid import uuid4
 
 from pydantic import (
@@ -47,13 +55,27 @@ from pydantic import (
 )
 
 from phoenix.agents import prompts
-from phoenix.agents.handoff import HandoffBuilder
+from phoenix.agents.handoff import HandoffBuilder, HandoffEnvelope
 from phoenix.agents.mission_events import (
     EventPublisher,
     EventSink,
     MissionEvents,
     Phase,
     elapsed_ms,
+)
+from phoenix.agents.mission_recovery import (
+    MAX_RECOVERY_ACTIONS,
+    RECOVERY_AGENT_ID,
+    PolicyResponder,
+    RecoveryClass,
+    RecoveryOutcome,
+    RecoveryRecord,
+    RecoveryRole,
+    classify,
+    recovery_subject,
+    retryable,
+    summary,
+    trigger,
 )
 from phoenix.agents.orchestrator import (
     CancellationResult,
@@ -63,7 +85,13 @@ from phoenix.agents.orchestrator import (
     PhoenixRequest,
     PhoenixResultKind,
 )
-from phoenix.agents.planner import AizenPlanner, PlanningRequest
+from phoenix.agents.planner import AizenPlan, AizenPlanner, PlanningRequest
+from phoenix.agents.recovery import (
+    MahoragaRecovery,
+    MahoragaRecoveryError,
+    RecoveryAction,
+    RecoveryStatus,
+)
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.responders import (
     GenerationRecord,
@@ -121,6 +149,7 @@ from phoenix.agents.triage import (
 from phoenix.agents.verifier import (
     LeviVerifier,
     VerificationResponder,
+    VerificationResult,
     VerificationVerdict,
     verification_requirement_satisfied,
 )
@@ -151,6 +180,7 @@ TEXT_DOMAINS: tuple[RoutingDomain, ...] = (
 FINAL_STEP_ID = "final"
 _path = TypeAdapter(OrchestrationPath)
 _identifier = TypeAdapter(Identifier)
+_T = TypeVar("_T")
 
 
 class _Value(BaseModel):
@@ -218,6 +248,14 @@ class RuntimeLimits(_Value):
     )
     # PHX-105: health probe, model selection and the one triage generation.
     triage_timeout_seconds: float = Field(default=60.0, gt=0, allow_inf_nan=False)
+    # PHX-109: MAHORAGA's mission budget (0 disables recovery) and the wait
+    # before a provider failure's health re-check and retry.
+    max_recovery_actions: int = Field(
+        default=MAX_RECOVERY_ACTIONS, strict=True, ge=0, le=MAX_RECOVERY_ACTIONS
+    )
+    recovery_backoff_seconds: float = Field(
+        default=2.0, ge=0, le=30, allow_inf_nan=False
+    )
 
 
 class ControlRoleModelSelector:
@@ -283,6 +321,11 @@ class MissionTrace(_Value):
     (cancelled, or the mission deadline), whose ``path`` is None too.
     ``triage_reason`` is a fallback's closed code, set only by the triage that
     fell back (a re-run that reuses that decision carries none).
+
+    PHX-109: ``recoveries`` lists MAHORAGA's decisions in order. A recovered
+    ``switch_agent`` means PHOENIX answered on the DIRECT path after AIZEN's
+    plan failed: ``path`` stays the decided COMPLEX and the task never
+    COMPLETED, so it never counts as COMPLEX success.
     """
 
     prompt_set_version: Identifier
@@ -295,6 +338,7 @@ class MissionTrace(_Value):
     tool_calls: tuple[ToolCallRecord, ...] = ()
     triage_outcome: TriageOutcome | None = None
     triage_reason: TriageFallbackReason | None = None
+    recoveries: tuple[RecoveryRecord, ...] = ()
 
     @model_validator(mode="after")
     def consistent_triage(self) -> Self:
@@ -309,6 +353,10 @@ class MissionTrace(_Value):
             and self.path != OrchestrationPath.COMPLEX
         ):
             raise ValueError("A triage fallback takes the complex path")
+        if any(record.direct_fallback for record in self.recoveries) and (
+            self.path != OrchestrationPath.COMPLEX or TaskState.COMPLETED in self.states
+        ):
+            raise ValueError("A direct fallback never completes the complex task")
         return self
 
 
@@ -373,10 +421,19 @@ class _Evidence:
     generations: list[GenerationRecord] = field(default_factory=list)
     verifications: list[StepVerification] = field(default_factory=list)
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
+    recoveries: list[RecoveryRecord] = field(default_factory=list)
+    # PHX-109: a direct fallback already settled the failed task as FAILED.
+    task_failed: bool = False
+
+    @property
+    def recovery_actions(self) -> int:
+        return sum(record.action is not None for record in self.recoveries)
 
     def settle(self, state: TaskState) -> TaskTransition | None:
         # An illegal edge here is a runtime defect: raise rather than skip it.
         if self.machine is not None:
+            if self.task_failed and state == TaskState.FAILED:
+                return None
             return self.machine.transition(state)
         return None
 
@@ -414,6 +471,7 @@ class _Evidence:
                 tool_calls=tuple(self.tool_calls),
                 triage_outcome=self.triage_outcome,
                 triage_reason=self.triage_reason,
+                recoveries=tuple(self.recoveries),
             ),
         )
 
@@ -486,6 +544,10 @@ class PhoenixRuntime:
                 max_read_bytes=self._limits.max_output_chars,
             )
             self._domains = (*TEXT_DOMAINS, RoutingDomain.DOCUMENTS)
+        try:
+            self._recovery = MahoragaRecovery(self._agents)
+        except MahoragaRecoveryError:
+            raise PhoenixRuntimeError("MAHORAGA is absent from the registry") from None
         self._active: dict[str, _Mission] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._events = EventPublisher(events)
@@ -719,6 +781,207 @@ class PhoenixRuntime:
             )
         )
 
+    async def _recovering(
+        self,
+        request: PhoenixRequest,
+        evidence: _Evidence,
+        events: MissionEvents,
+        *,
+        role: RecoveryRole,
+        binding: ModelBinding,
+        attempt: Callable[[ModelBinding], Awaitable[_T]],
+        step_id: str | None = None,
+        thinking: bool = False,
+    ) -> _T:
+        """One generation, retried at most once with MAHORAGA's approval (PHX-109).
+
+        A provider failure waits ``recovery_backoff_seconds`` and retries only
+        if that provider's health re-check passes. A thinking role's truncated
+        output retries on the structured (think:false) provider when one is
+        configured. The retry runs under the caller's deadlines, and LEVI still
+        verifies whatever it produces.
+        """
+        try:
+            return await attempt(binding)
+        except Exception as error:
+            if not retryable(error):
+                raise
+            failure = error
+        recovery_class, responder_error = classify(failure)
+        retry, action = binding, RecoveryAction.RETRY_SAME
+        if thinking and responder_error == ResponderErrorCode.TRUNCATED:
+            structured = self._structured[binding.provider.provider_id]
+            if structured is not binding.provider:
+                retry = replace(binding, provider=structured)
+                action = RecoveryAction.ADJUST_PARAMETERS
+        async with self._recovery_action(
+            request,
+            evidence,
+            events,
+            failure,
+            role=role,
+            agent_id=binding.agent_id,
+            action=action,
+            step_id=step_id,
+        ) as outcome:
+            if recovery_class != RecoveryClass.RESPONDER_OUTPUT:
+                await asyncio.sleep(self._limits.recovery_backoff_seconds)
+                if not await self._provider_healthy(binding.provider.provider_id):
+                    outcome[0] = RecoveryOutcome.UNAVAILABLE
+                    raise failure
+            return await attempt(retry)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    async def _direct_fallback(
+        self,
+        request: PhoenixRequest,
+        evidence: _Evidence,
+        events: MissionEvents,
+        failure: ResponderOutputError,
+    ) -> str:
+        """PHOENIX answers directly after AIZEN's plan failed (PHX-109).
+
+        The COMPLEX task ends FAILED with the plan's codes; the answer is
+        PHOENIX's DIRECT output, never a verified COMPLEX result.
+        """
+        machine = evidence.machine
+        assert machine is not None  # the complex task exists before planning
+        async with self._recovery_action(
+            request,
+            evidence,
+            events,
+            failure,
+            role=RecoveryRole.PLANNER,
+            agent_id="strategist",
+            action=RecoveryAction.SWITCH_AGENT,
+        ):
+            await _state_changed(
+                events,
+                machine.transition(TaskState.FAILED),
+                failure_code=MissionFailureCode.RESPONDER_OUTPUT.value,
+                responder_error=failure.code.value,
+            )
+            evidence.task_failed = True
+            return await self._direct(request, evidence, events)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    @asynccontextmanager
+    async def _recovery_action(
+        self,
+        request: PhoenixRequest,
+        evidence: _Evidence,
+        events: MissionEvents,
+        failure: Exception,
+        *,
+        role: RecoveryRole,
+        agent_id: str,
+        action: RecoveryAction,
+        step_id: str | None = None,
+    ) -> AsyncIterator[list[RecoveryOutcome]]:
+        """MAHORAGA approves one action or reports exhaustion; then it is recorded.
+
+        Exhaustion (or a zero budget) re-raises the original failure. A body
+        that fails again with a retryable failure also re-raises the original,
+        so the mission keeps its first failure code; any other error propagates.
+        """
+        limit = self._limits.max_recovery_actions
+        if limit == 0:
+            raise failure
+        recovery_class, responder_error = classify(failure)
+        machine = evidence.machine
+        subject = role.value if step_id is None else f"{step_id}-{role.value}"
+        graph, handoff = recovery_subject(
+            self._agents,
+            self._handoffs,
+            task_id=request.request_id if machine is None else machine.task_id,
+            subject_id=subject,
+            agent_id=agent_id,
+            timeout_seconds=self._limits.step_timeout_seconds,
+        )
+        decision = await self._recovery.recover(
+            graph=graph,
+            handoff=handoff,
+            trigger=trigger(recovery_class),
+            failure_summary=summary(recovery_class, responder_error),
+            attempts_used=evidence.recovery_actions,
+            max_attempts=limit,
+            max_replan_steps=1,
+            responder=PolicyResponder(action),
+        )
+        fields: dict[str, JsonValue] = {
+            "recovery_id": decision.recovery_id,
+            "role": role.value,
+            "recovery_class": recovery_class.value,
+        }
+        if step_id is not None:
+            fields["step_id"] = step_id
+        if responder_error is not None:
+            fields["responder_error"] = responder_error.value
+        record = {
+            "recovery_id": decision.recovery_id,
+            "role": role,
+            "agent_id": agent_id,
+            "step_id": step_id,
+            "recovery_class": recovery_class,
+            "responder_error": responder_error,
+        }
+        if decision.status == RecoveryStatus.EXHAUSTED:
+            evidence.recoveries.append(
+                RecoveryRecord.model_validate(
+                    {**record, "outcome": RecoveryOutcome.EXHAUSTED}
+                )
+            )
+            await events.emit(
+                EventType.RECOVERY_EXHAUSTED, agent_id=RECOVERY_AGENT_ID, **fields
+            )
+            raise failure
+        assert decision.proposal is not None
+        fields["action"] = decision.proposal.action.value
+        record["action"] = decision.proposal.action
+        # Recorded when approved, so a nested recovery (the direct fallback's
+        # own retry) sees this action spent; the outcome is set on exit.
+        index = len(evidence.recoveries)
+        outcome = [RecoveryOutcome.FAILED]
+        evidence.recoveries.append(
+            RecoveryRecord.model_validate({**record, "outcome": outcome[0]})
+        )
+        await events.emit(
+            EventType.RECOVERY_STARTED, agent_id=RECOVERY_AGENT_ID, **fields
+        )
+        clock = time.monotonic()
+        try:
+            yield outcome
+            outcome[0] = RecoveryOutcome.RECOVERED
+        except asyncio.CancelledError:
+            outcome[0] = RecoveryOutcome.CANCELLED
+            raise
+        except Exception as error:
+            if retryable(error):
+                raise failure from None
+            raise
+        finally:
+            evidence.recoveries[index] = RecoveryRecord.model_validate(
+                {**record, "outcome": outcome[0]}
+            )
+            await events.emit(
+                EventType.RECOVERY_COMPLETED,
+                agent_id=RECOVERY_AGENT_ID,
+                **fields,
+                outcome=outcome[0].value,
+                duration_ms=elapsed_ms(clock),
+            )
+
+    async def _provider_healthy(self, provider_id: str) -> bool:
+        """The default instance's health stands for the backend (ADR-081)."""
+        try:
+            report = await self._providers[provider_id].health()
+        except ModelProviderError:
+            return False
+        return (report.provider_id, report.status) == (
+            provider_id,
+            ProviderHealthStatus.HEALTHY,
+        )
+
     async def _triage(
         self, request: PhoenixRequest, evidence: _Evidence, events: MissionEvents
     ) -> OrchestrationPath:
@@ -758,9 +1021,17 @@ class PhoenixRuntime:
     ) -> str:
         async with _agent_phase(events, "phoenix", "direct"):
             health = await self._health(evidence)
-            responder = ModelDirectResponder(self._control("phoenix", health, evidence))
-            result = await self._orchestrator.execute(
-                request, OrchestrationPath.DIRECT, direct_responder=responder
+            result = await self._recovering(
+                request,
+                evidence,
+                events,
+                role=RecoveryRole.DIRECT,
+                binding=self._control("phoenix", health, evidence),
+                attempt=lambda binding: self._orchestrator.execute(
+                    request,
+                    OrchestrationPath.DIRECT,
+                    direct_responder=ModelDirectResponder(binding),
+                ),
             )
         assert result.text is not None  # COMPLETED is the only direct outcome.
         return result.text
@@ -784,23 +1055,45 @@ class PhoenixRuntime:
         await _transition(events, machine, TaskState.PLANNING)
         health = await self._health(evidence)
 
-        async with asyncio.timeout(limits.planning_timeout_seconds):
-            async with _agent_phase(events, "strategist", "planner"):
-                plan = await self._planner.plan(
-                    PlanningRequest(
-                        request_id=request.request_id, objective=request.text
-                    ),
-                    responder=ModelPlanningResponder(
-                        self._control("strategist", health, evidence),
-                        max_steps=limits.max_plan_steps,
-                    ),
-                )
-            async with _agent_phase(events, "phoenix", "assignment"):
-                assignments = await ModelStepAssignmentResponder(
-                    self._control("phoenix", health, evidence, tier="assignment"),
-                    self._guard,
-                    allowed_domains=self._domains,
-                ).assign(plan)
+        planning = PlanningRequest(
+            request_id=request.request_id, objective=request.text
+        )
+        plan: AizenPlan | None = None
+        try:
+            async with asyncio.timeout(limits.planning_timeout_seconds):
+                async with _agent_phase(events, "strategist", "planner"):
+                    plan = await self._recovering(
+                        request,
+                        evidence,
+                        events,
+                        role=RecoveryRole.PLANNER,
+                        binding=self._control("strategist", health, evidence),
+                        attempt=lambda binding: self._planner.plan(
+                            planning,
+                            responder=ModelPlanningResponder(
+                                binding, max_steps=limits.max_plan_steps
+                            ),
+                        ),
+                    )
+                async with _agent_phase(events, "phoenix", "assignment"):
+                    planned = plan
+                    assignments = await self._recovering(
+                        request,
+                        evidence,
+                        events,
+                        role=RecoveryRole.ASSIGNMENT,
+                        binding=self._control(
+                            "phoenix", health, evidence, tier="assignment"
+                        ),
+                        attempt=lambda binding: ModelStepAssignmentResponder(
+                            binding, self._guard, allowed_domains=self._domains
+                        ).assign(planned),
+                    )
+        except ResponderOutputError as error:
+            if plan is not None or error.code != ResponderErrorCode.SCHEMA:
+                raise
+            # PHX-109: the plan failed its schema even after its retry.
+            return await self._direct_fallback(request, evidence, events, error)
 
         routes = {
             item.step_id: self._route(item.domain, health)
@@ -903,9 +1196,20 @@ class PhoenixRuntime:
                             events=events,
                         )
                     else:
-                        candidate = await ModelSpecialistResponder(
-                            binding, self._guard, final=final
-                        ).perform(handoff, user_request=request.text, evidence=prior)
+                        candidate = await self._recovering(
+                            request,
+                            evidence,
+                            events,
+                            role=RecoveryRole.FINAL_ANSWER
+                            if final
+                            else RecoveryRole.SPECIALIST,
+                            binding=binding,
+                            attempt=_specialist(
+                                self._guard, handoff, request.text, prior, final
+                            ),
+                            step_id=step_id,
+                            thinking=True,
+                        )
             if final:
                 await _transition(events, machine, TaskState.VERIFYING)
             async with events.phase(
@@ -916,41 +1220,22 @@ class PhoenixRuntime:
                 step_id=step_id,
             ) as check:
                 verifier = self._control("verifier", health, evidence, avoid=producer)
-                responder: VerificationResponder
-                if final:
-                    # PHX-047: LEVI's model sees the verified step outputs it judges.
-                    responder = FinalVerificationResponder(
-                        verifier,
-                        self._guard,
-                        original_request=request.text,
-                        evidence=prior,
-                    )
-                elif tool_evidence is None:
-                    # PHX-047: grounded in the earlier outputs this step saw, if any.
-                    responder = StepVerificationResponder(
-                        verifier,
-                        self._guard,
-                        original_request=request.text,
-                        evidence=prior,
-                    )
-                else:
-                    # PHX-047: LEVI's model sees the guarded tool output it verifies.
-                    responder = ToolEvidenceVerificationResponder(
-                        DocumentVerificationResponder(
-                            verifier,
-                            self._guard,
-                            original_request=request.text,
-                            evidence=tool_evidence,
-                        ),
-                        tool_evidence,
-                        grants,
-                    )
+                levi = _levi_responder(
+                    self._guard, request.text, prior, final, tool_evidence, grants
+                )
                 async with asyncio.timeout(limits.verification_timeout_seconds):
-                    verification = await self._verifier.verify(
-                        graph=graph,
-                        handoff=handoff,
-                        candidate_output=candidate,
-                        responder=responder,
+                    # PHX-109: only LEVI's failed generation is retried, never
+                    # its verdict: a FAILED result returns from here as is.
+                    verification = await self._recovering(
+                        request,
+                        evidence,
+                        events,
+                        role=RecoveryRole.VERIFICATION,
+                        binding=verifier,
+                        attempt=_verification(
+                            self._verifier, graph, handoff, candidate, levi
+                        ),
+                        step_id=step_id,
                     )
                 satisfied = verification_requirement_satisfied(handoff, verification)
                 check.result = {
@@ -979,6 +1264,79 @@ class PhoenixRuntime:
             )
         await _transition(events, machine, TaskState.COMPLETED)
         return outputs[FINAL_STEP_ID]
+
+
+def _specialist(
+    guard: PromptInjectionGuard,
+    handoff: HandoffEnvelope,
+    user_request: str,
+    prior: tuple[tuple[str, str], ...],
+    final: bool,
+) -> Callable[[ModelBinding], Awaitable[str]]:
+    """One text step's generation on a given binding (PHX-109 retries it)."""
+
+    def perform(binding: ModelBinding) -> Awaitable[str]:
+        return ModelSpecialistResponder(binding, guard, final=final).perform(
+            handoff, user_request=user_request, evidence=prior
+        )
+
+    return perform
+
+
+def _levi_responder(
+    guard: PromptInjectionGuard,
+    user_request: str,
+    prior: tuple[tuple[str, str], ...],
+    final: bool,
+    tool_evidence: ToolEvidence | None,
+    grants: tuple[PermissionGrant, ...],
+) -> Callable[[ModelBinding], VerificationResponder]:
+    """LEVI's responder for a step on a given binding."""
+
+    def responder(verifier: ModelBinding) -> VerificationResponder:
+        if final:
+            # PHX-047: LEVI's model sees the verified step outputs it judges.
+            return FinalVerificationResponder(
+                verifier, guard, original_request=user_request, evidence=prior
+            )
+        if tool_evidence is None:
+            # PHX-047: grounded in the earlier outputs this step saw, if any.
+            return StepVerificationResponder(
+                verifier, guard, original_request=user_request, evidence=prior
+            )
+        # PHX-047: LEVI's model sees the guarded tool output it verifies.
+        return ToolEvidenceVerificationResponder(
+            DocumentVerificationResponder(
+                verifier,
+                guard,
+                original_request=user_request,
+                evidence=tool_evidence,
+            ),
+            tool_evidence,
+            grants,
+        )
+
+    return responder
+
+
+def _verification(
+    verifier: LeviVerifier,
+    graph: TaskGraph,
+    handoff: HandoffEnvelope,
+    candidate: str,
+    levi: Callable[[ModelBinding], VerificationResponder],
+) -> Callable[[ModelBinding], Awaitable[VerificationResult]]:
+    """One LEVI verification on a given binding (PHX-109 retries it)."""
+
+    def verify(binding: ModelBinding) -> Awaitable[VerificationResult]:
+        return verifier.verify(
+            graph=graph,
+            handoff=handoff,
+            candidate_output=candidate,
+            responder=levi(binding),
+        )
+
+    return verify
 
 
 def _healthy(

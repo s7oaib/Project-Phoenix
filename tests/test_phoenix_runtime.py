@@ -362,7 +362,9 @@ def test_invalid_plan_output_fails_explicitly(
 ) -> None:
     provider = ScriptedProvider()
     provider.replies["planner"] = reply
-    result = mission(provider)
+    # PHX-109: with MAHORAGA's budget off; a failed plan's retry and direct
+    # fallback are covered in test_mahoraga_missions.py.
+    result = mission(provider, limits=RuntimeLimits(max_recovery_actions=0))
     assert (result.kind, result.failure_code, result.responder_error) == (
         MissionKind.FAILED,
         MissionFailureCode.RESPONDER_OUTPUT,

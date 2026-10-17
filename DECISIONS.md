@@ -4339,3 +4339,74 @@ without a path. A mission interrupted by a crash before it settles has no
 recorded decision, so its re-run triages again. Triage accuracy is not yet
 measured live (the routing benchmark is the instrument). No new dependencies
 and no new event types.
+
+## ADR-093 — Bounded MAHORAGA recovery in missions
+
+Status: Proposed (the recommended defaults are applied under the owner's
+overnight instruction, "do which is recommended", 2026-10-18; R1–R16 in
+`tickets/PHX-109-mahoraga-missions.md` await the owner's review)
+Date: 2026-10-18
+Ticket: PHX-109
+
+ADR-091 and ADR-092 are reserved by the desktop branch
+(`feature/PHX-106-107-desktop-connected`).
+
+This replaces ADR-081's "Failures. Explicit, with no hidden retries ...
+MAHORAGA and KAIDO stay deferred" for MAHORAGA. KAIDO stays deferred.
+
+Context: in FYP configuration 2 (2026-10-18), 15 of 32 missions failed. Most
+failures were structural (`schema`, `truncated`, `not_json`) or transient
+(`provider_unavailable`), and every completed mission was correct.
+
+Decision:
+
+- **What is retried.** A mission generation is retried once when it fails with
+  `responder_output` (`not_json`, `schema` or `truncated`), `provider_unavailable`
+  or `provider_error`. Nothing else is retried: LEVI's `verification_failed`
+  stands (INV-008), and timeouts, cancellation, permission decisions, tool
+  outcomes, prompt-boundary refusals and routing failures stay explicit
+  (INV-021). Document steps, which would repeat a permissioned tool call, are
+  not retried; their LEVI generation is.
+- **MAHORAGA decides.** Each decision goes through the existing
+  `MahoragaRecovery.recover()`, with a deterministic `PolicyResponder`
+  (PHOENIX's fixed policy, no model) and a one-step evidence graph describing
+  the failed generation. MAHORAGA's own budget check bounds the mission: at
+  most three actions (`RuntimeLimits.max_recovery_actions`, 0 to 3; 0
+  disables recovery), plus one retry per generation (INV-009). Exhaustion, or
+  a retry failing again with a retryable failure, keeps the original failure
+  code.
+- **How it retries.**
+  - A provider failure waits `recovery_backoff_seconds` (2 s, at most 30 s)
+    and retries only if that provider's health re-check is `HEALTHY`;
+    otherwise the mission fails with the original code.
+  - A truncated thinking role (specialist or final answer) retries on the
+    structured think:false provider when one is configured
+    (`adjust_parameters`).
+  - Everything else retries the same generation (`retry_same`).
+  - Retries stay in the current task state under the same deadlines, and
+    still pass LEVI.
+- **Failed plan.** A planner `schema` failure that persists after its retry
+  falls back to PHOENIX's DIRECT path (`switch_agent`). The COMPLEX task ends
+  `FAILED`, the trace keeps `path="complex"`, and the answer is unverified
+  DIRECT output (ADR-081), so it never counts as COMPLEX success.
+- **Observability (INV-022).** `MissionTrace.recoveries` records each decision
+  with closed values only: role, agent, step, class, responder error, action
+  and outcome. The existing `recovery.started`, `recovery.completed` and
+  `recovery.exhausted` types publish it (agent `adaptive_recovery`), and the
+  PHX-103 allowlist gains them with closed-enum fields. The vocabulary stays
+  at 32.
+- **Frozen files.** `responders.py`, `recovery.py` and `failsafe.py` are
+  byte-identical. `runtime.py` and `mission_events.py` move from the PHX-105
+  pin to the PHX-109 implementation commit (`PHX_109_COMMIT` /
+  `PHX_109_PATHS`). This lands as an implementation commit followed by a pin
+  commit.
+
+Limitations:
+
+- KAIDO is not wired, so a provider that stays down fails the mission.
+- Re-generating after a LEVI rejection is deferred to the owner.
+- The direct fallback covers every plan `schema` failure, not only an empty
+  plan, because the runtime sees only the closed code.
+- The live effect on the FYP success rate is not yet measured.
+
+No new dependencies, event types, migrations or API changes.

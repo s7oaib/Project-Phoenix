@@ -23,7 +23,14 @@ from typing import Final, Protocol
 
 from pydantic import JsonValue
 
+from phoenix.agents.mission_recovery import (
+    RETRYABLE_OUTPUT,
+    RecoveryClass,
+    RecoveryOutcome,
+    RecoveryRole,
+)
 from phoenix.agents.orchestrator import OrchestrationPath
+from phoenix.agents.recovery import RecoveryAction
 from phoenix.agents.registry import build_default_agent_registry
 from phoenix.agents.responders import ResponderErrorCode
 from phoenix.agents.router import RoutingDomain
@@ -139,6 +146,24 @@ _TRIAGE: dict[str, _Kind] = {
     "triage_outcome": _values(TriageOutcome),
 }
 
+# PHX-109 (ADR-093): one MAHORAGA decision per mission recovery, closed values.
+_RECOVERY: dict[str, _Kind] = {
+    "recovery_id": UUID,
+    "role": _values(RecoveryRole),
+    "step_id": STEP,
+    "recovery_class": _values(RecoveryClass),
+    "responder_error": frozenset(code.value for code in RETRYABLE_OUTPUT),
+}
+RECOVERY_ACTIONS: Final = frozenset(
+    action.value
+    for action in (
+        RecoveryAction.RETRY_SAME,
+        RecoveryAction.ADJUST_PARAMETERS,
+        RecoveryAction.SWITCH_AGENT,
+    )
+)
+RECOVERY_OUTCOMES: Final = _values(RecoveryOutcome) - {RecoveryOutcome.EXHAUSTED}
+
 # Every event type PHX-103 publishes, with its complete payload allowlist.
 PAYLOAD_FIELDS: Final[Mapping[EventType, Mapping[str, _Kind]]] = MappingProxyType(
     {
@@ -209,6 +234,14 @@ PAYLOAD_FIELDS: Final[Mapping[EventType, Mapping[str, _Kind]]] = MappingProxyTyp
             "code": FAILURE_CODES,
             "duration_ms": MILLISECONDS,
         },
+        EventType.RECOVERY_STARTED: {**_RECOVERY, "action": RECOVERY_ACTIONS},
+        EventType.RECOVERY_COMPLETED: {
+            **_RECOVERY,
+            "action": RECOVERY_ACTIONS,
+            "outcome": RECOVERY_OUTCOMES,
+            "duration_ms": MILLISECONDS,
+        },
+        EventType.RECOVERY_EXHAUSTED: _RECOVERY,
     }
 )
 _WARNING_TYPES: Final = frozenset(
