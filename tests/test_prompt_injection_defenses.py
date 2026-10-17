@@ -1741,8 +1741,9 @@ PHX_103_PATHS = (
 # PHX-104 (ADR-089) intentionally changed server.py (REST routes, settings
 # store and workspace wiring), missions.py (use_runtime; a mission keeps its
 # runtime) and alembic/env.py (settings row registration); all three stay
-# pinned, at the PHX-104 implementation commit.
-PHX_104_COMMIT = "f9a075c41ecf56f01f268b0ab75505fb723ae133"
+# pinned, at the latest PHX-104 implementation commit (review fixes; the first
+# round was f9a075c).
+PHX_104_COMMIT = "7af605e26afcaf0e7000ee44d312e741a9107b2b"
 PHX_104_PATHS = (
     "phoenix/api/server.py",
     "phoenix/api/missions.py",
