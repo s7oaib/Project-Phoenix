@@ -68,7 +68,7 @@ const AT = '2026-10-18T10:00:00.123456Z';
 
 function page(items, total = items.length) { return { items, limit: 64, offset: 0, total }; }
 function detail(overrides = {}) {
-  return { mission_id: MISSION, conversation_id: CONV, status: 'waiting_permission', path: 'complex', failure_code: null,
+  return { mission_id: MISSION, conversation_id: CONV, status: 'waiting_permission', path: 'complex', triage_outcome: 'decided', failure_code: null,
     responder_error: null, rerun_of: null, created_at: AT, started_at: AT, finished_at: null, request_text: 'Summarize notes.txt',
     answer_text: null, rerun_id: null, task_id: TASK, task_states: ['created', 'planning', 'running', 'waiting_permission'],
     permission_request: { request_id: REQ, mission_id: MISSION, status: 'pending', tool_id: 'filesystem.read_text', action: 'read_text',
@@ -199,6 +199,8 @@ test('PHX-107 every live port snapshot is admitted by the unchanged App readers'
   assert.deepEqual(plain(diagnostics.metrics.map((metric) => metric.name)), ['verification_result', 'task_step_latency']);
   assert.equal(view.connection.workspace.root, 'D:\\docs');
   assert.equal(view.connection.mission.status, 'waiting_permission');
+  assert.equal(view.connection.mission.path, 'complex');
+  assert.equal(view.connection.mission.triageOutcome, 'decided');
 });
 
 test('PHX-107 submitDecision maps approve and deny to the exact REST calls and follows the re-run', async () => {
@@ -232,10 +234,20 @@ test('PHX-107 sendText posts trimmed text, keeps the conversation and honours th
   const { store, transport } = await readyStore(backendRoutes({ 'GET /conversations?limit=1': { status: 200, body: page([], 0) } }));
   transport.calls.length = 0;
   assert.equal(await app.sendDraft(store.getSnapshot().chatPort, '  Hello PHOENIX  ', { pending: false, cancelled: false }), 'acknowledged');
+  // Automatic is the default: no `path`, so PHOENIX triages the request (PHX-105).
+  assert.equal(store.getSnapshot().connection.path, 'auto');
   assert.deepEqual(plain(transport.calls[0]), { method: 'POST', path: '/chat', body: { text: 'Hello PHOENIX' } });
   store.setPath('complex');
   await store.getSnapshot().chatPort.sendText('Read notes.txt');
   assert.deepEqual(plain(transport.calls.at(-1).body), { text: 'Read notes.txt', conversation_id: CONV, path: 'complex' });
+  store.setPath('direct');
+  await store.getSnapshot().chatPort.sendText('Hi');
+  assert.deepEqual(plain(transport.calls.at(-1).body), { text: 'Hi', conversation_id: CONV, path: 'direct' });
+  store.setPath('auto');
+  await store.getSnapshot().chatPort.sendText('Again');
+  assert.deepEqual(plain(transport.calls.at(-1).body), { text: 'Again', conversation_id: CONV });
+  // A mission still being triaged has a null path and outcome.
+  assert.deepEqual(plain(core.readMission(detail({ path: null, triage_outcome: null }))).path, null);
   const { store: busy } = await readyStore(backendRoutes({ 'POST /chat': { status: 503, body: { error: { code: 'service_unavailable' } } } }));
   assert.equal(await app.sendDraft(busy.getSnapshot().chatPort, 'hi', { pending: false, cancelled: false }), 'failed');
 });
@@ -360,7 +372,9 @@ test('PHX-107 ConnectedApp renders the connection bar and the live App without i
   assert.match(markup, /aria-label="Backend connection"/);
   assert.match(markup, /Connected to the local PHOENIX backend through the native shell\./);
   assert.match(markup, /D:\\docs \(active\)/);
-  assert.match(markup, /Latest mission 11111111: waiting for your permission/);
+  assert.match(markup, /Latest mission 11111111: waiting for your permission[^<]*· planned steps \(PHOENIX decided\)/);
+  assert.match(markup, /<option value="auto" selected="">Automatic \(PHOENIX decides\)<\/option>/);
+  assert.match(markup, /Override: direct answer/);
   assert.match(markup, /notes\.txt lists three tasks\./);
   assert.doesNotMatch(markup, /style="/);
   const degraded = renderToStaticMarkup(createElement(connected.ConnectionBar, { connection: { ...store.getSnapshot().connection, backend: { state: 'degraded', code: 'python_not_found' } }, store }));

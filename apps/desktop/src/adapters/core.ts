@@ -42,6 +42,7 @@ export const RING = 64;
 export const STEP_LIMIT_SECONDS = 300; // RuntimeLimits.step_timeout_seconds default (PHX-029)
 export const REFRESH_DELAY_MS = 120;
 export const POLL_MS = 3000;
+/** 'auto' omits `path`, so PHOENIX triages the request (PHX-105); the others are explicit overrides. */
 export type MissionPath = 'auto' | 'direct' | 'complex';
 export const ACTIVE_STATUSES = Object.freeze(['queued', 'running']);
 export const TERMINAL_STATUSES = Object.freeze(['completed', 'failed', 'cancelled', 'superseded']);
@@ -100,7 +101,9 @@ export function readPermission(value: unknown): PendingPermission | undefined {
 }
 
 export type MissionView = {
-  missionId: string; conversationId: string; status: string; path: string; failureCode: string | null;
+  missionId: string; conversationId: string; status: string;
+  /** PHX-105: null until triage decides; triageOutcome says who decided. */
+  path: 'direct' | 'complex' | null; triageOutcome: 'decided' | 'fallback' | 'client' | null; failureCode: string | null;
   rerunOf: string | null; rerunId: string | null; taskId: string | null; taskStates: readonly string[];
   permissionRequestId: string | null;
 };
@@ -113,7 +116,9 @@ export function readMission(value: unknown): MissionView | undefined {
   const states = Array.isArray(value.task_states) ? value.task_states.filter((state): state is string => typeof state === 'string') : [];
   const request = isObject(value.permission_request) ? id(value.permission_request.request_id) ?? null : null;
   return {
-    missionId, conversationId, status, path: str(value.path, 16) ?? 'direct',
+    missionId, conversationId, status,
+    path: value.path === 'direct' || value.path === 'complex' ? value.path : null,
+    triageOutcome: value.triage_outcome === 'decided' || value.triage_outcome === 'fallback' || value.triage_outcome === 'client' ? value.triage_outcome : null,
     failureCode: str(value.failure_code, 64) ?? null, rerunOf: id(value.rerun_of) ?? null,
     rerunId: id(value.rerun_id) ?? null, taskId: id(value.task_id) ?? null, taskStates: states,
     permissionRequestId: request,

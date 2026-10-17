@@ -1,6 +1,7 @@
 // PHX-107 (ADR-092) + minimal PHX-108: renders App with live ports and a compact connection
 // bar for what App has no port for yet: backend state, the document workspace folder
-// (PATCH /settings), the mission path and the active mission's cancel / run-again.
+// (PATCH /settings), an optional mission-path override of PHX-105 triage, and the active
+// mission's cancel / run-again.
 
 import { useState, useSyncExternalStore, type FormEvent } from 'react';
 import App from '../App';
@@ -22,6 +23,9 @@ const degradedText: Readonly<Record<string, string>> = {
   ready_timeout: 'The backend did not become ready in time.',
   backend_exited: 'The backend process exited. Restart PHOENIX.',
   ipc_unavailable: 'The native shell did not answer.',
+};
+const triageText: Readonly<Record<string, string>> = {
+  decided: 'PHOENIX decided', fallback: 'triage fallback', client: 'your override',
 };
 const missionText: Readonly<Record<string, string>> = {
   queued: 'queued', running: 'running', completed: 'completed', failed: 'failed', cancelled: 'cancelled',
@@ -59,11 +63,11 @@ export function ConnectionBar({ connection, store }: { connection: ConnectionVie
         <div className="connection-row">
           <label htmlFor="mission-path">Mission path</label>
           <select id="mission-path" value={connection.path} onChange={(event) => store.setPath(event.currentTarget.value as MissionPath)}>
-            <option value="auto">Server default</option>
-            <option value="direct">Direct answer</option>
-            <option value="complex">Planned steps (AIZEN plan, workspace documents)</option>
+            <option value="auto">Automatic (PHOENIX decides)</option>
+            <option value="direct">Override: direct answer</option>
+            <option value="complex">Override: planned steps (AIZEN plan, workspace documents)</option>
           </select>
-          {mission && <span className="connection-value">Latest mission {mission.missionId.slice(0, 8)}: {missionText[mission.status] ?? mission.status}{mission.failureCode ? ` (${mission.failureCode})` : ''}</span>}
+          {mission && <span className="connection-value">Latest mission {mission.missionId.slice(0, 8)}: {missionText[mission.status] ?? mission.status}{mission.failureCode ? ` (${mission.failureCode})` : ''}{mission.path ? ` · ${mission.path === 'complex' ? 'planned steps' : 'direct'}${mission.triageOutcome ? ` (${triageText[mission.triageOutcome]})` : ''}` : ''}</span>}
           {mission && (mission.status === 'queued' || mission.status === 'running') &&
             <button type="button" onClick={() => void store.missionAction('cancel')}>Cancel mission</button>}
           {mission && mission.status === 'failed' && mission.failureCode === 'interrupted' && !mission.rerunId &&
