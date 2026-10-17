@@ -1753,7 +1753,7 @@ PHX_104_PATHS = (
 # entry point, Tauri config (capability and CSP) and native host (backend
 # sidecar, proxy and event bridge); they stay pinned, at the PHX-106/107
 # implementation commit.
-PHX_106_COMMIT = "PHX106_COMMIT"
+PHX_106_COMMIT = "e34ca3d18e9444ff5ed32b3f1abb60fc5344f246"
 PHX_106_PATHS = (
     "apps/desktop/package.json",
     "apps/desktop/src/main.tsx",

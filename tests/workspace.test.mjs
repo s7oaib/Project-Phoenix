@@ -218,7 +218,7 @@ test('PHX-080 leaves manifests, entry point and Tauri native security files byte
   // native host (sidecar, proxy, ACL); they stay pinned, at the PHX-106/107 implementation commit.
   const baselines = {
     '4a70867203a70d3a85e2c141ef0dbb92bdff42e2': ['package.json', 'apps/desktop/tsconfig.json', 'apps/desktop/vite.config.ts'],
-    'PHX106_COMMIT': ['package-lock.json', 'apps/desktop/package.json', 'apps/desktop/src/main.tsx', 'apps/desktop/src-tauri/tauri.conf.json',
+    'e34ca3d18e9444ff5ed32b3f1abb60fc5344f246': ['package-lock.json', 'apps/desktop/package.json', 'apps/desktop/src/main.tsx', 'apps/desktop/src-tauri/tauri.conf.json',
       'apps/desktop/src-tauri/Cargo.toml', 'apps/desktop/src-tauri/Cargo.lock', 'apps/desktop/src-tauri/src/main.rs', 'apps/desktop/src-tauri/build.rs'],
     '829670b7713eacf246e3dd282e0e15f1c94c142f': ['pyproject.toml', 'uv.lock'],
   };

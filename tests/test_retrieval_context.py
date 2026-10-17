@@ -2028,7 +2028,11 @@ def test_scope_ast_schema_dependencies_and_protected_sources_unchanged(
     for path in protected:
         # PHX-106/107 (ADR-091, ADR-092) intentionally added @tauri-apps/api to
         # the lock; it stays pinned, at the PHX-106/107 implementation commit.
-        base = "PHX106_COMMIT" if path == "package-lock.json" else "origin/main"
+        base = (
+            "e34ca3d18e9444ff5ed32b3f1abb60fc5344f246"
+            if path == "package-lock.json"
+            else "origin/main"
+        )
         previous = subprocess.check_output(["git", "show", f"{base}:{path}"], cwd=ROOT)
         current = (ROOT / path).read_bytes().replace(b"\r\n", b"\n")
         if path == "alembic/env.py":
