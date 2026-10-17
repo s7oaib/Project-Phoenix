@@ -1,14 +1,55 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod backend;
+mod events;
+mod proxy;
+
+use std::sync::Arc;
+
+use tauri::{Emitter, Manager, RunEvent};
+
+/// Tauri events the webview may listen to (capability `core:event:allow-listen`).
+const BACKEND_STATUS_EVENT: &str = "phoenix:backend-status";
+const EVENT: &str = "phoenix:event";
+const EVENTS_STATUS_EVENT: &str = "phoenix:events-status";
+
 fn main() {
-    tauri::Builder::default()
-        .setup(|_app| {
+    let backend = Arc::new(backend::Backend::new());
+    let app = tauri::Builder::default()
+        .manage(Arc::clone(&backend))
+        .invoke_handler(tauri::generate_handler![
+            proxy::api_request,
+            backend::backend_status
+        ])
+        .setup(move |app| {
             #[cfg(windows)]
-            focus_wrap::install(_app);
+            focus_wrap::install(app);
+            // PHX-106 (ADR-091): the shell starts and owns the backend; only Rust holds the token.
+            let handle = app.handle().clone();
+            backend.start(Arc::new(move |status| {
+                let _ = handle.emit_to("main", BACKEND_STATUS_EVENT, status);
+            }));
+            let handle = app.handle().clone();
+            events::spawn_bridge(
+                Arc::clone(&backend),
+                Arc::new(move |bridged| {
+                    let _ = match bridged {
+                        events::Bridged::Event(event) => handle.emit_to("main", EVENT, event),
+                        events::Bridged::Status(status) => {
+                            handle.emit_to("main", EVENTS_STATUS_EVENT, status)
+                        }
+                    };
+                }),
+            );
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("Failed to run the PHOENIX desktop application");
+    app.run(|app, event| {
+        if let RunEvent::Exit = event {
+            app.state::<Arc<backend::Backend>>().shutdown();
+        }
+    });
 }
 
 /// Keeps keyboard focus inside the web content when Tab/Shift+Tab leaves its first or last
@@ -44,7 +85,11 @@ mod focus_wrap {
                 Ok(())
             }));
             let mut token = 0i64;
-            let _ = unsafe { webview.controller().add_MoveFocusRequested(&handler, &mut token) };
+            let _ = unsafe {
+                webview
+                    .controller()
+                    .add_MoveFocusRequested(&handler, &mut token)
+            };
         });
     }
 

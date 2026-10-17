@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -214,9 +214,12 @@ test('PHX-080 leaves manifests, entry point and Tauri native security files byte
   const root = fileURLToPath(new URL('../', import.meta.url));
   // PHX-088 (ADR-075) intentionally changed the native host files; they stay pinned, at the PHX-088 commit.
   // PHX-103 (ADR-088) intentionally added websockets to pyproject.toml and uv.lock; they stay pinned, at the PHX-103 commit.
+  // PHX-106/107 (ADR-091, ADR-092) intentionally changed the desktop manifest, lock, entry point, Tauri config and
+  // native host (sidecar, proxy, ACL); they stay pinned, at the PHX-106/107 implementation commit.
   const baselines = {
-    '4a70867203a70d3a85e2c141ef0dbb92bdff42e2': ['package.json', 'package-lock.json', 'apps/desktop/package.json', 'apps/desktop/src/main.tsx', 'apps/desktop/tsconfig.json', 'apps/desktop/vite.config.ts', 'apps/desktop/src-tauri/tauri.conf.json'],
-    '30c8d5752d2d19dd2d8ec014a0ce5b778ceeb71b': ['apps/desktop/src-tauri/Cargo.toml', 'apps/desktop/src-tauri/Cargo.lock', 'apps/desktop/src-tauri/src/main.rs'],
+    '4a70867203a70d3a85e2c141ef0dbb92bdff42e2': ['package.json', 'apps/desktop/tsconfig.json', 'apps/desktop/vite.config.ts'],
+    'PHX106_COMMIT': ['package-lock.json', 'apps/desktop/package.json', 'apps/desktop/src/main.tsx', 'apps/desktop/src-tauri/tauri.conf.json',
+      'apps/desktop/src-tauri/Cargo.toml', 'apps/desktop/src-tauri/Cargo.lock', 'apps/desktop/src-tauri/src/main.rs', 'apps/desktop/src-tauri/build.rs'],
     '829670b7713eacf246e3dd282e0e15f1c94c142f': ['pyproject.toml', 'uv.lock'],
   };
   for (const [commit, paths] of Object.entries(baselines)) {
@@ -228,15 +231,35 @@ test('PHX-080 leaves manifests, entry point and Tauri native security files byte
   }
 });
 
-test('desktop has no IPC permissions and keeps a restrictive production CSP', () => {
+test('desktop grants exactly the PHX-106 proxy commands and event listening, with an IPC-only production CSP', () => {
   const config = readJson('../apps/desktop/src-tauri/tauri.conf.json');
-  assert.deepEqual(config.app.security.capabilities.flatMap((capability) => capability.permissions), []);
-  assert.deepEqual(config.app.security.capabilities.flatMap((capability) => capability.windows), ['main']);
+  // PHX-106 (ADR-091): one capability, main window only, exactly these four permissions.
+  assert.deepEqual(config.app.security.capabilities, [{
+    identifier: 'desktop-backend-proxy',
+    description: "PHX-106/107: the two backend proxy commands and listening to the shell's backend events. No plugins, files, shell or HTTP.",
+    windows: ['main'],
+    permissions: ['allow-api-request', 'allow-backend-status', 'core:event:allow-listen', 'core:event:allow-unlisten'],
+  }]);
   assert.equal(config.app.withGlobalTauri ?? false, false);
   assert.deepEqual(config.plugins ?? {}, {});
-  assert.match(config.app.security.csp, /connect-src 'none'/);
-  assert.match(config.app.security.csp, /object-src 'none'/);
+  assert.equal(existsSync(new URL('../apps/desktop/src-tauri/capabilities', import.meta.url)), false);
+  // Only Tauri 2's IPC channels may be fetched: no backend, network or WebSocket origin.
+  assert.equal(config.app.security.csp, "default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; connect-src ipc: http://ipc.localhost");
+  const devConnect = config.app.security.devCsp.split(';').map((directive) => directive.trim()).filter((directive) => directive.startsWith('connect-src'));
+  assert.deepEqual(devConnect, ["connect-src 'self' ws://127.0.0.1:5173 ipc: http://ipc.localhost"]);
   assert.doesNotMatch(config.app.security.csp, /unsafe-inline|unsafe-eval|\*/);
+  // The ACL commands, the registered handlers and the crate's dependencies match exactly; no Tauri plugin.
+  const buildScript = readFileSync(new URL('../apps/desktop/src-tauri/build.rs', import.meta.url), 'utf8');
+  assert.deepEqual([...buildScript.matchAll(/\.commands\(&\[([^\]]*)\]\)/g)].map((match) => match[1]), ['"api_request", "backend_status"']);
+  const host = readFileSync(new URL('../apps/desktop/src-tauri/src/main.rs', import.meta.url), 'utf8');
+  assert.deepEqual([...host.matchAll(/generate_handler!\[([^\]]*)\]/g)].map((match) => match[1].replace(/\s+/g, ' ').replace(/,?\s*$/, '').trim()), ['proxy::api_request, backend::backend_status']);
+  const commands = ['backend.rs', 'proxy.rs', 'events.rs'].flatMap((file) => [...readFileSync(new URL(`../apps/desktop/src-tauri/src/${file}`, import.meta.url), 'utf8').matchAll(/#\[tauri::command\]\s*pub (?:async )?fn (\w+)/g)].map((match) => match[1]));
+  assert.deepEqual(commands.sort(), ['api_request', 'backend_status']);
+  const manifest = readFileSync(new URL('../apps/desktop/src-tauri/Cargo.toml', import.meta.url), 'utf8');
+  assert.doesNotMatch(manifest, /tauri-plugin/);
+  assert.match(manifest, /^tauri = \{ version = "2", features = \[\] \}$/m);
+  assert.deepEqual(Object.keys(readJson('../apps/desktop/package.json').dependencies), ['@tauri-apps/api', 'react', 'react-dom']);
+  assert.equal(readJson('../apps/desktop/package.json').dependencies['@tauri-apps/api'], '2.12.1');
 });
 
 test('development CSP allows only the React refresh preamble as an inline script', () => {
@@ -2037,3 +2060,6 @@ test('PHX-087 suppressed sources report counts unavailable rather than claiming 
   assert.equal((empty.match(/0 of 0 supplied/g) ?? []).length, 3);
   assert.doesNotMatch(empty, /Diagnostic counts unavailable/);
 });
+
+// PHX-106/107 (ADR-091, ADR-092): adapter, transport and native-boundary tests run in this file's node:test run.
+import './desktop_adapters.mjs';

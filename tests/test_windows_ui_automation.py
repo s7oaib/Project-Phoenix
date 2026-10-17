@@ -1508,6 +1508,22 @@ def test_source_architecture_and_immutability() -> None:
         ":(exclude)phoenix/api/routes/system.py",
         ":(exclude)phoenix/persistence/settings.py",
         ":(exclude)alembic/versions/0007_app_settings.py",
+        # PHX-106/107 (ADR-091, ADR-092) change these desktop files (hash-pinned in
+        # test_prompt_injection_defenses.py) and add the sidecar, proxy and adapters.
+        ":(exclude)apps/desktop/package.json",
+        ":(exclude)apps/desktop/src/main.tsx",
+        ":(exclude)apps/desktop/src-tauri/tauri.conf.json",
+        ":(exclude)apps/desktop/src-tauri/Cargo.toml",
+        ":(exclude)apps/desktop/src-tauri/Cargo.lock",
+        ":(exclude)apps/desktop/src-tauri/build.rs",
+        ":(exclude)apps/desktop/src-tauri/src/main.rs",
+        ":(exclude)apps/desktop/src/adapters/core.ts",
+        ":(exclude)apps/desktop/src/adapters/tauri.ts",
+        ":(exclude)apps/desktop/src/adapters/ConnectedApp.tsx",
+        ":(exclude)apps/desktop/src/adapters/connected.css",
+        ":(exclude)apps/desktop/src-tauri/src/backend.rs",
+        ":(exclude)apps/desktop/src-tauri/src/proxy.rs",
+        ":(exclude)apps/desktop/src-tauri/src/events.rs",
     ]
     assert not subprocess.check_output(
         ["git", "diff", "origin/main", "--", *paths], cwd=ROOT

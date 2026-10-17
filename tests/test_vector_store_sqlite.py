@@ -1355,9 +1355,10 @@ def test_scope_ast_frozen_events_and_unchanged_dependencies() -> None:
     # PHX-050 owns the authorized Python dependency promotion and its exact-diff
     # gate in test_browser_tool; PHX-033 still freezes desktop dependencies.
     for path in ("package.json", "package-lock.json"):
-        previous = subprocess.check_output(
-            ["git", "show", f"origin/main:{path}"], cwd=ROOT
-        )
+        # PHX-106/107 (ADR-091, ADR-092) intentionally added @tauri-apps/api to
+        # the lock; it stays pinned, at the PHX-106/107 implementation commit.
+        base = "PHX106_COMMIT" if path == "package-lock.json" else "origin/main"
+        previous = subprocess.check_output(["git", "show", f"{base}:{path}"], cwd=ROOT)
         assert (ROOT / path).read_bytes().replace(b"\r\n", b"\n") == previous.replace(
             b"\r\n", b"\n"
         )
