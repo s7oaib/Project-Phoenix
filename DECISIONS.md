@@ -4153,8 +4153,8 @@ Real-uvicorn WebSockets needed a new dependency (ADR-084 Q3). The owner chose
 
 ## ADR-089 — REST API v1 and the settable document workspace
 
-Status: Proposed (owner decisions 2026-10-17; recommendations R1–R24 in
-`tickets/PHX-104-rest-api-v1.md` await owner confirmation)
+Status: Accepted (owner decisions 2026-10-17; the owner confirmed recommendations
+R1–R24 in `tickets/PHX-104-rest-api-v1.md` on 2026-10-17)
 Date: 2026-10-17
 Ticket: PHX-104
 

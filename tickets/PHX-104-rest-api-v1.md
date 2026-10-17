@@ -1,6 +1,6 @@
 # PHX-104 — REST API v1
 
-Status: IN_PROGRESS (recommendations R1–R24 are for owner confirmation)
+Status: DONE (the owner confirmed recommendations R1–R24 on 2026-10-17)
 Phase: 10 — Product Integration (milestone M1, backend)
 Branch: `feature/PHX-104-rest-api-v1` (local commits only; no push, no PR)
 Base: `feature/PHX-103-runtime-events-ws` `c986b63`; later merged with main `751eb43` (PHX-103, PR #76, merged) and `origin/fix/PHX-103-ws-cleanup` (PR #77, the PHX-103 flake fix)
@@ -30,7 +30,7 @@ Expose the backend to the desktop shell over authenticated REST: chat, missions,
 - FastAPI 0.142 keeps an included router as one `_IncludedRouter` entry in `app.routes`, so a route listing must look inside it (`original_router.routes`).
 - `phoenix/api/security.py` (frozen) maps unknown error codes to the generic message "Request failed.", so new codes reuse the envelope unchanged.
 
-## Recommendations (R1–R24, for owner confirmation)
+## Recommendations (R1–R24, confirmed by the owner 2026-10-17)
 
 - **R1 — Placement.** Routes in the new `phoenix/api/routes/` package: `common.py` (services, errors, pagination), `schemas.py`, `missions.py` (chat, missions, conversations), `permissions.py` (decisions, grants), `system.py` (agents, models, settings). The workspace rules and `WorkspaceService` in the new `phoenix/api/workspace.py`; the `app_settings` row and `SettingsStore` in the new `phoenix/persistence/settings.py`. The routes import `server.py` (`BackendServices`, the readiness probe), so `build_server_app` imports the routes when it runs, avoiding an import cycle.
 - **R2 — Chat.** `{"text", "conversation_id"?, "path"?}`. Without `conversation_id` a conversation is created. `path` is `direct` (default) or `complex` and is the caller's choice until PHX-105 triage replaces it; `complex` plans steps, including document reads when a workspace is set. Text: 1–16,000 characters and not blank.
@@ -72,7 +72,7 @@ Expose the backend to the desktop shell over authenticated REST: chat, missions,
 - Pagination is cut in memory (R5).
 - `GET /grants?include_inactive=true` lists every revoked and expired grant ever stored; grants are not bounded by the 30-day retention.
 - `GET /missions/{id}` loads all of the conversation's messages and missions on each poll to find the texts and the re-run.
-- **Follow-up ticket: FilesystemTool root hardening.** Make FilesystemTool check its own root on every call, not only when it is constructed: `lstat` the root, refuse it if it is a symlink, junction or any other reparse point, and require `realpath(root) == root` (case-insensitively on Windows) before resolving any target, failing `root_unavailable` otherwise. Today `_target` calls `root.resolve(strict=True)`, which follows a junction that replaced the root after validation; PHX-104 narrows that window by validating the root again before every mission, but a swap during a mission is still followed. `phoenix/tools/filesystem.py` is frozen, so this needs its own ticket and pin change.
+- **Follow-up ticket PHX-048: FilesystemTool root hardening** (owner-approved 2026-10-17, scheduled before PHX-112). Make FilesystemTool check its own root on every call, not only when it is constructed: `lstat` the root, refuse it if it is a symlink, junction or any other reparse point, and require `realpath(root) == root` (case-insensitively on Windows) before resolving any target, failing `root_unavailable` otherwise. Today `_target` calls `root.resolve(strict=True)`, which follows a junction that replaced the root after validation; PHX-104 narrows that window by validating the root again before every mission, but a swap during a mission is still followed. `phoenix/tools/filesystem.py` is frozen, so this needs its own ticket and pin change.
 - New error codes show the generic message "Request failed." because `security.py` is frozen.
 - On this machine a symlink needs a privilege, so the symlink case skips itself; junctions are created and refused.
 
