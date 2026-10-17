@@ -1715,25 +1715,29 @@ PHX_017_PATHS = ("phoenix/models/ollama.py",)
 # intentionally changed both again, plus tool_steps.py (frozen at origin/main
 # since PHX-046 merged); all three stay pinned, at the latest PHX-047
 # implementation commit (round 5; earlier rounds were f600f12, 73a4f00,
-# e47834a and 327f4e4), so each path has exactly one baseline.
+# e47834a and 327f4e4), so each path has exactly one baseline. PHX-103 moved
+# runtime.py and tool_steps.py to its own pin (below).
 PHX_047_COMMIT = "47aa471712c6c5ea3452cf5a45c3ed390470e185"
-PHX_047_PATHS = (
-    "phoenix/agents/prompts.py",
+PHX_047_PATHS = ("phoenix/agents/prompts.py",)
+# PHX-102 (ADR-086) intentionally changed server.py (MissionService wiring) and
+# alembic/env.py (row registration); env.py stays pinned at the PHX-102
+# implementation commit, and PHX-103 moved server.py to its own pin (below).
+PHX_102_COMMIT = "9ccc5d4522c513832f85da49c44a236284aab7b7"
+PHX_102_PATHS = ("alembic/env.py",)
+# PHX-103 (ADR-087) intentionally changed runtime.py and tool_steps.py (event
+# publishing), server.py (WS /events wiring) and missions.py (mission events);
+# all four stay pinned, at the PHX-103 implementation commit.
+PHX_103_COMMIT = "829670b7713eacf246e3dd282e0e15f1c94c142f"
+PHX_103_PATHS = (
     "phoenix/agents/runtime.py",
     "phoenix/agents/tool_steps.py",
-)
-# PHX-102 (ADR-086) intentionally changed server.py (MissionService wiring) and
-# alembic/env.py (row registration); both stay pinned, at the PHX-102
-# implementation commit.
-PHX_102_COMMIT = "9ccc5d4522c513832f85da49c44a236284aab7b7"
-PHX_102_PATHS = (
     "phoenix/api/server.py",
-    "alembic/env.py",
+    "phoenix/api/missions.py",
 )
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
-    # PHX-072's dependency gate owns manifest/lock exactness.
+    # PHX-103's dependency gate (test_events_ws.py) owns manifest/lock exactness.
     protected = [
         path
         for path in subprocess.check_output(
@@ -1745,11 +1749,13 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_017_PATHS
         and path not in PHX_047_PATHS
         and path not in PHX_102_PATHS
+        and path not in PHX_103_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
     baselines += [(PHX_047_COMMIT, path) for path in PHX_047_PATHS]
     baselines += [(PHX_102_COMMIT, path) for path in PHX_102_PATHS]
+    baselines += [(PHX_103_COMMIT, path) for path in PHX_103_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
