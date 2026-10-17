@@ -1716,9 +1716,10 @@ PHX_017_PATHS = ("phoenix/models/ollama.py",)
 # since PHX-046 merged); all three stay pinned, at the latest PHX-047
 # implementation commit (round 5; earlier rounds were f600f12, 73a4f00,
 # e47834a and 327f4e4), so each path has exactly one baseline. PHX-103 moved
-# runtime.py and tool_steps.py to its own pin (below).
+# runtime.py and tool_steps.py to its own pin (below); PHX-105 moved
+# prompts.py to its own pin (below), so nothing stays on the PHX-047 commit.
 PHX_047_COMMIT = "47aa471712c6c5ea3452cf5a45c3ed390470e185"
-PHX_047_PATHS = ("phoenix/agents/prompts.py",)
+PHX_047_PATHS: tuple[str, ...] = ()
 # PHX-102 (ADR-086) intentionally changed server.py (MissionService wiring) and
 # alembic/env.py (row registration); PHX-103 moved server.py and PHX-104 moved
 # env.py to their own pins (below), so nothing stays on the PHX-102 commit.
@@ -1730,24 +1731,37 @@ PHX_102_PATHS: tuple[str, ...] = ()
 # mission_events.py (then on main). runtime.py, tool_steps.py,
 # mission_events.py and event_stream.py stay pinned, at the latest PHX-103
 # implementation commit (earlier rounds: 829670b, 10c1723). PHX-104 moved
-# server.py and missions.py to its own pin (below).
+# server.py and missions.py, and PHX-105 runtime.py and mission_events.py, to
+# their own pins (below).
 PHX_103_COMMIT = "023be4ea7cd71ff8ff5c74b0ff8992cf7bb0c134"
 PHX_103_PATHS = (
-    "phoenix/agents/runtime.py",
     "phoenix/agents/tool_steps.py",
-    "phoenix/agents/mission_events.py",
     "phoenix/api/event_stream.py",
 )
 # PHX-104 (ADR-089) intentionally changed server.py (REST routes, settings
 # store and workspace wiring), missions.py (use_runtime; a mission keeps its
 # runtime) and alembic/env.py (settings row registration); all three stay
 # pinned, at the latest PHX-104 implementation commit (review fixes; the first
-# round was f9a075c).
+# round was f9a075c). PHX-105 moved missions.py to its own pin (below).
 PHX_104_COMMIT = "7af605e26afcaf0e7000ee44d312e741a9107b2b"
 PHX_104_PATHS = (
     "phoenix/api/server.py",
-    "phoenix/api/missions.py",
     "alembic/env.py",
+)
+# PHX-105 (ADR-090) intentionally changed prompts.py (v4 TRIAGE_SYSTEM),
+# runtime.py (triage, trace fields), mission_events.py (triage allowlist),
+# api/missions.py (optional path, decisions, re-runs), persistence/missions.py
+# (nullable path, triage_outcome) and the REST routes and schemas; all stay
+# pinned, at the PHX-105 implementation commit.
+PHX_105_COMMIT = "e34142ca0062dc14c05a5a1d18720b64446cdaa7"
+PHX_105_PATHS = (
+    "phoenix/agents/prompts.py",
+    "phoenix/agents/runtime.py",
+    "phoenix/agents/mission_events.py",
+    "phoenix/api/missions.py",
+    "phoenix/api/routes/missions.py",
+    "phoenix/api/routes/schemas.py",
+    "phoenix/persistence/missions.py",
 )
 
 
@@ -1766,6 +1780,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_102_PATHS
         and path not in PHX_103_PATHS
         and path not in PHX_104_PATHS
+        and path not in PHX_105_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1773,6 +1788,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_102_COMMIT, path) for path in PHX_102_PATHS]
     baselines += [(PHX_103_COMMIT, path) for path in PHX_103_PATHS]
     baselines += [(PHX_104_COMMIT, path) for path in PHX_104_PATHS]
+    baselines += [(PHX_105_COMMIT, path) for path in PHX_105_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

@@ -4329,7 +4329,7 @@ Design:
   `mission_events.py` (from the PHX-103 pin), `api/missions.py` (from the
   PHX-104 pin) and `persistence/missions.py`, `api/routes/missions.py` and
   `api/routes/schemas.py` (from `origin/main`) move to the PHX-105
-  implementation commit (`PHX_105_COMMIT` / `PHX_105_PATHS`), landed as an
+  implementation commit (`PHX_105_COMMIT` / `PHX_105_PATHS`, `e34142ca0062dc14c05a5a1d18720b64446cdaa7`), landed as an
   implementation commit then a pin commit. Head expectations move to
   `0008_mission_triage`; the two `git diff origin/main` guards exclude the
   new migration by name.
