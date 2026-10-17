@@ -1726,8 +1726,9 @@ PHX_102_COMMIT = "9ccc5d4522c513832f85da49c44a236284aab7b7"
 PHX_102_PATHS = ("alembic/env.py",)
 # PHX-103 (ADR-087) intentionally changed runtime.py and tool_steps.py (event
 # publishing), server.py (WS /events wiring) and missions.py (mission events);
-# all four stay pinned, at the PHX-103 implementation commit.
-PHX_103_COMMIT = "829670b7713eacf246e3dd282e0e15f1c94c142f"
+# all four stay pinned, at the latest PHX-103 implementation commit (review
+# round; the first round was 829670b).
+PHX_103_COMMIT = "10c17237e0340df9b88041335fbc7b78a8e1e693"
 PHX_103_PATHS = (
     "phoenix/agents/runtime.py",
     "phoenix/agents/tool_steps.py",

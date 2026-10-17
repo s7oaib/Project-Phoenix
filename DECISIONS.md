@@ -4117,7 +4117,7 @@ Design:
   `launcher.py` is unchanged.
 - **Frozen files.** `runtime.py` and `tool_steps.py` (PHX-047 pin), `server.py`
   (PHX-102 pin) and `missions.py` (`origin/main`) are pinned to the PHX-103
-  implementation commit (`PHX_103_COMMIT` / `PHX_103_PATHS`, `829670b7713eacf246e3dd282e0e15f1c94c142f`), landed as an
+  implementation commit (`PHX_103_COMMIT` / `PHX_103_PATHS`, review round `10c17237e0340df9b88041335fbc7b78a8e1e693`; first round `829670b`), landed as an
   implementation commit and then a pin commit; the PR must merge with a merge
   commit. `prompts.py` stays on PHX-047 and `alembic/env.py` on PHX-102. The
   two `git diff origin/main` guards exclude `phoenix/api/event_stream.py`.

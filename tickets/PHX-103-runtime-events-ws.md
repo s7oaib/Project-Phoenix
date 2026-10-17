@@ -70,7 +70,7 @@ New event types; replay or resumable streams; REST routes or answer text (PHX-10
 
 ## Frozen-file handling
 
-- `runtime.py` and `tool_steps.py` leave the PHX-047 pin, `server.py` leaves the PHX-102 pin and `missions.py` leaves `origin/main`. All four are pinned to the PHX-103 implementation commit (`PHX_103_COMMIT` / `PHX_103_PATHS`, `829670b7713eacf246e3dd282e0e15f1c94c142f`) in a separate pin commit; `prompts.py` stays on PHX-047 and `alembic/env.py` on PHX-102, so each path has exactly one baseline. The PR must merge with a merge commit.
+- `runtime.py` and `tool_steps.py` leave the PHX-047 pin, `server.py` leaves the PHX-102 pin and `missions.py` leaves `origin/main`. All four are pinned to the PHX-103 implementation commit (`PHX_103_COMMIT` / `PHX_103_PATHS`, review round `10c17237e0340df9b88041335fbc7b78a8e1e693`; first round `829670b`) in a separate pin commit; `prompts.py` stays on PHX-047 and `alembic/env.py` on PHX-102, so each path has exactly one baseline. The PR must merge with a merge commit. `pyproject.toml` and `uv.lock` stay pinned at `829670b` in `tests/workspace.test.mjs`; they have not changed since. `pyproject.toml` and `uv.lock` stay pinned at `829670b` in `tests/workspace.test.mjs`; they have not changed since.
 - `responders.py` is byte-identical.
 - The two `git diff origin/main` guards exclude `phoenix/api/event_stream.py` by name.
 - `tests/test_api_server.py` now expects the `/events` route.
