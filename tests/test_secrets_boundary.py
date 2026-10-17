@@ -934,7 +934,7 @@ def test_static_isolation_and_event_schema() -> None:
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0007_app_settings"]
+    ).get_heads() == ["0008_mission_triage"]
     assert set(module.__all__) == {
         "SecretReference",
         "SecretMaterial",

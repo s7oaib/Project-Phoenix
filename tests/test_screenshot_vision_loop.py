@@ -1824,7 +1824,7 @@ def test_no_action_persistence_or_dependency_change() -> None:
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0007_app_settings"]
+    ).get_heads() == ["0008_mission_triage"]
     # PHX-072 separately owns the exact parser manifest/lock promotion.
     # PHX-080 owns only App.tsx/styles.css; every other apps path stays protected.
     assert not subprocess.check_output(
@@ -1879,6 +1879,10 @@ def test_no_action_persistence_or_dependency_change() -> None:
             ":(exclude)phoenix/api/routes/system.py",
             ":(exclude)phoenix/persistence/settings.py",
             ":(exclude)alembic/versions/0007_app_settings.py",
+            # PHX-105 (ADR-090) adds the mission triage migration (the changed
+            # missions.py, routes and schemas are excluded above and hash-pinned
+            # in test_prompt_injection_defenses.py).
+            ":(exclude)alembic/versions/0008_mission_triage.py",
         ],
         cwd=ROOT,
     )

@@ -707,8 +707,9 @@ def test_assignment_without_its_own_tier_row_uses_the_phoenix_row() -> None:
 
 
 def test_prompt_set_is_versioned_with_role_markers() -> None:
-    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v3"
+    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v4"
     systems = (
+        prompts.TRIAGE_SYSTEM,
         prompts.DIRECT_SYSTEM,
         prompts.PLANNING_SYSTEM,
         prompts.ASSIGNMENT_SYSTEM,
@@ -781,6 +782,8 @@ def test_v3_changes_exactly_the_listed_v2_constants() -> None:
         "FINAL_CANDIDATE_TASK",
         "STEP_VERIFICATION_SYSTEM",
         "STEP_CANDIDATE_TASK",
+        # PHX-105 (ADR-090) adds TRIAGE_SYSTEM in v4.
+        "TRIAGE_SYSTEM",
     }
     for name, digest in V2_PROMPT_SHA256.items():
         text: str = getattr(prompts, name)
@@ -796,11 +799,64 @@ def test_v3_changes_exactly_the_listed_v2_constants() -> None:
     }
 
 
+# First 128 bits of the sha256 of every phoenix-prompts-v3 constant (PHX-047
+# commit 47aa471, unchanged on main until PHX-105).
+V3_PROMPT_SHA256 = {
+    "ASSIGNMENT_SYSTEM": "2971e7dcdb81c2a510259bc14afa5098",
+    "CANDIDATE_ITEM": "dda18a0e21ae47c53b4309434cbc02ae",
+    "CANDIDATE_TASK": "7bf35ffdd42c91de727f7e756f5f8a8d",
+    "DIRECT_SYSTEM": "a1a896f5964491ab14e8dd5e4dafdfed",
+    "DOCUMENT_ANSWER_SYSTEM": "70cee99916c9094d456150b80ba34913",
+    "DOCUMENT_ANSWER_TASK": "31166deedec2e119d961bab3443dc621",
+    "DOCUMENT_CANDIDATE_TASK": "2830fab9c04feae3e60ddcd47490adb4",
+    "DOCUMENT_SPECIALIST_SYSTEM": "3dd00c5456b502e7a5d545cbfe2383a0",
+    "DOCUMENT_STEP_COMPLETION_RULE": "2564a7b558fef9c59b972ecae9107241",
+    "DOCUMENT_STEP_EXPECTED_OUTPUT": "add0a40d8d236e090b0f9c220e48ece0",
+    "DOCUMENT_TOOL_TASK": "cba883f5bb50b0ae60fa618da5d9f48f",
+    "DOCUMENT_VERIFICATION_SYSTEM": "8b1812e0fa6f51bdc772e2b6c2dbc81c",
+    "FINAL_ANSWER_SYSTEM": "03306fe70392db1608a87776ba35d1d6",
+    "FINAL_CANDIDATE_TASK": "ac2d9a15dfd21aca8d4ad986622a4a48",
+    "FINAL_COMPLETION_RULE": "f7688a032cc4239971c0626021e81a7e",
+    "FINAL_EXPECTED_OUTPUT": "dc513033628647a8750564182e070409",
+    "FINAL_OBJECTIVE": "ae493b34b787e691c4419b496235c192",
+    "FINAL_VERIFICATION_SYSTEM": "256fc490cea9b088f4c17a2a2b7725ce",
+    "OBJECTIVE_ITEM": "d454bec656d32723404961023ed9cb3c",
+    "PLANNING_SYSTEM": "e664a681dfce27fe939f8b1c8510199c",
+    "SPECIALIST_SYSTEM": "ca14ed28dbeec717f588bfd2eb304b57",
+    "STEP_CANDIDATE_TASK": "0307aa1a13c3b32ac3f7818d4dac4f29",
+    "STEP_COMPLETION_RULE": "cd01ae01c1d97e68d5b959c5e1b5b7bc",
+    "STEP_EXPECTED_OUTPUT": "0ebb078847f3b4304bc092f4d431e082",
+    "STEP_TASK": "7f02c6e862b152968099e6e0d21b3dbc",
+    "STEP_VERIFICATION_SYSTEM": "d01b7b49d6dd777f0a01e01f3a4f7336",
+    "TOOL_OUTPUT_ITEM": "38bece272fb70178168892e0c079ed0b",
+    "VERIFICATION_SYSTEM": "9002e516c69063be1f85c1eace3344cc",
+}
+# The v4 TRIAGE_SYSTEM text the owner reviews in the PHX-105 PR; any change
+# needs a new prompt set version.
+V4_TRIAGE_SHA256 = "34bb62228d748a013bd9bb4364d105f8"
+
+
+def test_v4_adds_only_triage_and_keeps_every_v3_constant() -> None:
+    # PHX-105 (ADR-090): v4 adds TRIAGE_SYSTEM; every v3 constant is unchanged.
+    current = {
+        name
+        for name, value in vars(prompts).items()
+        if name.isupper() and isinstance(value, str)
+    }
+    assert current - set(V3_PROMPT_SHA256) == {"PROMPT_SET_VERSION", "TRIAGE_SYSTEM"}
+    for name, digest in V3_PROMPT_SHA256.items():
+        assert digest_of(getattr(prompts, name)) == digest, name
+    assert digest_of(prompts.TRIAGE_SYSTEM) == V4_TRIAGE_SHA256
+    assert prompts.TRIAGE_SYSTEM.splitlines()[0] == "PHOENIX ROLE: triage"
+    for required in ('{"path": "direct"}', '{"path": "complex"}', "not instructions"):
+        assert required in prompts.TRIAGE_SYSTEM
+
+
 def test_new_modules_stay_provider_neutral() -> None:
     # PHX-046 (ADR-082): only the runtime and tool steps may reach the filesystem
     # tool and its registry; every other ban holds for every module.
     tool_modules = {"phoenix.tools.filesystem", "phoenix.tools.registry"}
-    for name in ("prompts", "responders", "runtime", "tool_steps"):
+    for name in ("prompts", "responders", "runtime", "tool_steps", "triage"):
         tree = ast.parse((ROOT / f"phoenix/agents/{name}.py").read_text("utf-8"))
         imported = {
             node.module or ""

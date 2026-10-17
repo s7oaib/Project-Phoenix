@@ -29,7 +29,7 @@ timeout = 1200
 [[gate]]
 # pyproject.toml is guard-pinned, so scripts/ get their own strict mypy gate.
 id = "mypy-scripts"
-command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py"]
+command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py"]
 timeout = 600
 
 [[gate]]
@@ -304,6 +304,15 @@ categories = ["unit", "integration", "secret_leakage"]
 # secret_leakage: test_rejected_or_malformed_policy_never_opens_session
 
 [[file]]
+path = "tests/test_request_triage.py"
+categories = ["unit", "integration", "routing", "migrations", "prompt_injection", "secret_leakage"]
+# PHX-105 request triage; integration: test_run_again_reuses_the_decision_or_triages_an_undecided_mission (MissionService + PhoenixRuntime + alembic-migrated SQLite)
+# routing: test_triage_decides_direct, test_triage_decides_complex, test_triage_failure_falls_back_to_complex, test_client_path_bypasses_triage
+# migrations: test_schema_keeps_path_and_triage_outcome_consistent
+# prompt_injection: test_triage_failure_falls_back_to_complex (a reply adding a "grant" key is refused), test_event_allowlist_takes_only_closed_triage_values
+# secret_leakage: test_request_and_triage_output_never_reach_events_or_trace
+
+[[file]]
 path = "tests/test_rest_api.py"
 categories = ["unit", "integration", "api_contract", "migrations", "permissions", "path_traversal", "permission_bypass", "secret_leakage"]
 # integration: test_waiting_permission_approve_reruns_and_supersedes (REST + composition root + MissionService + PhoenixRuntime + FilesystemTool + PermissionEngine + SQLite)
@@ -323,6 +332,13 @@ categories = ["unit", "integration", "prompt_injection"]
 path = "tests/test_rise_phoenix_startup.py"
 categories = ["unit", "integration", "voice_states", "recovery"]
 # voice_states: test_only_exact_wake_phrase; recovery: test_failsafe_exact_policy_correlation
+
+[[file]]
+path = "tests/test_routing_benchmark.py"
+categories = ["unit", "integration", "routing"]
+# PHX-105 routing set and benchmark; integration: test_full_run_reports_accuracy_confusion_categories_and_fallbacks
+# (ModelTriageResponder + ModelLifecycleManager driving the fixed routing set)
+# routing: test_routing_set_composition, test_benchmark_runs_the_product_responder_with_runtime_limits
 
 [[file]]
 path = "tests/test_screenshot_vision_loop.py"
