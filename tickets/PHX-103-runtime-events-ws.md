@@ -1,6 +1,6 @@
 # PHX-103 — Runtime events and `WS /events`
 
-Status: IN_PROGRESS (implemented; awaiting owner confirmation of R1–R16 and the merge)
+Status: DONE (the owner confirmed recommendations R1–R16 on 2026-10-17)
 Phase: 10 — Product Integration (milestone M1, backend)
 Branch: `feature/PHX-103-runtime-events-ws` (local commits only; no push, no PR)
 Base: main `4c649d7` (includes PHX-100, PHX-101 and PHX-102)
@@ -31,7 +31,7 @@ Give the desktop UI live, observable mission progress (INV-019, INV-022) without
 - `tests/test_document_generation.py` (PHX-073) owned current manifest/lock exactness (the brief calls it the PHX-072 gate; PHX-073 had already turned PHX-072's gate into fixed history).
 - `tests/test_retrieval_context.py` failed on main `4c649d7` itself: its `alembic/env.py` byte guard strips the PHX-102 registration from the current file only, but main now contains it too.
 
-## Recommendations (R1–R16, for owner confirmation)
+## Recommendations (R1–R16, confirmed by the owner 2026-10-17)
 
 - **R1 — Placement.** The allowlist and publisher live in the new `phoenix/agents/mission_events.py`, shared by the runtime and the service; `phoenix/agents` stays free of API, persistence, tool and provider imports. The bridge is the new `phoenix/api/event_stream.py`; the route is in `server.py`.
 - **R2 — Sink and drops.** `EventSink` is a protocol with `async publish(event)`, which `EventBus` satisfies; it must refuse rather than wait. `EventPublisher` swallows anything a sink or the allowlist raises (only cancellation propagates) and counts it: `PhoenixRuntime.dropped_events` and `MissionService.dropped_events`. Production wires the `EventStream`, which never raises: a bus-full refusal is counted in `EventStream.dropped_events` and closes every client with 1013 (R11). Nothing reaches `MissionResult` or `MissionTrace`.

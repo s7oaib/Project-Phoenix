@@ -4035,8 +4035,8 @@ No routes (PHX-104) and no events (PHX-103). No new dependencies.
 
 ## ADR-087 — Content-free runtime events and the `WS /events` stream
 
-Status: Proposed (owner decisions 2026-10-17; recommendations R1–R16 in
-`tickets/PHX-103-runtime-events-ws.md` await confirmation)
+Status: Accepted (owner decisions 2026-10-17; the owner confirmed recommendations
+R1–R16 in `tickets/PHX-103-runtime-events-ws.md` on 2026-10-17)
 Date: 2026-10-17
 Ticket: PHX-103
 
