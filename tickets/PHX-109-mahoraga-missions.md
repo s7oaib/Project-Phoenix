@@ -136,4 +136,16 @@ The earlier run was made while an exe build ran in parallel.
 - Success is higher.
 - Accuracy is lower, because 3 DIRECT-routed answers were wrong (arithmetic chain, word count, code one-liner). DIRECT answers depend on triage and the model, not on MAHORAGA.
 - With 16 tasks and one run, run-to-run variance exceeds the effect.
-- A 3-run comparison with and without MAHORAGA is being measured for the FYP report.
+
+## 3-run comparison (2026-10-18, idle machine, 48 missions each)
+
+The two variants ran back to back: with MAHORAGA on PHX-109 plus the configuration (2) runner, and without it on the configuration (2) runner alone, which is based on main `1b51f26`. Both used the same task set and the default triage path. Evidence is in `validation/PHX-FYP-config2-3runs-with-mahoraga-20261018-051123` and `...-without-mahoraga-20261018-054420`.
+
+| Variant | Completed | Failed | Success | Accuracy | provider_unavailable | not_json / schema / truncated | verification_failed | Median latency |
+|---|---|---|---|---|---|---|---|---|
+| Without MAHORAGA | 29 | 19 | 60% | 50% | 8 | 3 / 4 / 1 | 3 | 1.30 s |
+| **With MAHORAGA** | **40** | **8** | **83%** | **64%** | **1** | 2 / 2 / 0 | 3 | 1.24 s |
+
+- **Success:** MAHORAGA raises success by 23 points and accuracy by 14 points.
+- **Where the gain comes from:** mostly recovering transient Ollama drops, which still happen on an idle machine during model swaps on the 6 GB GPU (8 → 1), plus structural retries.
+- **Unchanged:** `verification_failed` is the same (3 → 3), because LEVI rejections are never retried (INV-008). Latency does not change.
