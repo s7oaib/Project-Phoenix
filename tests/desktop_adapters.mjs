@@ -88,7 +88,7 @@ function backendRoutes(overrides = {}) {
     [`GET /conversations/${CONV}/messages?limit=1`]: { status: 200, body: page([], 2) },
     [`GET /conversations/${CONV}/messages?limit=64&offset=0`]: { status: 200, body: page([
       { message_id: MSG1, role: 'user', text: 'Summarize notes.txt', created_at: AT },
-      { message_id: MSG2, role: 'phoenix', text: 'notes.txt lists three tasks.', created_at: AT }]) },
+      { message_id: `${RERUN}:answer`, role: 'phoenix', text: 'notes.txt lists three tasks.', created_at: AT }]) },
     'POST /chat': { status: 202, body: { mission_id: MISSION, conversation_id: CONV, status: 'queued', rerun_of: null } },
     [`POST /permissions/${REQ}/approve`]: { status: 202, body: { request_id: REQ, duration: 'session', superseded_mission_id: MISSION, mission_id: RERUN } },
     [`POST /permissions/${REQ}/deny`]: { status: 200, body: { request_id: REQ, mission_id: MISSION, status: 'failed', failure_code: 'permission_denied' } },
@@ -164,7 +164,7 @@ test('PHX-107 every live port snapshot is admitted by the unchanged App readers'
   const chat = app.readChatPort(view.chatPort);
   assert.equal(chat.status, 'connected');
   assert.deepEqual(plain(app.boundedMessages(chat.messages)), { omitted: false, messages: [
-    { id: MSG1, role: 'user', content: 'Summarize notes.txt' }, { id: MSG2, role: 'assistant', content: 'notes.txt lists three tasks.' }] });
+    { id: MSG1, role: 'user', content: 'Summarize notes.txt' }, { id: `${RERUN}:answer`, role: 'assistant', content: '[Verified by LEVI]\nnotes.txt lists three tasks.' }] });
 
   const permissions = app.readPermissionPort(view.permissionPort);
   assert.equal(permissions.rejected, false);
@@ -298,8 +298,10 @@ test('PHX-107 backend states map to honest port statuses and degraded codes', as
 
 test('PHX-107 long answers become ordered parts and only the latest 64 transcript entries are kept', () => {
   const long = 'a'.repeat(core.MESSAGE_PART) + 'b'.repeat(10);
-  const messages = core.toChatMessages(page([{ message_id: MSG1, role: 'phoenix', text: long, created_at: AT }, { message_id: MSG2, role: 'system', text: 'x' }]));
-  assert.deepEqual(plain(messages.map((message) => [message.id, message.content.length])), [[`${MSG1}:1`, 4000], [`${MSG1}:2`, 10]]);
+  const messages = core.toChatMessages(page([{ message_id: `${RERUN}:answer`, role: 'phoenix', text: long, created_at: AT }, { message_id: MSG2, role: 'system', text: 'x' }]), new Map([[RERUN, 'verified']]));
+  // The 19-character badge "[Verified by LEVI]\n" leads the first part; nothing is clipped.
+  assert.deepEqual(plain(messages.map((message) => [message.id, message.content.length])), [[`${RERUN}:answer:1`, 4000], [`${RERUN}:answer:2`, 29]]);
+  assert.ok(messages[0].content.startsWith('[Verified by LEVI]\n'));
   assert.equal(app.boundedMessages(messages).omitted, false);
   const many = Array.from({ length: 70 }, (_, index) => ({ message_id: `${String(index).padStart(8, '0')}-0000-4000-8000-000000000000`, role: 'user', text: `m${index}` }));
   const window = core.toChatMessages(page(many));
@@ -380,6 +382,77 @@ test('PHX-107 ConnectedApp renders the connection bar and the live App without i
   const degraded = renderToStaticMarkup(createElement(connected.ConnectionBar, { connection: { ...store.getSnapshot().connection, backend: { state: 'degraded', code: 'python_not_found' } }, store }));
   assert.match(degraded, /Backend unavailable\. The backend Python environment was not found/);
   assert.doesNotMatch(degraded, /Document workspace/);
+});
+
+// ---- consolidated review M1: an unverified answer never looks verified
+
+function completed(overrides) {
+  return detail({ status: 'completed', permission_request: null, ...overrides });
+}
+
+test('M1 verification labels: complex+completed is verified, direct and direct fallback are unverified', () => {
+  const verified = core.readMission(completed({ path: 'complex', task_states: ['created', 'planning', 'running', 'verifying', 'completed'] }));
+  assert.equal(verified.verification, 'verified');
+  const direct = core.readMission(completed({ path: 'direct', task_id: null, task_states: [] }));
+  assert.equal(direct.verification, 'unverified_direct');
+  // PHX-109 fallback: the mission completed on the DIRECT path while its COMPLEX task failed.
+  const fallback = core.readMission(completed({ path: 'complex', task_states: ['created', 'planning', 'failed'] }));
+  assert.equal(fallback.verification, 'unverified_direct_fallback');
+  assert.equal(core.readMission(completed({ path: null, task_states: [] })).verification, 'unverified_unknown');
+  assert.equal(core.readMission(completed({ path: 'complex', task_states: [] })).verification, 'unverified_unknown');
+  assert.equal(core.readMission(detail()).verification, undefined); // not completed: no label
+  assert.equal(core.verificationOf({ status: 'failed', path: 'complex', taskStates: ['failed'] }), undefined);
+});
+
+test('M1 the top bar states verification in text and never calls a direct fallback planned steps', () => {
+  const connected = load('adapters/ConnectedApp.tsx');
+  const line = (overrides) => connected.missionLine(core.readMission(completed(overrides)));
+  assert.equal(line({ path: 'complex', task_states: ['running', 'completed'] }),
+    'Latest mission 11111111: completed · verified · planned steps (PHOENIX decided)');
+  assert.equal(line({ path: 'complex', task_states: ['planning', 'failed'] }),
+    'Latest mission 11111111: completed · unverified (direct fallback)');
+  assert.doesNotMatch(line({ path: 'complex', task_states: ['planning', 'failed'] }), /planned steps/);
+  assert.equal(line({ path: 'direct', triage_outcome: 'client', task_states: [] }),
+    'Latest mission 11111111: completed · unverified · direct');
+  assert.match(connected.missionLine(core.readMission(detail())), /waiting for your permission[^·]*· planned steps/);
+});
+
+test('M1 every PHOENIX answer in Chat carries a text badge from its own mission', async () => {
+  const FALLBACK = '88888888-8888-4888-8888-888888888888';
+  const DIRECT = '99999999-9999-4999-8999-999999999999';
+  const LOST = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const answers = [
+    { message_id: MSG1, role: 'user', text: 'Q', created_at: AT },
+    { message_id: `${RERUN}:answer`, role: 'phoenix', text: 'verified answer', created_at: AT },
+    { message_id: `${FALLBACK}:answer`, role: 'phoenix', text: 'fallback answer', created_at: AT },
+    { message_id: `${DIRECT}:answer`, role: 'phoenix', text: 'direct answer', created_at: AT },
+    { message_id: `${LOST}:answer`, role: 'phoenix', text: 'unknown answer', created_at: AT },
+  ];
+  const { store, transport, scheduler } = await readyStore(backendRoutes({
+    [`GET /conversations/${CONV}/messages?limit=1`]: { status: 200, body: page([], answers.length) },
+    [`GET /conversations/${CONV}/messages?limit=64&offset=0`]: { status: 200, body: page(answers) },
+    [`GET /missions/${FALLBACK}`]: { status: 200, body: completed({ mission_id: FALLBACK, path: 'complex', task_states: ['planning', 'failed'] }) },
+    [`GET /missions/${DIRECT}`]: { status: 200, body: completed({ mission_id: DIRECT, path: 'direct', task_id: null, task_states: [] }) },
+  }));
+  const chat = app.boundedMessages(app.readChatPort(store.getSnapshot().chatPort).messages);
+  assert.equal(chat.omitted, false);
+  assert.deepEqual(plain(chat.messages.map((message) => message.content)), [
+    'Q',
+    '[Verified by LEVI]\nverified answer',
+    '[Unverified · direct fallback]\nfallback answer',
+    '[Unverified · direct answer]\ndirect answer',
+    '[Unverified · verification status unavailable]\nunknown answer',
+  ]);
+  // Each answer's mission is read once; completed verification is cached across refreshes.
+  const reads = () => transport.calls.filter((call) => call.path === `/missions/${FALLBACK}`).length;
+  assert.equal(reads(), 1);
+  transport.handlers.stream({ connected: true, code: null });
+  await scheduler.flush();
+  assert.ok(transport.calls.filter((call) => call.path.startsWith(`/conversations/${CONV}/messages`)).length > 2);
+  assert.equal(reads(), 1);
+  const markup = renderToStaticMarkup(createElement(load('adapters/ConnectedApp.tsx').ConnectedApp, { store }));
+  assert.match(markup, /\[Unverified · direct fallback\]/);
+  assert.match(markup, /\[Verified by LEVI\]/);
 });
 
 export { loader };

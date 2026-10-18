@@ -5,7 +5,7 @@
 
 import { useState, useSyncExternalStore, type FormEvent } from 'react';
 import App from '../App';
-import type { ConnectionView, MissionPath, PhoenixStore } from './core';
+import { verificationText, type ConnectionView, type MissionPath, type MissionView, type PhoenixStore } from './core';
 import './connected.css';
 
 const backendText: Readonly<Record<string, string>> = {
@@ -27,6 +27,17 @@ const degradedText: Readonly<Record<string, string>> = {
 const triageText: Readonly<Record<string, string>> = {
   decided: 'PHOENIX decided', fallback: 'triage fallback', client: 'your override',
 };
+/** Review M1: a completed mission always states whether LEVI verified it, in text; a direct
+ *  fallback is never described as planned steps. */
+export function missionLine(mission: MissionView): string {
+  const status = missionText[mission.status] ?? mission.status;
+  const failure = mission.failureCode ? ` (${mission.failureCode})` : '';
+  const verification = mission.verification ? ` · ${verificationText[mission.verification]}` : '';
+  const fallback = mission.verification === 'unverified_direct_fallback';
+  const path = !mission.path || fallback || mission.verification === 'unverified_direct' ? '' :
+    ` · ${mission.path === 'complex' ? 'planned steps' : 'direct'}${mission.triageOutcome ? ` (${triageText[mission.triageOutcome]})` : ''}`;
+  return `Latest mission ${mission.missionId.slice(0, 8)}: ${status}${failure}${verification}${path}`;
+}
 const missionText: Readonly<Record<string, string>> = {
   queued: 'queued', running: 'running', completed: 'completed', failed: 'failed', cancelled: 'cancelled',
   waiting_permission: 'waiting for your permission — open Permissions to approve or deny', superseded: 'superseded by a linked re-run',
@@ -67,7 +78,7 @@ export function ConnectionBar({ connection, store }: { connection: ConnectionVie
             <option value="direct">Override: direct answer</option>
             <option value="complex">Override: planned steps (AIZEN plan, workspace documents)</option>
           </select>
-          {mission && <span className="connection-value">Latest mission {mission.missionId.slice(0, 8)}: {missionText[mission.status] ?? mission.status}{mission.failureCode ? ` (${mission.failureCode})` : ''}{mission.path ? ` · ${mission.path === 'complex' ? 'planned steps' : 'direct'}${mission.triageOutcome ? ` (${triageText[mission.triageOutcome]})` : ''}` : ''}</span>}
+          {mission && <span className="connection-value">{missionLine(mission)}</span>}
           {mission && (mission.status === 'queued' || mission.status === 'running') &&
             <button type="button" onClick={() => void store.missionAction('cancel')}>Cancel mission</button>}
           {mission && mission.status === 'failed' && mission.failureCode === 'interrupted' && !mission.rerunId &&

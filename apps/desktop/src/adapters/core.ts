@@ -106,7 +106,38 @@ export type MissionView = {
   path: 'direct' | 'complex' | null; triageOutcome: 'decided' | 'fallback' | 'client' | null; failureCode: string | null;
   rerunOf: string | null; rerunId: string | null; taskId: string | null; taskStates: readonly string[];
   permissionRequestId: string | null;
+  /** Review M1: whether LEVI verified a completed mission's answer (undefined until completed). */
+  verification: Verification | undefined;
 };
+
+// Review M1: an answer LEVI never verified must not look like a verified one. A completed
+// COMPLEX mission whose task ends `completed` passed LEVI on every step and the final answer.
+// DIRECT answers are never LEVI-verified, and a COMPLEX mission that completed while its task
+// ended `failed` was answered on the DIRECT fallback (PHX-109 MAHORAGA), so it is not
+// "planned steps". Anything else is reported unverified, never verified.
+export type Verification = 'verified' | 'unverified_direct' | 'unverified_direct_fallback' | 'unverified_unknown';
+export const verificationText: Readonly<Record<Verification, string>> = {
+  verified: 'verified', unverified_direct: 'unverified · direct',
+  unverified_direct_fallback: 'unverified (direct fallback)', unverified_unknown: 'unverified (status unavailable)',
+};
+export const verificationBadge: Readonly<Record<Verification, string>> = {
+  verified: 'Verified by LEVI', unverified_direct: 'Unverified · direct answer',
+  unverified_direct_fallback: 'Unverified · direct fallback', unverified_unknown: 'Unverified · verification status unavailable',
+};
+export function verificationOf(mission: Pick<MissionView, 'status' | 'path' | 'taskStates'>): Verification | undefined {
+  if (mission.status !== 'completed') return undefined;
+  const last = mission.taskStates[mission.taskStates.length - 1];
+  if (mission.path === 'direct') return 'unverified_direct';
+  if (mission.path === 'complex' && last === 'completed') return 'verified';
+  if (mission.path === 'complex' && last === 'failed') return 'unverified_direct_fallback';
+  return 'unverified_unknown';
+}
+/** PHOENIX answers are stored as `<mission_id>:answer` (PHX-102). */
+export const ANSWER_ID = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):answer$/;
+export function answerMission(messageId: string): string | undefined {
+  return ANSWER_ID.exec(messageId)?.[1];
+}
+
 export function readMission(value: unknown): MissionView | undefined {
   if (!isObject(value)) return undefined;
   const missionId = id(value.mission_id);
@@ -115,9 +146,9 @@ export function readMission(value: unknown): MissionView | undefined {
   if (!missionId || !conversationId || !status) return undefined;
   const states = Array.isArray(value.task_states) ? value.task_states.filter((state): state is string => typeof state === 'string') : [];
   const request = isObject(value.permission_request) ? id(value.permission_request.request_id) ?? null : null;
+  const path = value.path === 'direct' || value.path === 'complex' ? value.path : null;
   return {
-    missionId, conversationId, status,
-    path: value.path === 'direct' || value.path === 'complex' ? value.path : null,
+    missionId, conversationId, status, path, verification: verificationOf({ status, path, taskStates: states }),
     triageOutcome: value.triage_outcome === 'decided' || value.triage_outcome === 'fallback' || value.triage_outcome === 'client' ? value.triage_outcome : null,
     failureCode: str(value.failure_code, 64) ?? null, rerunOf: id(value.rerun_of) ?? null,
     rerunId: id(value.rerun_id) ?? null, taskId: id(value.task_id) ?? null, taskStates: states,
@@ -125,15 +156,20 @@ export function readMission(value: unknown): MissionView | undefined {
   };
 }
 
-/** User messages and PHOENIX answers as App ChatMessages; long answers become ordered parts. */
-export function toChatMessages(body: unknown): ChatMessage[] {
+/** User messages and PHOENIX answers as App ChatMessages; long answers become ordered parts.
+ *  Every answer starts with a text badge, "[Verified by LEVI]" or "[Unverified · …]" (review M1). */
+export function toChatMessages(body: unknown, verifications: ReadonlyMap<string, Verification> = new Map()): ChatMessage[] {
   const messages: ChatMessage[] = [];
   for (const entry of items(body)) {
     if (!isObject(entry)) continue;
-    const messageId = id(entry.message_id);
-    const text = typeof entry.text === 'string' ? entry.text : undefined;
     const role = entry.role === 'user' ? 'user' : entry.role === 'phoenix' ? 'assistant' : undefined;
-    if (!messageId || !role || text === undefined || text.trim().length === 0) continue;
+    const rawId = str(entry.message_id, 64);
+    const messageId = rawId && (UUID.test(rawId) || (role === 'assistant' && answerMission(rawId))) ? rawId : undefined;
+    const raw = typeof entry.text === 'string' ? entry.text : undefined;
+    if (!messageId || !role || raw === undefined || raw.trim().length === 0) continue;
+    const missionId = role === 'assistant' ? answerMission(messageId) : undefined;
+    const badge = verificationBadge[(missionId && verifications.get(missionId)) || 'unverified_unknown'];
+    const text = role === 'assistant' ? `[${badge}]\n${raw}` : raw;
     const parts = Math.ceil(text.length / MESSAGE_PART);
     for (let part = 0; part < parts; part += 1) {
       const content = text.slice(part * MESSAGE_PART, (part + 1) * MESSAGE_PART);
@@ -323,6 +359,7 @@ export class PhoenixStore {
   private messages: ChatMessage[] = [];
   private activeMissionId: string | undefined;
   private mission: MissionView | undefined;
+  private verifications = new Map<string, Verification>();
   private pending: PendingPermission[] = [];
   private hiddenPermissions = 0;
   private actors = new Map<string, string>();
@@ -572,6 +609,7 @@ export class PhoenixStore {
     const mission = readMission(await this.get(`/missions/${this.activeMissionId}`));
     if (!mission) return;
     this.mission = mission;
+    if (mission.verification) this.verifications.set(mission.missionId, mission.verification);
     // Follow a linked re-run the user started from the Permissions view.
     if (mission.rerunId && mission.status === 'superseded') {
       this.activeMissionId = mission.rerunId;
@@ -598,7 +636,15 @@ export class PhoenixStore {
     }
     const path = `/conversations/${this.conversationId}/messages`;
     const count = total(await this.get(`${path}?limit=1`));
-    this.messages = toChatMessages(await this.get(`${path}?limit=${MESSAGE_WINDOW}&offset=${Math.max(0, count - MESSAGE_WINDOW)}`));
+    const body = await this.get(`${path}?limit=${MESSAGE_WINDOW}&offset=${Math.max(0, count - MESSAGE_WINDOW)}`);
+    // A completed mission's verification never changes, so each answer's mission is read once.
+    const unknown = new Set(items(body).map((entry) => isObject(entry) && typeof entry.message_id === 'string' ? answerMission(entry.message_id) : undefined)
+      .filter((missionId): missionId is string => missionId !== undefined && !this.verifications.has(missionId)));
+    await Promise.all([...unknown].map(async (missionId) => {
+      const mission = readMission(await this.get(`/missions/${missionId}`).catch(() => undefined));
+      if (mission?.verification) this.verifications.set(missionId, mission.verification);
+    }));
+    this.messages = toChatMessages(body, this.verifications);
   }
 
   // -- port operations

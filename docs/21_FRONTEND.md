@@ -625,6 +625,13 @@ renders `ConnectedApp` only inside the native shell; a plain browser keeps the h
 unconnected App. App.tsx is unchanged, so its captions still describe ports as
 caller-supplied (copy update proposed for PHX-108).
 
+Verification labels (review M1): every completed mission is labelled from mission detail.
+`verified` needs path `complex` and a last task state of `completed`; a `direct` answer is
+`unverified · direct`; a `complex` mission that completed while its task `failed` is the
+PHX-109 DIRECT fallback, `unverified (direct fallback)`, never "planned steps". Each PHOENIX
+answer in Chat starts with a text badge, `[Verified by LEVI]` or `[Unverified · …]`, taken
+from its own mission (answer IDs are `<mission_id>:answer`).
+
 Minimal PHX-108: a connection bar above App shows backend and live-stream state, sets
 the document workspace through `PATCH /settings`, sends missions to PHX-105 triage by
 default ("Automatic (PHOENIX decides)", no `path`) with direct and planned steps as

@@ -29,9 +29,13 @@ Back the existing App ports with the live backend through the PHX-106 native pro
 - **R10 — Minimal PHX-108: connection bar.** Above App: backend state with a plain explanation of each degraded code, live-stream state, the document workspace (root and status) with a folder field calling `PATCH /settings` (each `workspace_*` code explained, the path never echoed), the mission path override (Automatic by default), and the tracked mission's status with Cancel (queued/running, INV-019) and Run again (failed `interrupted`).
 - **R11 — Known copy gap.** App's panel captions still say "caller-supplied … live transport is not implemented" and the header "backend integration pending"; App.tsx is deliberately unchanged here. Updating that copy (and its historical byte checks) is proposed for PHX-108.
 
+## Verification labels (consolidated review M1)
+
+An answer LEVI never verified must not look verified. Every completed mission gets a label derived from mission detail, with no API change: `verified` when its path is `complex` and its last task state is `completed` (LEVI passed every step and the final answer); `unverified · direct` when its path is `direct`; `unverified (direct fallback)` when its path is `complex` but its task ended `failed` (the PHX-109 MAHORAGA DIRECT fallback); otherwise `unverified (status unavailable)`, never verified. The connection bar shows the label in text (a direct fallback is never called "planned steps"), and every PHOENIX answer in Chat begins with a text badge, `[Verified by LEVI]` or `[Unverified · …]`, read from that answer's own mission (answers are stored as `<mission_id>:answer`; completed labels are cached). The same change fixes answer IDs: `<mission_id>:answer` was previously not admitted, so answers were dropped from the transcript. App.tsx is unchanged.
+
 ## Verification
 
-- `npm test` (192 tests, including 11 PHX-106/107 tests in `tests/desktop_adapters.mjs`: App readers admit every live port; `submitDecision` mapping, re-run tracking and refusals; `sendText` body and path; event/stream refetch coalescing and no fetch while down; status mapping; long-answer parts; risk-free requests have no controls; workspace errors; exact tauri commands/events; no credential, address or network primitive in webview code; connected SSR render without inline styles).
+- `npm test` (195 tests, including 14 PHX-106/107 tests in `tests/desktop_adapters.mjs`: App readers admit every live port; `submitDecision` mapping, re-run tracking and refusals; `sendText` body and path; event/stream refetch coalescing and no fetch while down; status mapping; long-answer parts; risk-free requests have no controls; workspace errors; exact tauri commands/events; no credential, address or network primitive in webview code; connected SSR render without inline styles).
 - `npm run typecheck`, frontend build, native release build and the PHX-106 smoke.
 
 ## Acceptance
