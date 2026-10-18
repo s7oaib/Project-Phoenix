@@ -16,14 +16,14 @@
     "security": {
       "capabilities": [
         {
-          "identifier": "desktop-foundation",
-          "description": "The static foundation screen requires no IPC permissions.",
+          "identifier": "desktop-backend-proxy",
+          "description": "PHX-106/107: the two backend proxy commands and listening to the shell's backend events. No plugins, files, shell or HTTP.",
           "windows": ["main"],
-          "permissions": []
+          "permissions": ["allow-api-request", "allow-backend-status", "core:event:allow-listen", "core:event:allow-unlisten"]
         }
       ],
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; connect-src 'none'",
-      "devCsp": "default-src 'self'; script-src 'self' 'sha256-Z2/iFzh9VMlVkEOar1f/oSHWwQk3ve1qk/C2WdsC4Xk='; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-src 'none'; connect-src 'self' ws://127.0.0.1:5173"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; connect-src ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; script-src 'self' 'sha256-Z2/iFzh9VMlVkEOar1f/oSHWwQk3ve1qk/C2WdsC4Xk='; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-src 'none'; connect-src 'self' ws://127.0.0.1:5173 ipc: http://ipc.localhost"
     }
   },
   "bundle": {

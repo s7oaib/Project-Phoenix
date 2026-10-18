@@ -91,6 +91,25 @@ is unchanged. It is a direct requirement, not the `uvicorn[standard]` extra, and
 tests use its synchronous client against a real loopback server.
 See https://websockets.readthedocs.io/.
 
+### Desktop shell HTTP / WebSocket clients (Phase 10)
+
+Owner-approved on 2026-10-18 (PHX-106, ADR-091) as required Rust dependencies of
+the Tauri shell, which proxies the webview's traffic to the loopback backend and
+holds the per-launch token:
+
+- `ureq` **3.4.2** (MIT OR Apache-2.0), with `ureq-proto` 0.6.5: the blocking
+  HTTP/1.1 client behind the `api_request` command. Default features are off,
+  so it is TLS-free (no rustls, webpki roots or gzip); the environment proxy is
+  explicitly disabled and redirects are off.
+- `tungstenite` **0.28.0** (MIT OR Apache-2.0), `handshake` feature only: the
+  WebSocket client for `WS /events`. TLS-free (no `native-tls` or `rustls`
+  features); it pulls `sha1`, `data-encoding`, `rand` 0.9 and `utf-8`.
+
+Both connect only to `127.0.0.1`. `base64`, `getrandom`, `serde`, `serde_json`
+and `windows-sys` were already locked through Tauri and are now direct. The
+webview gains `@tauri-apps/api` **2.12.1** (Apache-2.0 OR MIT), matching the
+`tauri` crate, for `invoke` and `listen` only.
+
 ## Optional V1 runtime
 
 ### Colibri

@@ -1,0 +1,34 @@
+/* PHX-107/108 connection bar: compact, wraps at 800x600 and narrower, uses the shell tokens. */
+.connection-bar {
+  display: grid;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.connection-state { color: var(--muted); }
+.connection-ready { color: var(--text); }
+.connection-degraded { color: var(--accent); }
+.connection-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.connection-row label { font-weight: 650; }
+.connection-value, .connection-feedback { color: var(--muted); overflow-wrap: anywhere; min-width: 0; }
+.connection-row input { flex: 1 1 220px; min-width: 0; }
+.connection-row input, .connection-row select, .connection-row button {
+  min-height: 32px;
+  padding: 4px 10px;
+  color: var(--text);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.connection-row button { cursor: pointer; }
+.connection-row button:hover { background: var(--surface-hover); }
+.connection-row button:disabled { cursor: not-allowed; opacity: 0.6; }
+@media (prefers-reduced-motion: reduce) { .connection-bar * { transition: none; } }
