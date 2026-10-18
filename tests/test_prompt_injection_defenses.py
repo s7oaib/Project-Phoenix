@@ -1776,6 +1776,11 @@ PHX_106_PATHS = (
     "apps/desktop/src-tauri/build.rs",
     "apps/desktop/src-tauri/src/main.rs",
 )
+# PHX-048 (ADR-094) intentionally changed filesystem.py (root checked on every
+# call; frozen at origin/main until then); it stays pinned, at the PHX-048
+# implementation commit.
+PHX_048_COMMIT = "2e04e22f361f64110742dd8974dece216d567a7f"
+PHX_048_PATHS = ("phoenix/tools/filesystem.py",)
 # PHX-109 (ADR-093) intentionally changed runtime.py (bounded MAHORAGA
 # recovery, MissionTrace.recoveries) and mission_events.py (recovery.*
 # allowlist); both stay pinned, at the PHX-109 implementation commit.
@@ -1803,6 +1808,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_104_PATHS
         and path not in PHX_105_PATHS
         and path not in PHX_106_PATHS
+        and path not in PHX_048_PATHS
         and path not in PHX_109_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
@@ -1813,6 +1819,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_104_COMMIT, path) for path in PHX_104_PATHS]
     baselines += [(PHX_105_COMMIT, path) for path in PHX_105_PATHS]
     baselines += [(PHX_106_COMMIT, path) for path in PHX_106_PATHS]
+    baselines += [(PHX_048_COMMIT, path) for path in PHX_048_PATHS]
     baselines += [(PHX_109_COMMIT, path) for path in PHX_109_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path

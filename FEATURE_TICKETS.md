@@ -51,7 +51,7 @@ Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - PHX-045 Secrets boundary — DONE
 - PHX-046 Permissioned tool steps in mission runtime — DONE
 - PHX-047 Grounded document verification — DONE
-- PHX-048 FilesystemTool root hardening — TODO
+- PHX-048 FilesystemTool root hardening — DONE
 
 ## Phase 5 — Computer & Web
 - PHX-050 Playwright browser tool — DONE

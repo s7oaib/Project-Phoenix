@@ -8,6 +8,7 @@ import importlib
 import inspect
 import json
 import os
+import shutil
 import socket
 import sqlite3
 import stat
@@ -1430,6 +1431,159 @@ def test_resolved_containment_fails_closed(
 
     monkeypatch.setattr(Path, "resolve", escaped)
     assert execute(tool, call()).error_code is FilesystemErrorCode.PATH_ESCAPE
+
+
+# PHX-048 (ADR-094): the root itself is checked on every call, before anything
+# resolves, so a root replaced by a link after validation is never followed.
+
+
+def tool_at(root: Path, audit: AuditTrail) -> FilesystemTool:
+    return FilesystemTool(root, registry(), PermissionPolicy(), audit)
+
+
+def assert_root_refused(result: FilesystemToolResult) -> None:
+    """An explicit failure with no effect and no content (INV-021)."""
+    assert result.status is ToolResultStatus.FAILURE
+    assert result.error_code is FilesystemErrorCode.ROOT_UNAVAILABLE
+    assert result.attempted and not result.effect_applied and result.output is None
+    assert FilesystemToolResult.model_validate(result) == result
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Real NTFS junction requires Windows")
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("moment", ("between_calls", "inside_call"))
+def test_root_junction_swap_during_use_refused(
+    runtime: tuple[Path, FilesystemTool, AuditTrail, Engine],
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    moment: str,
+) -> None:
+    root, tool, _, _ = runtime
+    (root / "File A.txt").write_bytes(b"inside\n")
+    assert execute(tool, call("stat")).status is ToolResultStatus.SUCCESS
+    outside = root.parent / "outside"
+    outside.mkdir()
+    secret = outside / "File A.txt"
+    secret.write_bytes(PRIVATE.encode())
+    original = root.parent / "original"
+
+    def swap() -> None:
+        root.rename(original)
+        junction(outside, root)
+
+    lstat = Path.lstat
+    if moment == "between_calls":
+        swap()
+    else:
+        # The root is a real directory when lstat runs and a junction by the
+        # time its real path is taken.
+        def swapping(self: Path) -> os.stat_result:
+            info = lstat(self)
+            if self == root and not original.exists():
+                swap()
+            return info
+
+        monkeypatch.setattr(Path, "lstat", swapping)
+    reads: list[object] = []
+    path_open, scandir = Path.open, os.scandir
+
+    def spy_open(self: Path, *args: object, **kwargs: object) -> object:
+        reads.append(self)
+        return path_open(self, *args, **kwargs)  # type: ignore[call-overload]
+
+    def spy_scandir(path: object) -> object:
+        reads.append(path)
+        return scandir(path)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(Path, "open", spy_open)
+    monkeypatch.setattr(os, "scandir", spy_scandir)
+    result = execute(tool, call(operation))
+    monkeypatch.undo()
+    assert_root_refused(result)
+    assert reads == []
+    assert lstat(root).st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    assert list(outside.iterdir()) == [secret]
+    assert secret.read_bytes() == PRIVATE.encode()
+    assert list(original.iterdir()) == [original / "File A.txt"]
+    assert (original / "File A.txt").read_bytes() == b"inside\n"
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("where", ("root", "ancestor"))
+@pytest.mark.parametrize("kind", ("symlink", "junction"))
+def test_linked_root_refused(
+    runtime: tuple[Path, FilesystemTool, AuditTrail, Engine],
+    operation: str,
+    where: str,
+    kind: str,
+) -> None:
+    workspace, _, audit, _ = runtime
+    real = workspace / "real"
+    (real / "sub").mkdir(parents=True)
+    for folder in (real, real / "sub"):
+        (folder / "File A.txt").write_bytes(PRIVATE.encode())
+    link = workspace.parent / "link"
+    if kind == "symlink":
+        symlink(real, link, directory=True)
+    elif os.name == "nt":
+        junction(real, link)
+    else:
+        pytest.skip("Real NTFS junction requires Windows")
+    root = link if where == "root" else link / "sub"
+    before = sorted((path, path.read_bytes()) for path in real.rglob("*.txt"))
+    assert_root_refused(execute(tool_at(root, audit), call(operation)))
+    assert sorted((path, path.read_bytes()) for path in real.rglob("*.txt")) == before
+    assert sorted(real.iterdir()) == [real / "File A.txt", real / "sub"]
+    assert sorted((real / "sub").iterdir()) == [real / "sub" / "File A.txt"]
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_root_deleted_after_construction_fails_explicitly(
+    runtime: tuple[Path, FilesystemTool, AuditTrail, Engine], operation: str
+) -> None:
+    root, tool, audit, _ = runtime
+    (root / "File A.txt").write_bytes(PRIVATE.encode())
+    shutil.rmtree(root)
+    assert_root_refused(execute(tool, call(operation)))
+    assert not root.exists()
+    mandatory = operation in ("write_text", "delete_file")
+    assert len(audit.list_records()) == (2 if mandatory else 0)
+
+
+@pytest.mark.parametrize("spelling", ("exact", "case"))
+def test_checked_root_every_operation(
+    runtime: tuple[Path, FilesystemTool, AuditTrail, Engine], spelling: str
+) -> None:
+    workspace, _, audit, _ = runtime
+    if spelling == "case":
+        if os.name != "nt":
+            pytest.skip("Case-insensitive comparison applies on Windows")
+        real = workspace / "Workspace Root"
+        real.mkdir()
+        root = workspace / "wORKSPACE rOOT"
+    else:
+        real = root = workspace
+    tool = tool_at(root, audit)
+    steps = (
+        call("create_directory", relative_path="Folder"),
+        call("create_text"),
+        call("write_text", content="replaced"),
+        call("read_text"),
+        call("list_directory", relative_path="."),
+        call("stat"),
+        call("delete_file"),
+    )
+    results = [execute(tool, value) for value in steps]
+    assert [result.status for result in results] == [ToolResultStatus.SUCCESS] * 7
+    assert all(result.error_code is None for result in results)
+    assert results[3].output == {"content": "replaced", "size_bytes": 8}
+    assert results[4].output is not None
+    entries = cast(tuple[Mapping[str, object], ...], results[4].output["entries"])
+    assert [(entry["name"], entry["kind"]) for entry in entries] == [
+        ("File A.txt", "file"),
+        ("Folder", "directory"),
+    ]
+    assert sorted(real.iterdir()) == [real / "Folder"]
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)

@@ -1,8 +1,10 @@
 """Bounded workspace operations; content is untrusted and never logged.
 
 Trusted integration supplies a narrow non-secret root and authentic permission
-evidence. Concurrent hostile path replacement is outside the V1 threat model;
-path checks are not a cross-platform, race-proof filesystem sandbox.
+evidence. The root is checked again on every call and a root replaced by a
+link is refused (PHX-048). Concurrent hostile path replacement within one call
+is outside the V1 threat model; path checks are not a cross-platform,
+race-proof filesystem sandbox.
 """
 
 import heapq
@@ -568,13 +570,28 @@ def _kind(info: os.stat_result) -> str:
     return "other"
 
 
-def _target(root: Path, relative: str) -> tuple[Path, os.stat_result | None]:
+def _checked_root(root: Path) -> Path:
+    """The configured root itself, checked again on every call (PHX-048).
+
+    Before anything resolves, the root must be a real directory that is not a
+    symlink, junction or other reparse point, and its real path must be the
+    configured path (case-insensitively on Windows). A root replaced by a link
+    after validation is refused instead of followed outside the workspace.
+    """
     try:
-        resolved = root.resolve(strict=True)
-        if not resolved.is_dir():
+        info = root.lstat()
+        if _link(info) or not stat.S_ISDIR(info.st_mode):
             raise _Failure(FilesystemErrorCode.ROOT_UNAVAILABLE)
-    except (OSError, RuntimeError):
+        real = os.path.realpath(root, strict=True)
+    except (OSError, ValueError, RuntimeError):
         raise _Failure(FilesystemErrorCode.ROOT_UNAVAILABLE) from None
+    if os.path.normcase(os.path.normpath(real)) != os.path.normcase(str(root)):
+        raise _Failure(FilesystemErrorCode.ROOT_UNAVAILABLE)
+    return Path(real)
+
+
+def _target(root: Path, relative: str) -> tuple[Path, os.stat_result | None]:
+    resolved = _checked_root(root)
     current = resolved
     info = current.lstat()
     parts = () if relative == "." else tuple(relative.split("/"))
