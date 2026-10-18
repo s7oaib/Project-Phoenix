@@ -95,6 +95,35 @@ behaviour.
     (`reasoning-arithmetic-chain`) came from the DIRECT path, which has no LEVI
     check. Permissioned tool use is the other gain. The next levers are
     constrained JSON decoding and MAHORAGA retries (PHX-109).
+  - **Verified and unverified results are reported separately.** The headline
+    success excludes unverified DIRECT fallbacks; completions including them
+    are labelled as such.
+    - A DIRECT fallback is PHX-109 MAHORAGA answering on the DIRECT path after
+      AIZEN's plan fails twice. The decided path stays COMPLEX, the task ends
+      `failed` and the answer is unverified.
+    - The per-path breakdown labels DIRECT missions unverified by design. It
+      splits COMPLEX missions into LEVI-verified completions, fallbacks and
+      failures.
+    - `recovery_success` is MEASURED only when the traces carry PHX-109
+      recoveries.
+    - The single runs above predate PHX-109, so they have no fallbacks: their
+      success is the same with or without them.
+  - 3-run triage evidence (2026-10-18, 48 missions each; re-rendered from the
+    stored trials with `--from-results`). The with-MAHORAGA run used the local
+    integration branch `ca85fad` (PHX-109, PR #84, not on main):
+
+    | | with MAHORAGA | without MAHORAGA |
+    | --- | --- | --- |
+    | Completed (incl. unverified fallbacks) | 40 (83%) | 29 (60%) |
+    | DIRECT fallbacks | 3 | 0 |
+    | Success excl. fallbacks | 77% | 60% |
+    | Accuracy / excl. fallbacks | 64% / 60% | 50% / 50% |
+    | DIRECT missions (unverified) | 34, 22/28 scored pass | 28, 20/24 |
+    | COMPLEX: LEVI-verified / fallback / failed | 3 / 3 / 8 of 14 | 1 / 0 / 19 of 20 |
+
+    Caveat: those traces predate `MissionTrace.recoveries`, so fallbacks were
+    detected from the task states (a completed mission whose COMPLEX task
+    ended `failed`).
 - Configuration (3) is reported as NOT RUNNABLE: the runtime has no adaptive
   routing or Colibri deep-tier path.
 - Every metric above is reported either as measured or as NOT RUNNABLE with a

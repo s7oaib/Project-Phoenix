@@ -12,7 +12,7 @@ import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from types import ModuleType, TracebackType
+from types import ModuleType, SimpleNamespace, TracebackType
 from typing import Any, Self
 
 import pytest
@@ -246,6 +246,12 @@ def test_forced_complex_runs_full_pipeline_for_every_case(tmp_path: Path) -> Non
     assert (s["max_ram_used_bytes"], s["max_gpu_used_mib"]) == (8_000_000_000, 4000)
     assert results["path"] == {"requested": "complex", "used": "complex"}
     assert (s["paths"], s["triage_outcomes"]) == ({"complex": 16}, {"client": 16})
+    # Every COMPLEX completion here reached COMPLETED after LEVI: verified.
+    assert all(t["verified"] for t in results["trials_detail"])
+    assert not any(t["direct_fallback"] for t in results["trials_detail"])
+    assert (s["levi_verified_passes"], s["direct_fallbacks"]) == (14, 0)
+    assert s["success_rate_excl_fallbacks"] == s["success_rate"] == 1.0
+    assert all(t["recoveries"] is None for t in results["trials_detail"])
     assert results["trials"] == {"warmup": 0, "measured": 1}
 
 
@@ -266,6 +272,17 @@ def test_default_triage_records_decided_path_and_outcome(tmp_path: Path) -> None
         None,
     )
     assert first["generations"] == 2 and first["levi_passed"] == 0  # triage, direct
+    assert (first["verified"], first["direct_fallback"]) == (False, False)
+    assert s["by_path"]["direct"] == {
+        "missions": 3,
+        "completed": 3,
+        "scorable": 3,
+        "passed": 3,
+        "verification": "unverified by design",
+        "pass_rate": 1.0,
+    }
+    assert s["by_path"]["complex"]["levi_verified"] == 13
+    assert s["levi_verified_passes"] == 11  # 2 of the 13 are unscored planning
     assert results["trials_detail"][3]["generations"] == 7
     assert provider.roles[:3] == ["triage", "direct", "triage"]
     assert s["roles"]["triage"] == {
@@ -402,24 +419,41 @@ def test_compare_builds_side_by_side_table(tmp_path: Path) -> None:
     table = (out / multi.COMPARISON_NAME).read_text("utf-8")
     assert "| (2) | PHOENIX multi-agent (triage) | mixed by role | 100% |" in table
     assert "(best)" in table and "not one model" in table
+    assert "success excludes 0 unverified DIRECT fallback(s)" in table
+    assert "completed, incl. unverified fallbacks: 100%" in table
     assert "| yes | c1-off |" in table and "| yes | c1-default |" in table
     assert "Comparison with configuration (1)" in (out / multi.SUMMARY_NAME).read_text(
         "utf-8"
     )
 
-    # Re-render later from saved results, without running missions again; a
-    # results file from before PHX-105 (no path/triage counts) still renders.
+    # Re-render later from saved results, without running missions again. An
+    # older file (no triage or verification fields per trial) is re-derived
+    # from its trials, and the source file is never overwritten.
     saved = json.loads((out / multi.RESULTS_NAME).read_text("utf-8"))
-    del saved["summary"]["paths"], saved["summary"]["triage_outcomes"]
-    older = tmp_path / "older.json"
+    for trial in saved["trials_detail"]:
+        for key in ("triage_outcome", "triage_reason", "recoveries", "verified"):
+            del trial[key]
+        del trial["direct_fallback"]
+    saved["summary"] = {"stale": True}
+    older_dir = tmp_path / "older"
+    older_dir.mkdir()
+    older = older_dir / multi.RESULTS_NAME
     older.write_text(json.dumps(saved), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        multi.main(["--out", str(older_dir), "--from-results", str(older)])
     again = tmp_path / "again"
     code = multi.main(
         ["--out", str(again), "--from-results", str(older), "--compare", str(off)]
     )
     assert code == 0
     assert "| (2) |" in (again / multi.COMPARISON_NAME).read_text("utf-8")
-    assert "missions by path n/a" in (again / multi.SUMMARY_NAME).read_text("utf-8")
+    rendered = json.loads((again / multi.RESULTS_NAME).read_text("utf-8"))
+    assert rendered["summary"]["success_rate_excl_fallbacks"] == 1.0
+    assert rendered["rerendered"]["from"] == str(older)
+    assert json.loads(older.read_text("utf-8"))["summary"] == {"stale": True}
+    assert "missions by path complex 16" in (again / multi.SUMMARY_NAME).read_text(
+        "utf-8"
+    )
 
 
 def test_compare_rejects_wrong_file_before_running(tmp_path: Path) -> None:
@@ -497,3 +531,122 @@ def test_preflight_models_follow_the_runtime_tier_table() -> None:
         "qwen2.5-coder:7b",
     )
     assert multi.tier_table_json()["verifier"][0] == "qwen3.5:9b"
+
+
+def _trial(
+    path: str | None,
+    kind: str,
+    states: list[str],
+    score: str | None,
+    recoveries: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A stored trial record as the runner writes it (closed values only)."""
+    return {
+        "case_id": "c",
+        "category": "reasoning",
+        "kind": "measured",
+        "run_index": 0,
+        "scoring_mode": "contains",
+        "mission_kind": kind,
+        "failure_code": None if kind == "completed" else "responder_output",
+        "responder_error": None if kind == "completed" else "schema",
+        "score": score,
+        "mission_ms": 10.0,
+        "prompt_set_version": "phoenix-prompts-v4",
+        "path": path,
+        "triage_outcome": "decided",
+        "states": states,
+        "generations": 1,
+        "input_tokens": 1,
+        "output_tokens": 1,
+        "generations_without_usage": 0,
+        "levi_passed": 0,
+        "levi_failed": 0,
+        "generation_records": [],
+        "resources": {"before": None, "after": None},
+        "recoveries": recoveries,
+    }
+
+
+DONE = ["created", "planning", "ready", "running", "verifying", "completed"]
+PLAN_FAILED = ["created", "planning", "failed"]
+
+
+def test_completed_mission_with_failed_task_is_a_direct_fallback() -> None:
+    fallback = _trial("complex", "completed", PLAN_FAILED, "pass")
+    assert multi.mission_class(fallback) == "direct_fallback"
+    verified = _trial("complex", "completed", DONE, "pass")
+    assert multi.mission_class(verified) == "levi_verified"
+    direct = _trial("direct", "completed", [], "pass")
+    assert multi.mission_class(direct) == "unverified_direct"
+    failed = _trial("complex", "failed", PLAN_FAILED, None)
+    assert multi.mission_class(failed) == "not_completed"
+    # PHX-109 traces flag the fallback in their recoveries as well.
+    flagged = _trial("complex", "completed", [], "pass", {"direct_fallback": True})
+    assert multi.mission_class(flagged) == "direct_fallback"
+
+
+def test_summary_reports_success_with_and_without_fallbacks() -> None:
+    trials = [
+        _trial("complex", "completed", DONE, "pass"),  # LEVI-verified
+        _trial("complex", "completed", PLAN_FAILED, "pass"),  # DIRECT fallback
+        _trial("complex", "failed", PLAN_FAILED, None),
+        _trial("direct", "completed", [], "pass"),  # unverified by design
+        _trial("direct", "completed", [], "fail"),
+    ]
+    s = multi.summarize(trials)
+    assert s["success_rate"] == pytest.approx(4 / 5)
+    assert s["success_rate_label"] == "completed, incl. unverified fallbacks"
+    assert s["success_rate_excl_fallbacks"] == pytest.approx(3 / 5)
+    assert s["score_accuracy"] == pytest.approx(3 / 5)
+    assert s["score_accuracy_excl_fallbacks"] == pytest.approx(2 / 5)
+    assert (s["direct_fallbacks"], s["levi_verified_passes"]) == (1, 1)
+    assert s["by_path"]["complex"] == {
+        "missions": 3,
+        "completed": 2,
+        "scorable": 3,
+        "passed": 2,
+        "levi_verified": 1,
+        "direct_fallbacks": 1,
+        "failed": 1,
+        "pass_rate": pytest.approx(2 / 3),
+    }
+    assert s["by_path"]["direct"]["verification"] == "unverified by design"
+    assert s["recoveries"] is None
+    rows = {row["id"]: row for row in multi.metric_rows(s)}
+    assert rows["recovery_success"]["status"] == "NOT_RUNNABLE"
+    assert "PHX-109" in rows["recovery_success"]["reason"]
+    assert "no retries" not in rows["recovery_success"]["reason"]
+    lines = "\n".join(multi._verification_lines(s))
+    assert "Success excluding unverified DIRECT fallbacks: 60%" in lines
+    assert "completed, incl. unverified fallbacks: 80% (1 fallback(s))" in lines
+
+
+def test_recoveries_are_counted_by_closed_value_and_measured() -> None:
+    record = SimpleNamespace(
+        recovery_class=SimpleNamespace(value="responder_output"),
+        action=SimpleNamespace(value="switch_agent"),
+        outcome=SimpleNamespace(value="recovered"),
+        direct_fallback=True,
+    )
+    exhausted = SimpleNamespace(
+        recovery_class=SimpleNamespace(value="provider_error"),
+        action=None,
+        outcome=SimpleNamespace(value="exhausted"),
+        direct_fallback=False,
+    )
+    counts = multi.recovery_counts(SimpleNamespace(recoveries=(record, exhausted)))
+    assert counts == {
+        "count": 2,
+        "by_class": {"provider_error": 1, "responder_output": 1},
+        "by_action": {"none": 1, "switch_agent": 1},
+        "by_outcome": {"exhausted": 1, "recovered": 1},
+        "direct_fallback": True,
+    }
+    assert multi.recovery_counts(SimpleNamespace()) is None  # pre-PHX-109 trace
+    s = multi.summarize([_trial("complex", "completed", [], "pass", counts)])
+    assert s["direct_fallbacks"] == 1
+    assert s["recoveries"]["actions"] == 1 and s["recoveries"]["recovered"] == 1
+    assert s["recoveries"]["recovery_success"] == 1.0
+    rows = {row["id"]: row for row in multi.metric_rows(s)}
+    assert rows["recovery_success"]["status"] == "MEASURED"

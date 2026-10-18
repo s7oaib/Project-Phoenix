@@ -118,10 +118,11 @@ METRICS: tuple[tuple[str, str], ...] = (
         "this runner records each mission's decided path and triage outcome.",
     ),
     ("verification_catch_rate", baseline.CATCH_RATE_REASON),
+    # Replaced by a MEASURED row when the traces carry MAHORAGA recoveries.
     (
         "recovery_success",
-        "MAHORAGA/KAIDO are not model-backed; the runtime fails explicitly with "
-        "no retries (ADR-081).",
+        "These traces record no MAHORAGA recoveries: MissionTrace.recoveries "
+        "needs PHX-109.",
     ),
     ("memory_retrieval_accuracy", "Needs an end-to-end RAG answering flow."),
     ("research_evidence_quality", "Needs a model-backed URAHARA research flow."),
@@ -138,7 +139,11 @@ METRICS: tuple[tuple[str, str], ...] = (
 )
 MEASURED_FROM = {
     "task_success": "score_accuracy over measured missions (failed missions "
-    "score as not passed) plus completed/failed/waiting/cancelled counts",
+    "score as not passed), also excluding unverified DIRECT fallbacks; success "
+    "with and without fallbacks; per-path LEVI-verified, fallback and failed "
+    "counts",
+    "recovery_success": "MAHORAGA recovery actions whose outcome was "
+    "'recovered' over all actions taken (MissionTrace.recoveries, PHX-109)",
     "ttft_latency": "whole-mission latency (median/min/max); missions are not "
     "streamed, so TTFT is not observed",
     "ram_vram": "max system RAM and GPU memory sampled at each mission's start "
@@ -223,6 +228,62 @@ def _record(
     }
 
 
+def _value(item: object) -> str:
+    return "none" if item is None else str(getattr(item, "value", item))
+
+
+def recovery_counts(trace: object) -> dict[str, Any] | None:
+    """MAHORAGA's decisions by closed value, or None for a pre-PHX-109 trace."""
+    records = getattr(trace, "recoveries", None)
+    if records is None:
+        return None
+
+    def counts(field: str) -> dict[str, int]:
+        found = Counter(_value(getattr(r, field, None)) for r in records)
+        return dict(sorted(found.items()))
+
+    return {
+        "count": len(records),
+        "by_class": counts("recovery_class"),
+        "by_action": counts("action"),
+        "by_outcome": counts("outcome"),
+        "direct_fallback": any(
+            bool(getattr(r, "direct_fallback", False)) for r in records
+        ),
+    }
+
+
+MISSION_CLASSES = (
+    "levi_verified",  # COMPLEX, completed, and the task reached COMPLETED
+    "direct_fallback",  # COMPLEX path but answered DIRECT after a failed plan
+    "unverified_direct",  # DIRECT path: no LEVI check by design
+    "unknown_completed",  # completed without evidence either way
+    "not_completed",
+)
+
+
+def mission_class(trial: dict[str, Any]) -> str:
+    """How far a trial's answer is verified, from stored closed values only.
+
+    A PHX-109 DIRECT fallback completes the mission while the decided path
+    stays COMPLEX and the task ends FAILED; traces without ``recoveries`` are
+    classified from the task states alone.
+    """
+    if trial["mission_kind"] != MissionKind.COMPLETED:
+        return "not_completed"
+    path = trial.get("path")
+    last = (trial.get("states") or [None])[-1]
+    recoveries = trial.get("recoveries") or {}
+    if path == "direct":
+        return "unverified_direct"
+    if path == "complex":
+        if recoveries.get("direct_fallback") or last == "failed":
+            return "direct_fallback"
+        if last == "completed":
+            return "levi_verified"
+    return "unknown_completed"
+
+
 def trial_record(
     base: dict[str, Any],
     outcome: ScoreOutcome | None,
@@ -230,6 +291,20 @@ def trial_record(
     seconds: float,
 ) -> dict[str, Any]:
     """Codes, counts, timings and hashes only; never prompt or answer text."""
+    record = _trial_fields(base, outcome, result, seconds)
+    record["recoveries"] = recovery_counts(result.trace)
+    verification = mission_class(record)
+    record["verified"] = verification == "levi_verified"
+    record["direct_fallback"] = verification == "direct_fallback"
+    return record
+
+
+def _trial_fields(
+    base: dict[str, Any],
+    outcome: ScoreOutcome | None,
+    result: MissionResult,
+    seconds: float,
+) -> dict[str, Any]:
     trace = result.trace
     records = trace.generations
     verdicts = Counter(item.verdict for item in trace.verifications)
@@ -284,6 +359,9 @@ def error_record(
         "path": None,
         "triage_outcome": None,
         "triage_reason": None,
+        "recoveries": None,
+        "verified": False,
+        "direct_fallback": False,
         "states": [],
         "generations": 0,
         "input_tokens": 0,
@@ -412,18 +490,42 @@ def summarize(trials: list[dict[str, Any]]) -> dict[str, Any]:
             role["generations"] += 1
             role["models"][record["model_id"]] += 1
     versions = sorted({t["prompt_set_version"] for t in measured} - {None})
-    decided = Counter(str(t["path"]) for t in measured)
-    triage = Counter(str(t["triage_outcome"]) for t in measured)
+    decided = Counter(str(t.get("path")) for t in measured)
+    triage = Counter(str(t.get("triage_outcome")) for t in measured)
+    classes = Counter(mission_class(t) for t in measured)
+    fallback_passes = sum(
+        t["score"] == ScoreOutcome.PASS
+        for t in scorable
+        if mission_class(t) == "direct_fallback"
+    )
+    n = len(measured)
     return {
-        "measured_missions": len(measured),
+        "measured_missions": n,
         "outcomes": {
             name: kinds[name]
             for name in (*(kind.value for kind in MissionKind), "error")
         },
-        "success_rate": len(completed) / len(measured) if measured else None,
+        # Headline success: completed missions minus unverified DIRECT fallbacks.
+        "success_rate_excl_fallbacks": (len(completed) - classes["direct_fallback"]) / n
+        if n
+        else None,
+        "success_rate": len(completed) / n if n else None,
+        "success_rate_label": "completed, incl. unverified fallbacks",
+        "direct_fallbacks": classes["direct_fallback"],
+        "mission_classes": {name: classes[name] for name in MISSION_CLASSES},
         "scorable_missions": len(scorable),
         "passed_scores": passed,
         "score_accuracy": passed / len(scorable) if scorable else None,
+        "score_accuracy_excl_fallbacks": (passed - fallback_passes) / len(scorable)
+        if scorable
+        else None,
+        "levi_verified_passes": sum(
+            t["score"] == ScoreOutcome.PASS
+            for t in measured
+            if mission_class(t) == "levi_verified"
+        ),
+        "by_path": _by_path(measured),
+        "recoveries": _recovery_summary(measured),
         "category_accuracy": {
             name: {**row, "accuracy": row["passed"] / row["n"]}
             for name, row in sorted(by_category.items())
@@ -467,13 +569,70 @@ def summarize(trials: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def metric_rows() -> list[dict[str, str]]:
-    return [
-        {"id": metric, "status": "NOT_RUNNABLE", "reason": reason}
-        if reason
-        else {"id": metric, "status": "MEASURED", "source": MEASURED_FROM[metric]}
-        for metric, reason in METRICS
-    ]
+def _by_path(measured: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """DIRECT answers are unverified by design; COMPLEX splits by LEVI evidence."""
+    rows: dict[str, dict[str, Any]] = {}
+    for trial in measured:
+        path = str(trial.get("path"))
+        row = rows.setdefault(
+            path,
+            {"missions": 0, "completed": 0, "scorable": 0, "passed": 0}
+            | ({"verification": "unverified by design"} if path == "direct" else {})
+            | (
+                {"levi_verified": 0, "direct_fallbacks": 0, "failed": 0}
+                if path == "complex"
+                else {}
+            ),
+        )
+        row["missions"] += 1
+        row["completed"] += trial["mission_kind"] == MissionKind.COMPLETED
+        if trial["scoring_mode"] != ScoringMode.UNSCORED:
+            row["scorable"] += 1
+            row["passed"] += trial["score"] == ScoreOutcome.PASS
+        if path == "complex":
+            verification = mission_class(trial)
+            row["levi_verified"] += verification == "levi_verified"
+            row["direct_fallbacks"] += verification == "direct_fallback"
+            row["failed"] += trial["mission_kind"] == MissionKind.FAILED
+    for row in rows.values():
+        row["pass_rate"] = row["passed"] / row["scorable"] if row["scorable"] else None
+    return dict(sorted(rows.items()))
+
+
+def _recovery_summary(measured: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """MAHORAGA totals, or None when no trace recorded recoveries (pre-PHX-109)."""
+    found = [t["recoveries"] for t in measured if t.get("recoveries") is not None]
+    if not found:
+        return None
+    total: dict[str, Counter[str]] = {
+        key: Counter() for key in ("by_class", "by_action", "by_outcome")
+    }
+    for item in found:
+        for key, counter in total.items():
+            counter.update(item[key])
+    actions = sum(total["by_action"].values()) - total["by_action"]["none"]
+    recovered = total["by_outcome"]["recovered"]
+    return {
+        "missions_with_recoveries": sum(item["count"] > 0 for item in found),
+        "decisions": sum(item["count"] for item in found),
+        "actions": actions,
+        "recovered": recovered,
+        "recovery_success": recovered / actions if actions else None,
+        **{key: dict(sorted(counter.items())) for key, counter in total.items()},
+    }
+
+
+def metric_rows(summary: dict[str, Any] | None = None) -> list[dict[str, str]]:
+    measured_recovery = summary is not None and summary.get("recoveries") is not None
+    rows = []
+    for metric, reason in METRICS:
+        if not reason or (metric == "recovery_success" and measured_recovery):
+            rows.append(
+                {"id": metric, "status": "MEASURED", "source": MEASURED_FROM[metric]}
+            )
+        else:
+            rows.append({"id": metric, "status": "NOT_RUNNABLE", "reason": reason})
+    return rows
 
 
 # ---- comparison with configuration (1)
@@ -536,7 +695,10 @@ def compare_rows(
             "thinking": "mixed by role",
             "status": "measured",
             "score_accuracy": s2["score_accuracy"],
-            "success_rate": s2["success_rate"],
+            "success_rate": s2["success_rate_excl_fallbacks"],
+            "success_rate_incl_fallbacks": s2["success_rate"],
+            "score_accuracy_excl_fallbacks": s2["score_accuracy_excl_fallbacks"],
+            "direct_fallbacks": s2["direct_fallbacks"],
             "latency_median_ms": s2["mission_latency_ms"]["median"],
             "input_tokens_per_task": _per(s2["input_tokens"], n),
             "output_tokens_per_task": _per(s2["output_tokens"], n),
@@ -574,8 +736,18 @@ def comparison_markdown(rows: list[dict[str, Any]]) -> list[str]:
             f"{_num(r['output_tokens_per_task'])} | "
             f"{'yes' if r['same_task_set'] else 'NO'} | {source} |"
         )
+    notes = [
+        f"Configuration (2) success excludes {r['direct_fallbacks']} unverified "
+        "DIRECT fallback(s); completed, incl. unverified fallbacks: "
+        f"{_pct(r['success_rate_incl_fallbacks'])}. Accuracy excluding fallbacks: "
+        f"{_pct(r['score_accuracy_excl_fallbacks'])}."
+        for r in rows
+        if r["fyp_configuration"] == "2"
+    ]
     return [
         *lines,
+        "",
+        *notes,
         "",
         f"Note: {MIXED_MODELS_NOTE} Configuration (1) thinking-on output tokens "
         "include hidden reasoning tokens (ADR-079).",
@@ -584,6 +756,47 @@ def comparison_markdown(rows: list[dict[str, Any]]) -> list[str]:
 
 def _counts(counts: dict[str, int]) -> str:
     return ", ".join(f"{name} {n}" for name, n in counts.items()) or "n/a"
+
+
+def _verification_lines(s: dict[str, Any]) -> list[str]:
+    """Verified vs unverified results, reported separately (never merged)."""
+    lines = [
+        "## Verification",
+        "",
+        f"- Success excluding unverified DIRECT fallbacks: "
+        f"{_pct(s['success_rate_excl_fallbacks'])}; {s['success_rate_label']}: "
+        f"{_pct(s['success_rate'])} ({s['direct_fallbacks']} fallback(s)).",
+        f"- Accuracy: {_pct(s['score_accuracy'])}; excluding fallbacks: "
+        f"{_pct(s['score_accuracy_excl_fallbacks'])} "
+        f"({s['passed_scores']}/{s['scorable_missions']} scored passes).",
+        f"- LEVI-verified passes: {s['levi_verified_passes']}.",
+    ]
+    for path, row in s["by_path"].items():
+        detail = f"{row['missions']} missions, {row['completed']} completed"
+        if path == "direct":
+            detail += ", unverified by design (no LEVI check)"
+        if path == "complex":
+            detail += (
+                f" ({row['levi_verified']} LEVI-verified, "
+                f"{row['direct_fallbacks']} DIRECT fallback(s)), "
+                f"{row['failed']} failed"
+            )
+        lines.append(
+            f"- Path {path}: {detail}; scored passes {row['passed']}/"
+            f"{row['scorable']} ({_pct(row['pass_rate'])})."
+        )
+    recoveries = s["recoveries"]
+    if recoveries is None:
+        lines.append("- MAHORAGA recoveries: not recorded by these traces.")
+    else:
+        lines.append(
+            f"- MAHORAGA: {recoveries['actions']} action(s), "
+            f"{recoveries['recovered']} recovered "
+            f"({_pct(recoveries['recovery_success'])}); by action "
+            f"{_counts(recoveries['by_action'])}; by class "
+            f"{_counts(recoveries['by_class'])}."
+        )
+    return lines
 
 
 def write_summary(results: dict[str, Any], path: Path) -> None:
@@ -604,17 +817,20 @@ def write_summary(results: dict[str, Any], path: Path) -> None:
         f"{results['trials']['measured']} measured. Prompt set: "
         f"{', '.join(s['prompt_set_versions']) or 'n/a'}.",
         "",
-        "| Missions | Completed | Failed | Waiting | Cancelled | Error | Accuracy "
-        "| Success | Latency median/min/max ms | Generations median (total) "
-        "| Input tokens | Output tokens | LEVI passed/failed |",
+        "| Missions | Completed | Failed | Waiting | Cancelled | Error "
+        "| Success excl. fallbacks | Accuracy | Latency median/min/max ms "
+        "| Generations median (total) | Input tokens | Output tokens "
+        "| LEVI checks passed/failed |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- "
         "| --- |",
         f"| {s['measured_missions']} | {o['completed']} | {o['failed']} | "
         f"{o['waiting_permission']} | {o['cancelled']} | {o['error']} | "
-        f"{_pct(s['score_accuracy'])} | {_pct(s['success_rate'])} | "
+        f"{_pct(s['success_rate_excl_fallbacks'])} | {_pct(s['score_accuracy'])} | "
         f"{_num(lat['median'])}/{_num(lat['minimum'])}/{_num(lat['maximum'])} | "
         f"{_num(gens['median'])} ({gens['total']}) | {s['input_tokens']} | "
         f"{s['output_tokens']} | {s['levi']['passed']}/{s['levi']['failed']} |",
+        "",
+        *_verification_lines(s),
         "",
         "## Per-category accuracy",
         "",
@@ -745,11 +961,24 @@ def main(
         )
         if earlier.get("tool") != TOOL or earlier.get("schema_version") != 1:
             parser.error(f"{args.from_results} is not a schema v1 {TOOL} file")
+        if (out / RESULTS_NAME).resolve() == args.from_results.resolve():
+            parser.error("--out must differ from the --from-results folder")
+        # Re-derive every figure from the stored trials with this runner's rules;
+        # a stale comparison is dropped unless --compare rebuilds it.
+        earlier["summary"] = summarize(earlier["trials_detail"])
+        earlier["metrics"] = metric_rows(earlier["summary"])
+        earlier["not_runnable"] = [NOT_RUNNABLE_CONFIG3]
+        earlier.pop("comparison", None)
+        earlier["rerendered"] = {
+            "from": str(args.from_results),
+            "at_utc": datetime.now(UTC).isoformat(),
+        }
         out.mkdir(parents=True, exist_ok=True)
         if config1:
             earlier["comparison"] = _comparison(earlier, config1, out)
+        (out / RESULTS_NAME).write_text(json.dumps(earlier, indent=2), encoding="utf-8")
         write_summary(earlier, out / SUMMARY_NAME)
-        print(f"fyp: re-rendered - summary in {out}")
+        print(f"fyp: re-rendered - results and summary in {out}")
         return 0
 
     suite, categories = baseline.load_task_set(args.tasks)
@@ -829,7 +1058,7 @@ def main(
         "host": {"platform": platform.platform(), "python": sys.version.split()[0]},
         "summary": summary,
         "not_runnable": [NOT_RUNNABLE_CONFIG3],
-        "metrics": metric_rows(),
+        "metrics": metric_rows(summary),
         "trials_detail": trials,
     }
     out.mkdir(parents=True, exist_ok=True)

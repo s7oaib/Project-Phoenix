@@ -361,3 +361,65 @@ Interpretation:
 - The stale `fyp_benchmark.py` reasons were also replaced: configuration (3)
   now says there is no adaptive routing or Colibri T3 path, and verification
   catch rate says it needs fault-injected cases.
+
+**Security review M2 fix (2026-10-18): verified and unverified results are
+reported separately.**
+
+PHX-109 (PR #84) lets MAHORAGA answer on the DIRECT path after AIZEN's plan
+fails twice. That mission completes, but its decided path stays COMPLEX, its
+task ends `failed`, and its answer is unverified. The runner used to count it
+as multi-agent success.
+
+What the runner records now:
+- **Per trial:**
+  - `verified`: COMPLEX, completed, and the task reached `completed`;
+  - `direct_fallback`: COMPLEX and completed, but the task ended `failed`, or
+    the PHX-109 `recoveries` flag a direct fallback;
+  - `recoveries`: counts by class, action and outcome when the trace has
+    them, otherwise `None`.
+- **Summary:**
+  - headline success excluding fallbacks, plus success "completed, incl.
+    unverified fallbacks";
+  - accuracy with and without fallbacks;
+  - the LEVI-verified pass count;
+  - a per-path breakdown: DIRECT is unverified by design; COMPLEX is split into
+    LEVI-verified, fallback and failed.
+- **Comparison:** configuration (2)'s success column is the figure excluding
+  fallbacks, and the figure including them goes in a note.
+- **`recovery_success`:** MEASURED when recoveries are present; otherwise
+  NOT_RUNNABLE ("needs PHX-109"). The stale "no retries (ADR-081)" text is
+  gone.
+- **`--from-results`:** re-derives the summary and metrics from the stored
+  trials into a new folder and refuses to overwrite its source.
+- **Run A and run B:** both predate PHX-109, so they cannot contain fallbacks
+  and their figures above are unchanged.
+
+**3-run triage evidence**, re-rendered without models into new sibling folders
+(`...-rerendered-M2`). The originals are untouched.
+
+| Run | Directory under `validation/` | Code |
+| --- | --- | --- |
+| with MAHORAGA | `PHX-FYP-config2-3runs-with-mahoraga-20261018-051123` | local integration branch `ca85fad` (PHX-109, PR #84, not on main) |
+| without MAHORAGA | `PHX-FYP-config2-3runs-without-mahoraga-20261018-054420` | `46bfafb` |
+
+| 48 missions each | with MAHORAGA | without MAHORAGA |
+| --- | --- | --- |
+| Completed (incl. unverified fallbacks) | 40 (83%) | 29 (60%) |
+| DIRECT fallbacks | 3 | 0 |
+| Success excl. fallbacks | 77% | 60% |
+| Accuracy (runner-style) | 64% | 50% |
+| Accuracy excl. fallbacks | 60% | 50% |
+| DIRECT missions (unverified by design) | 34; 22/28 scored pass | 28; 20/24 |
+| COMPLEX missions | 14 | 20 |
+| COMPLEX LEVI-verified completions | 3 | 1 |
+| COMPLEX failed | 8 | 19 |
+
+- **Reproduction:** the re-render reproduces the main session's independent
+  figures exactly.
+- **Caveats:**
+  - These traces predate `MissionTrace.recoveries`, so fallbacks were detected
+    from the task states.
+  - The run with MAHORAGA has 11 more completions. 6 of them come from triage
+    routing more requests DIRECT (34 vs 28), 3 are unverified DIRECT
+    fallbacks, and 2 are extra LEVI-verified COMPLEX completions (1 to 3). The
+    runs also differ in code (integration branch vs `46bfafb`).
