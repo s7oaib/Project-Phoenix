@@ -560,10 +560,13 @@ def test_responder_output_failure_publishes_agent_failed(stack: Stack) -> None:
         "task.created",
         "task.state_changed created>planning",
         "agent.started planner",
+        # PHX-109: MAHORAGA retries the generation once; it fails again.
+        "recovery.started planner",
+        "recovery.completed planner",
         "agent.failed planner",
         "task.state_changed planning>failed",
     ]
-    assert sink.events[3].payload["code"] == "responder_output"
+    assert sink.events[5].payload["code"] == "responder_output"
     assert dict(sink.events[-1].payload) == {
         "scope": "task",
         "from_state": "planning",
@@ -755,6 +758,10 @@ def test_vocabulary_stays_32_and_mapping_uses_existing_types() -> None:
         "verification.started",
         "verification.passed",
         "verification.failed",
+        # PHX-109 (ADR-093): MAHORAGA's mission recoveries.
+        "recovery.started",
+        "recovery.completed",
+        "recovery.exhausted",
     }
 
 

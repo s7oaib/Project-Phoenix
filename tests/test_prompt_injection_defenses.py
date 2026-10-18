@@ -1752,12 +1752,11 @@ PHX_104_PATHS = (
 # runtime.py (triage, trace fields), mission_events.py (triage allowlist),
 # api/missions.py (optional path, decisions, re-runs), persistence/missions.py
 # (nullable path, triage_outcome) and the REST routes and schemas; all stay
-# pinned, at the PHX-105 implementation commit.
+# pinned, at the PHX-105 implementation commit. PHX-109 moved runtime.py and
+# mission_events.py to its own pin (below).
 PHX_105_COMMIT = "e34142ca0062dc14c05a5a1d18720b64446cdaa7"
 PHX_105_PATHS = (
     "phoenix/agents/prompts.py",
-    "phoenix/agents/runtime.py",
-    "phoenix/agents/mission_events.py",
     "phoenix/api/missions.py",
     "phoenix/api/routes/missions.py",
     "phoenix/api/routes/schemas.py",
@@ -1782,6 +1781,14 @@ PHX_106_PATHS = (
 # implementation commit.
 PHX_048_COMMIT = "2e04e22f361f64110742dd8974dece216d567a7f"
 PHX_048_PATHS = ("phoenix/tools/filesystem.py",)
+# PHX-109 (ADR-093) intentionally changed runtime.py (bounded MAHORAGA
+# recovery, MissionTrace.recoveries) and mission_events.py (recovery.*
+# allowlist); both stay pinned, at the PHX-109 implementation commit.
+PHX_109_COMMIT = "2cf01ae286b4b74140769fba925a1b46a1a255e3"
+PHX_109_PATHS = (
+    "phoenix/agents/runtime.py",
+    "phoenix/agents/mission_events.py",
+)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -1802,6 +1809,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_105_PATHS
         and path not in PHX_106_PATHS
         and path not in PHX_048_PATHS
+        and path not in PHX_109_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1812,6 +1820,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_105_COMMIT, path) for path in PHX_105_PATHS]
     baselines += [(PHX_106_COMMIT, path) for path in PHX_106_PATHS]
     baselines += [(PHX_048_COMMIT, path) for path in PHX_048_PATHS]
+    baselines += [(PHX_109_COMMIT, path) for path in PHX_109_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

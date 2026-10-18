@@ -111,7 +111,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-106 Tauri backend sidecar — DONE (R1–R12 confirmed by the owner 2026-10-18)
 - PHX-107 Frontend port adapters — DONE (R1–R11 confirmed by the owner 2026-10-18)
 - PHX-108 Settings and onboarding — TODO
-- PHX-109 MAHORAGA/KAIDO in missions — TODO
+- PHX-109 MAHORAGA/KAIDO in missions — DONE (MAHORAGA bounded recovery, ADR-093; KAIDO deferred)
 - PHX-110 Memory and RAG in missions — TODO
 - PHX-111 Web research — TODO
 - PHX-112 Computer control steps — TODO
