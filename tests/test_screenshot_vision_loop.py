@@ -1884,6 +1884,23 @@ def test_no_action_persistence_or_dependency_change() -> None:
             # missions.py, routes and schemas are excluded above and hash-pinned
             # in test_prompt_injection_defenses.py).
             ":(exclude)alembic/versions/0008_mission_triage.py",
+            # PHX-106/107 (ADR-091, ADR-092) change these desktop files (hash-pinned
+            # in test_prompt_injection_defenses.py) and add the sidecar, proxy and
+            # adapters.
+            ":(exclude)apps/desktop/package.json",
+            ":(exclude)apps/desktop/src/main.tsx",
+            ":(exclude)apps/desktop/src-tauri/tauri.conf.json",
+            ":(exclude)apps/desktop/src-tauri/Cargo.toml",
+            ":(exclude)apps/desktop/src-tauri/Cargo.lock",
+            ":(exclude)apps/desktop/src-tauri/build.rs",
+            ":(exclude)apps/desktop/src-tauri/src/main.rs",
+            ":(exclude)apps/desktop/src/adapters/core.ts",
+            ":(exclude)apps/desktop/src/adapters/tauri.ts",
+            ":(exclude)apps/desktop/src/adapters/ConnectedApp.tsx",
+            ":(exclude)apps/desktop/src/adapters/connected.css",
+            ":(exclude)apps/desktop/src-tauri/src/backend.rs",
+            ":(exclude)apps/desktop/src-tauri/src/proxy.rs",
+            ":(exclude)apps/desktop/src-tauri/src/events.rs",
         ],
         cwd=ROOT,
     )

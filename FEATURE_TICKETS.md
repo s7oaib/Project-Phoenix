@@ -96,7 +96,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 
 ## Phase 9 — Validation & Release
 - PHX-090 Automated test matrix — DONE
-- PHX-091 FYP benchmark suite — DONE (configuration 1 GPU baselines; configurations 2/3 in a follow-up)
+- PHX-091 FYP benchmark suite — DONE (configuration 1 GPU baselines; configuration 2 measured live, triage and forced COMPLEX); configuration 3 NOT RUNNABLE
 - PHX-092 Packaging/install workflow — TODO
 - PHX-093 Final demo scenarios — TODO
 - PHX-094 Release evidence package — TODO
@@ -108,8 +108,8 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-103 Runtime events and WS — DONE
 - PHX-104 REST API v1 — DONE
 - PHX-105 Request triage — DONE
-- PHX-106 Tauri backend sidecar — TODO
-- PHX-107 Frontend port adapters — TODO
+- PHX-106 Tauri backend sidecar — DONE (R1–R12 confirmed by the owner 2026-10-18)
+- PHX-107 Frontend port adapters — DONE (R1–R11 confirmed by the owner 2026-10-18)
 - PHX-108 Settings and onboarding — TODO
 - PHX-109 MAHORAGA/KAIDO in missions — TODO
 - PHX-110 Memory and RAG in missions — TODO

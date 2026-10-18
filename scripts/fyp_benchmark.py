@@ -13,6 +13,9 @@ Usage::
     python scripts/fyp_benchmark.py                    # all baseline tiers (Ollama)
     python scripts/fyp_benchmark.py --model T1=qwen3.5:4b --runs 1
     python scripts/fyp_benchmark.py --think off        # thinking-off row (PHX-017)
+    python scripts/fyp_benchmark.py --config phoenix-multi-agent --help  # config (2)
+
+``--config phoenix-multi-agent`` dispatches to ``scripts/fyp_multi_agent.py``.
 """
 
 from __future__ import annotations
@@ -62,22 +65,27 @@ DEFAULT_TIERS: tuple[tuple[str, str], ...] = (
     ("T2", "qwen3.5:9b"),
     ("T2-code", "qwen2.5-coder:7b"),
 )
-INTEGRATION_GAP = (
-    "PhoenixOrchestrator, AizenPlanner and LeviVerifier accept injected responders "
-    "only; no model-backed responders exist yet (PHX-090 end_to_end GAP)."
+CONFIG3_REASON = (
+    "PhoenixRuntime has no adaptive model routing or Colibri deep-tier (T3) path; "
+    "its tier table covers T0-T2 only."
+)
+CATCH_RATE_REASON = (
+    "Needs fault-injected cases: the v1 set has no known-bad candidates, and a "
+    "LEVI rejection hides the rejected answer, so a catch cannot be scored."
 )
 NOT_RUNNABLE_CONFIGS: tuple[dict[str, str], ...] = (
     {
         "id": "phoenix-multi-agent",
         "fyp_configuration": "2",
         "description": "Phoenix multi-agent orchestration",
-        "reason": INTEGRATION_GAP,
+        "reason": "Not part of a baseline run; measured separately with "
+        "--config phoenix-multi-agent (PHX-091 continuation).",
     },
     {
         "id": "phoenix-adaptive-deep",
         "fyp_configuration": "3",
         "description": "Phoenix + adaptive model routing/deep tier",
-        "reason": INTEGRATION_GAP + " Colibri deep tier is not installed.",
+        "reason": CONFIG3_REASON,
     },
 )
 # Every docs/24 metric: measured from baseline reports, or NOT_RUNNABLE + reason.
@@ -88,7 +96,7 @@ METRICS: tuple[tuple[str, str | None], ...] = (
         "Measured separately by scripts/routing_benchmark.py (PHX-105) on"
         " benchmarks/routing/routing-v1.toml; not part of this baseline run.",
     ),
-    ("verification_catch_rate", "Needs a model-backed LEVI responder."),
+    ("verification_catch_rate", CATCH_RATE_REASON),
     ("recovery_success", "Needs model-backed MAHORAGA/KAIDO execution."),
     ("memory_retrieval_accuracy", "Needs an end-to-end RAG answering flow."),
     ("research_evidence_quality", "Needs a model-backed URAHARA research flow."),
@@ -353,12 +361,32 @@ def _num(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.0f}"
 
 
+CONFIGS = ("baseline", "phoenix-multi-agent")
+
+
+def _multi_agent(argv: list[str]) -> int:
+    scripts = str(Path(__file__).resolve().parent)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import fyp_multi_agent
+
+    return fyp_multi_agent.main(argv)
+
+
 def main(
     argv: list[str] | None = None,
     provider_factory: ProviderFactory | None = None,
     compute_probe: ComputeProbe | None = None,
 ) -> int:
+    dispatch = argparse.ArgumentParser(add_help=False)
+    dispatch.add_argument("--config", choices=CONFIGS, default="baseline")
+    known, rest = dispatch.parse_known_args(argv)
+    if known.config == "phoenix-multi-agent":
+        return _multi_agent(rest)
     parser = argparse.ArgumentParser(description="PHOENIX FYP benchmark suite")
+    parser.add_argument(
+        "--config", choices=CONFIGS, default="baseline", help="FYP configuration"
+    )
     parser.add_argument("--tasks", type=Path, default=DEFAULT_TASKS)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--model", action="append", default=[], help="TIER=model")
