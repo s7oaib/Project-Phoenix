@@ -48,7 +48,11 @@ path). The root is stored in its canonical real-path spelling. Before every
 mission that would use it, the root is validated again: if it fails (for
 example, the folder was replaced by a junction), that mission fails
 `tool_rejected`, the workspace becomes `unavailable` and later missions run
-without document steps. Changing the workspace never touches grants: they
+without document steps. During a mission, FilesystemTool checks the root again
+on every call (PHX-048): if it is no longer a real directory at its canonical
+path (deleted, or replaced by a symlink or junction), the call fails
+`root_unavailable` with nothing read or written, and the document step fails
+`tool_failed`. Changing the workspace never touches grants: they
 match exact absolute resources, so one for a file outside the new root never
 applies.
 

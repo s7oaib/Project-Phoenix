@@ -4471,3 +4471,60 @@ Consequences: the frontend has no direct backend, provider or tool access
 (INV-011); decisions are only user intents that PermissionEngine evaluates
 (INV-003, INV-005). App's captions still describe ports as caller-supplied and
 transport as not implemented; updating that copy is left to PHX-108.
+
+## ADR-094 — FilesystemTool checks its own root on every call
+
+Status: Accepted (the owner approved the PHX-048 follow-up on 2026-10-17 and,
+on 2026-10-18, asked for the recommended approach; R1–R7 in
+`tickets/PHX-048-filesystem-root-hardening.md` were applied under that
+overnight instruction and await the owner's review)
+Date: 2026-10-18
+Ticket: PHX-048
+
+ADR-089 recorded the finding: the workspace root is validated at PATCH, at
+startup and before each mission, but `FilesystemTool._target` called
+`root.resolve(strict=True)`, which follows a junction or symlink that replaced
+the root after validation. A swap during a mission was still followed outside
+the workspace. ADR numbers 091–093 are reserved by in-flight PRs.
+
+Decision:
+
+- **Root check on every call.** A new `_checked_root` runs first in `_target`,
+  which every operation (`read_text`, `list_directory`, `stat`, `create_text`,
+  `create_directory`, `write_text`, `delete_file`) calls before touching a
+  target. It `lstat`s the root and refuses it if it is a symlink, a junction or
+  any other reparse point (`FILE_ATTRIBUTE_REPARSE_POINT` through
+  `st_file_attributes`, the attribute check `_link` already makes; the project
+  runs Python 3.11, so `os.path.isjunction` is unavailable) or not a directory.
+  It then requires `os.path.realpath(root, strict=True)` to equal the
+  configured root under `os.path.normcase(os.path.normpath(...))`, the
+  normalization the constructor already applies (case-insensitive on Windows,
+  exact elsewhere). Containment is then checked against that real path.
+- **Failure shape.** Any refusal, or an `OSError` while checking (for example,
+  the root was deleted), is the existing `root_unavailable` code: an allowed,
+  attempted `FAILURE` with `effect_applied=False` and no output (INV-021). No
+  new code, status or event; the result validator is unchanged and accepts only
+  this shape for a failure. In a mission, the document step fails `tool_failed`
+  through the existing tool-step path.
+- **Unchanged.** The constructor does no I/O. `describe`, permission
+  evaluation and audit run before the check as before, so a P3/P4 call still
+  records its permission decision and a `FAILURE` outcome. The per-component
+  `lstat`, link refusal and resolved-containment checks are unchanged.
+- **Frozen file.** `phoenix/tools/filesystem.py` (from `origin/main`) is pinned
+  to the PHX-048 implementation commit (`PHX_048_COMMIT` / `PHX_048_PATHS`,
+  `2e04e22f361f64110742dd8974dece216d567a7f`), landed as an implementation
+  commit then a pin commit; the PR must merge with
+  a merge commit. The two `git diff origin/main` guards that named the file
+  (`test_screenshot_vision_loop.py`, `test_windows_ui_automation.py`) drop it
+  in favour of the hash pin.
+
+Limitations: a root whose configured spelling is not its real path (an 8.3
+short name, a `subst` drive, a symlinked ancestor, or a case-different spelling
+outside Windows) is now refused on every call. The API already stores the
+canonical real path and pytest's temporary roots are resolved, but
+`scripts/phoenix_mission_smoke.py` passes an unresolved `TemporaryDirectory`
+path, which fails on a machine whose temporary folder has a short-name or
+linked spelling. A swap between the root check and a later operation within one
+call stays outside the V1 threat model: the residual window shrinks from a
+whole mission to the inside of one call. No new dependencies and no new event
+types.
