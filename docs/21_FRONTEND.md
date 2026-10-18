@@ -5,6 +5,8 @@
 Implemented through PHX-087: Tauri 2, React 19, TypeScript 6, Vite 8 and CSS.
 Tailwind CSS, shadcn/ui, Zustand, TanStack Query and React Flow/XYFlow remain
 architecture choices for separately justified later tickets; PHX-080/081/082/083/084/085/086/087 add no dependency.
+PHX-107 adds exactly one: `@tauri-apps/api` 2.12.1 (matching the `tauri` crate), used only by
+`src/adapters/tauri.ts` (see "PHX-106/107 live desktop integration" below).
 
 ## PHX-080 app shell
 
@@ -302,6 +304,8 @@ to a borrowed callback. There is
 no HTTP/WebSocket, backend client, provider, database, tool, permission decision or
 Tauri IPC/plugin invocation. Existing production/development CSP, empty permission
 grants, entry point, native Rust and dependency manifests remain unchanged.
+PHX-106/107 (ADR-091, ADR-092) supersede this for the native app only: two Tauri
+commands and three shell events, with App.tsx itself still free of network code.
 
 Frontend may not:
 - call Ollama directly
@@ -318,6 +322,8 @@ Frontend may not:
 - Planned broader UI state: Zustand; no router/history or browser-storage persistence
   is introduced by PHX-080/081/082/083/084.
 - Planned live orchestration state: backend WebSocket events, not connected yet.
+- PHX-107: server state lives in `src/adapters/core.ts` (`PhoenixStore`, read through
+  `useSyncExternalStore`); REST is the source of truth and shell events trigger refetches.
 
 ## Suggested later structure
 
@@ -587,3 +593,51 @@ PHX-087 deterministic acceptance: DONE. Manual native WebView2 acceptance: PENDI
 Phase 8 remains INCOMPLETE; the phase-status decision is BLOCKED because final
 phase-level acceptance policy is unresolved under execution authority section 9.
 Builds and deterministic checks do not establish manual GUI or live integration.
+
+## PHX-106/107 live desktop integration (ADR-091, ADR-092)
+
+The native app starts the backend itself and is the only path to it. The Rust shell
+generates the per-launch token, starts `python -m phoenix.api` from the repository's
+`.venv` (demo/dev launch mode until PHX-092), reads the ready line, locks the data
+directory against a second instance, and owns the process tree. The token never
+reaches JavaScript.
+
+Webview access is exactly:
+
+- `invoke('api_request', { method, path, body })` — 18 allowlisted REST v1 routes
+  (docs/13), canonical UUID segments, listed query keys, JSON bodies up to 64 KiB;
+  anything else is `route_not_allowed`;
+- `invoke('backend_status')` — `starting`, `ready` or `degraded` with a closed code;
+- `listen` on `phoenix:event` (content-free event envelopes from `WS /events`),
+  `phoenix:events-status` and `phoenix:backend-status`.
+
+The capability grants only `allow-api-request`, `allow-backend-status`,
+`core:event:allow-listen` and `core:event:allow-unlisten`; production `connect-src` is
+`ipc: http://ipc.localhost`. No plugin, file, shell or HTTP access exists in the webview.
+
+`src/adapters/core.ts` maps REST and events to App's existing ports: Chat (POST /chat,
+latest 64 transcript entries, long answers in ordered parts), Permissions (pending
+requests, P1–P4 `approval_required` evidence, approve with `session` or deny; the
+linked re-run is followed), Task Graph and Agent Network (live step and agent states
+from events; objectives and dependencies are not published), Models and Observability
+(recent events and timings). Memory, Files and Voice stay unconnected. `main.tsx`
+renders `ConnectedApp` only inside the native shell; a plain browser keeps the honest
+unconnected App. App.tsx is unchanged, so its captions still describe ports as
+caller-supplied (copy update proposed for PHX-108).
+
+Verification labels (review M1): every completed mission is labelled from mission detail.
+`verified` needs path `complex` and a last task state of `completed`; a `direct` answer is
+`unverified · direct`; a `complex` mission that completed while its task `failed` is the
+PHX-109 DIRECT fallback, `unverified (direct fallback)`, never "planned steps". Each PHOENIX
+answer in Chat starts with a text badge, `[Verified by LEVI]` or `[Unverified · …]`, taken
+from its own mission (answer IDs are `<mission_id>:answer`).
+
+Minimal PHX-108: a connection bar above App shows backend and live-stream state, sets
+the document workspace through `PATCH /settings`, sends missions to PHX-105 triage by
+default ("Automatic (PHOENIX decides)", no `path`) with direct and planned steps as
+explicit overrides, and offers cancel / run again for the tracked mission.
+
+Demo: `uv sync` in the repository, then `npm run tauri:dev --workspace @phoenix/desktop`
+(or run the release build from `npm run tauri:build --workspace @phoenix/desktop`).
+Overrides: `PHOENIX_BACKEND_ROOT`, `PHOENIX_BACKEND_PYTHON`, `PHOENIX_DATA_DIR`.
+Backend stderr is written to `<data>/phoenix.desktop-backend.log`.

@@ -3321,6 +3321,49 @@ Their evidence is in the PHX-091 ticket.
   move to the PHX-091 continuation after PHX-029 and PHX-046. The owner chose,
   on 2026-10-15, to install Colibri for configuration (3).
 
+Amendment (2026-10-18, PHX-091 continuation): configuration (2) is runnable.
+- **Runner:** `scripts/fyp_benchmark.py --config phoenix-multi-agent`
+  dispatches to `scripts/fyp_multi_agent.py`. It runs each v1 case through
+  `PhoenixRuntime.run`, COMPLEX by default, with a default and a `think=False`
+  `OllamaProvider` and the runtime tier table. It uses its own mission loop,
+  because BenchmarkRunner would deadlock on the single lifecycle lease.
+- **Path:** `--path triage|complex|direct`. After PHX-105 merged, `triage`
+  became the default: it passes no path, so PHOENIX triages each request, and
+  each trial records the decided path and triage outcome. `--path complex`
+  stays as the full-pipeline stress test.
+- **Scoring:** unchanged; the same deterministic rules on the final answer.
+  Missions without an answer count as not passed.
+- **Trials:** 0 warm-up and 1 measured run by default, because a mission takes
+  about 1–2 minutes. Both are recorded in the results.
+- **Reported:** outcome counts, mission latency, generations, tokens, LEVI
+  verdicts, failure codes, per-category accuracy and the prompt set version.
+- **NOT_RUNNABLE:** verification catch rate, until fault-injected cases exist.
+  Routing accuracy belongs to PHX-105. Configuration (3) also stays
+  NOT_RUNNABLE.
+- **Comparison:** `--compare` sets configuration (1) tiers beside
+  configuration (2). It states that (2) mixes models and thinking modes by role
+  and that its latency is whole-mission time.
+- **Privacy:** unchanged (ADR-029): hashes and lengths only.
+- **Product code:** `phoenix/` is unchanged.
+- **Live evidence (2026-10-18):** BLAZE-6, RTX 3050 on CUDA, Ollama 0.40.4
+  desktop app, 16K context, AC power; 16 missions per run. Details are in the
+  PHX-091 ticket.
+  - **Forced COMPLEX** (prompts v3, `validation/PHX-091-config2-20261018-030132`):
+    43% accuracy, 38% success, 122 s median latency. Failures were mostly
+    structured output (4 schema, 3 truncated, 1 not_json) plus 2
+    `verification_failed`. All 6 completed answers were correct.
+  - **Triage** (prompts v4, `validation/PHX-091-config2-triage-20261018-033220`):
+    11 DIRECT and 5 COMPLEX; 64% accuracy, 69% success, 1.1 s median latency.
+  - **Configuration (1) best, for comparison:** 4B at 93% / 0.3 s (thinking
+    off) and 100% / 7.2 s (thinking on).
+- **Interpretation:**
+  - On these short tasks with 6 GB of VRAM, multi-agent is slower and less
+    accurate than the best single small model.
+  - Its value is that no wrong answer is reported as verified, plus
+    permissioned tool use.
+  - The next levers are constrained JSON decoding and MAHORAGA retries
+    (PHX-109).
+
 ## ADR-080 — Explicit Ollama thinking control at provider construction
 
 Status: Accepted
@@ -4339,6 +4382,95 @@ without a path. A mission interrupted by a crash before it settles has no
 recorded decision, so its re-run triages again. Triage accuracy is not yet
 measured live (the routing benchmark is the instrument). No new dependencies
 and no new event types.
+
+## ADR-091 — The desktop shell owns the backend and proxies the webview's traffic
+
+Status: Accepted (the owner confirmed recommendations R1–R12 in
+`tickets/PHX-106-tauri-backend-sidecar.md`, and the `ureq` and `tungstenite`
+dependencies, on 2026-10-18)
+Date: 2026-10-18
+Ticket: PHX-106
+
+Context: PHX-101 R6 (confirmed by the owner) recommends that the Rust shell hold
+the per-launch token and proxy HTTP and WebSocket traffic, so XSS in the webview
+cannot steal it and the backend needs no CORS. The launcher reads the token on
+stdin and announces the port in one JSON line on stdout (ADR-084, ADR-085).
+
+Decision:
+
+- **Lifecycle.** At setup the shell locks `<data>/phoenix.desktop.lock`
+  (exclusive; a second app reports `already_running`), generates 32 random bytes
+  (URL-safe base64), starts `python -m phoenix.api --host 127.0.0.1 --port 0
+  --data-dir <dir>` as an argument array without a shell or console window,
+  writes the token as one stdin line, and waits at most 90 s for the ready line.
+  On Windows the child starts suspended inside a kill-on-close job object, so the
+  venv launcher's interpreter is in the job and dies with the app even if the app
+  crashes. A watcher reports `degraded` / `backend_exited`; app exit kills the
+  tree. The webview sees only `starting`, `ready` or `degraded` with a closed code.
+- **Demo/dev launch mode.** The interpreter is the repository's `.venv`
+  (`PHOENIX_BACKEND_ROOT` / `PHOENIX_BACKEND_PYTHON` override, the build
+  checkout by default); data is `PHOENIX_DATA_DIR` or `~/.phoenix/data`. PHX-092
+  replaces this with a bundled backend.
+- **Two commands.** `api_request(method, path, body)` forwards only 18 exact
+  (method, route) pairs of the REST v1 contract, with canonical UUID segments,
+  listed query keys and JSON object bodies up to 64 KiB; destructive routes that
+  no adapter uses are absent. Rust adds `Authorization: Bearer`, sends no Origin,
+  disables the environment proxy and redirects, and returns only the status and
+  JSON body, or a closed error code. `backend_status()` returns the state.
+- **Events.** One Rust `tungstenite` client authenticates to `WS /events` with
+  the PHX-101 subprotocols, re-checks each frame as a bounded envelope, and
+  emits `phoenix:event` and `phoenix:events-status` to the main window;
+  it reconnects after any close.
+- **ACL and CSP.** `build.rs` declares the two commands as an app manifest; the
+  only capability grants `allow-api-request`, `allow-backend-status`,
+  `core:event:allow-listen` and `core:event:allow-unlisten`. No plugin. The
+  production CSP's `connect-src` changes from `'none'` to exactly
+  `ipc: http://ipc.localhost`, Tauri 2's IPC channel; the webview still cannot
+  reach the backend, Ollama, Colibri or any network origin (INV-011).
+
+Consequences: the token exists only in Rust memory and the child's stdin. New
+crates `ureq` 3.4 and `tungstenite` 0.28 (no TLS); `base64`, `getrandom`,
+`serde`, `serde_json` and `windows-sys` were already locked. The changed native
+files move their guard pins to the implementation commit (ADR-075 precedent).
+App exit does not shut the backend down gracefully; missions in flight are
+recorded `interrupted` at the next start (PHX-102).
+
+## ADR-092 — Live port adapters behind an unchanged App
+
+Status: Accepted (the owner confirmed recommendations R1–R11 in
+`tickets/PHX-107-frontend-port-adapters.md` on 2026-10-18)
+Date: 2026-10-18
+Ticket: PHX-107 (with a minimal piece of PHX-108)
+
+Decision:
+
+- **Boundary.** `src/adapters/tauri.ts` is the only webview code that touches
+  IPC (`invoke`, `listen`, `isTauri` from `@tauri-apps/api` 2.12.1). `core.ts`
+  holds a store that maps REST responses and content-free events to the
+  existing ports; `ConnectedApp.tsx` renders App with them through
+  `useSyncExternalStore`. App.tsx, its readers and its guards are unchanged;
+  every snapshot is admitted by them as they are.
+- **Source of truth.** REST. Events schedule coalesced refetches; backend
+  readiness and every stream reconnection or close reload everything; a 3 s
+  poll covers a tracked mission while it is queued or running.
+- **Ports.** Chat (POST /chat; the latest 64 transcript entries, long answers in
+  ordered parts), Permissions (pending requests; `approval_required` evidence
+  only for P1–P4; approve with `session`, deny with `{}`; the store follows the
+  linked re-run), Task Graph and Agent Network (live step and agent state from
+  events; objectives and dependencies are not published, so the objective text
+  states the live status and no edges are drawn), Models (`GET /models`) and
+  Observability (recent events as traces, timing and result metrics). Memory,
+  Files and Voice stay unconnected.
+- **Minimal PHX-108.** A connection bar above App shows the backend state, sets
+  the document workspace with `PATCH /settings` (validation codes explained),
+  defaults the mission path to PHX-105 triage ("Automatic", no `path`) with
+  direct and planned steps as overrides, and offers cancel and run again for
+  the tracked mission.
+
+Consequences: the frontend has no direct backend, provider or tool access
+(INV-011); decisions are only user intents that PermissionEngine evaluates
+(INV-003, INV-005). App's captions still describe ports as caller-supplied and
+transport as not implemented; updating that copy is left to PHX-108.
 
 ## ADR-093 — Bounded MAHORAGA recovery in missions
 

@@ -1762,6 +1762,20 @@ PHX_105_PATHS = (
     "phoenix/api/routes/schemas.py",
     "phoenix/persistence/missions.py",
 )
+# PHX-106/107 (ADR-091, ADR-092) intentionally changed the desktop manifest,
+# entry point, Tauri config (capability and CSP) and native host (backend
+# sidecar, proxy and event bridge); they stay pinned, at the PHX-106/107
+# implementation commit.
+PHX_106_COMMIT = "e34ca3d18e9444ff5ed32b3f1abb60fc5344f246"
+PHX_106_PATHS = (
+    "apps/desktop/package.json",
+    "apps/desktop/src/main.tsx",
+    "apps/desktop/src-tauri/tauri.conf.json",
+    "apps/desktop/src-tauri/Cargo.toml",
+    "apps/desktop/src-tauri/Cargo.lock",
+    "apps/desktop/src-tauri/build.rs",
+    "apps/desktop/src-tauri/src/main.rs",
+)
 # PHX-109 (ADR-093) intentionally changed runtime.py (bounded MAHORAGA
 # recovery, MissionTrace.recoveries) and mission_events.py (recovery.*
 # allowlist); both stay pinned, at the PHX-109 implementation commit.
@@ -1788,6 +1802,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_103_PATHS
         and path not in PHX_104_PATHS
         and path not in PHX_105_PATHS
+        and path not in PHX_106_PATHS
         and path not in PHX_109_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
@@ -1797,6 +1812,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_103_COMMIT, path) for path in PHX_103_PATHS]
     baselines += [(PHX_104_COMMIT, path) for path in PHX_104_PATHS]
     baselines += [(PHX_105_COMMIT, path) for path in PHX_105_PATHS]
+    baselines += [(PHX_106_COMMIT, path) for path in PHX_106_PATHS]
     baselines += [(PHX_109_COMMIT, path) for path in PHX_109_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path

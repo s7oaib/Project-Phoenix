@@ -1,6 +1,6 @@
 # PHX-091 — FYP benchmark suite
 
-Status: DONE (configuration 1 baseline; configurations 2 and 3 continue in a follow-up per PHX-029 D1)
+Status: DONE (configuration 1 baseline; configuration 2 measured live 2026-10-18); configuration 3 NOT RUNNABLE
 Phase: 9 — Validation & Release
 Branch: feature/PHX-091-fyp-benchmark-suite
 Starting main/base SHA: e9a5c393b2fd615b2664a0804a889f236d404877
@@ -215,3 +215,211 @@ Observations (deterministic: every listed failure occurred in 3 of 3 measured ru
 **Closure.** Configuration (1) is measured on BLAZE-6 in both thinking modes. Configurations (2) and (3) stay NOT RUNNABLE in this ticket, reported with their reasons.
 - **Configuration (2):** needs PHX-029 and PHX-046, then a runner mode under the PHX-091 continuation.
 - **Configuration (3):** the owner decided on 2026-10-15 to install Colibri and run it in that continuation.
+
+## Continuation: configuration (2) runner — DONE (2026-10-18)
+
+Branch `feature/PHX-091-config2-runner`, base main `f8aaef0`. This is the
+PHX-029 "PHX-091 configuration (2)" follow-up, after PHX-029, PHX-046 and
+PHX-047 landed. The FYP review is on 2026-10-21.
+
+**Delivered (no live model calls):**
+- `scripts/fyp_multi_agent.py`, reached through
+  `scripts/fyp_benchmark.py --config phoenix-multi-agent`. The baseline script
+  only gains the dispatch and a corrected configuration (2) reason.
+  - Each v1 case runs as one mission through `PhoenixRuntime.run`. The runtime
+    is built as in `scripts/phoenix_mission_smoke.py`: a default
+    `OllamaProvider` plus a `think=False` one for the structured roles, the
+    default tier table and only the installed models. It is text-only (no
+    filesystem tool).
+  - It has its own sequential loop, not `BenchmarkRunner` (PHX-029 finding 9).
+  - `--path triage` (default since PHX-105 merged; PHOENIX decides per
+    request), `complex` (forced full pipeline) or `direct`. See "Runner change
+    after PHX-105 merged" below.
+  - `--warmup 0 --runs 1` by default; both are recorded.
+  - Scoring: the unchanged `ScoringRule.score` on `MissionResult.text`. A
+    mission without text (failed, cancelled, waiting) counts as not passed.
+  - A runtime defect (unexpected exception) is recorded as `error` /
+    `runtime_defect` with the exception type only. The run continues, and the
+    exit code is then 1.
+  - The CPU-only placement guard checks every tier model before the run.
+- **Metrics:**
+  - accuracy and success rate;
+  - completed, failed, waiting_permission, cancelled and error counts;
+  - mission latency (median/min/max over completed missions, plus over all
+    missions);
+  - generations per mission;
+  - summed input and output tokens;
+  - LEVI passed/failed verdicts, in total and per mission;
+  - a failure-code histogram (`code/responder_error`);
+  - the prompt set version;
+  - per-category accuracy;
+  - generations by role and model, with each role's thinking mode;
+  - RAM/VRAM sampled at mission boundaries.
+- **NOT RUNNABLE, with reasons:** routing accuracy (owned by PHX-105),
+  verification catch rate (needs fault-injected cases), recovery,
+  memory/research/computer control, Colibri I/O, user intervention, and
+  configuration (3).
+- **Comparison:** `--compare <config1-results.json>` (repeatable) writes
+  `.fyp-bench/fyp-comparison.md` and a `comparison` section. Each
+  configuration (1) tier (best first per file) sits next to configuration (2),
+  with accuracy, success, median latency, tokens per task, a same-task-set
+  check and the evidence directory. `--from-results` re-renders from a saved
+  results file without models.
+- **Privacy:** as ADR-029, hashes and lengths only, never prompts or answers.
+- **Tests:** `tests/test_fyp_multi_agent.py` (11 test functions, 13 cases).
+  - It uses a real `PhoenixRuntime` with a scripted model. The same fake also
+    drives the configuration (1) harness for `--compare`.
+  - It is mapped in `tests/matrix.toml`, and the script was added to the
+    `mypy-scripts` gate.
+- **Read-only check:** `--compare` was exercised offline against the three
+  real configuration (1) GPU evidence files with a scripted configuration (2)
+  run (scratch output only). All three parse, and the task-set hashes match.
+
+**Framing the comparison honestly:**
+- **Models:** configuration (2) mixes models by role. Per the tier table,
+  planner, assignment and LEVI run on 9B; specialists and the final answer on
+  4B; build_engineering on coder 7B; 2B is the fallback.
+- **Thinking:** structured roles use `think=False`. Specialist and
+  final_answer use the model default, so Qwen3.5 thinks.
+- **Latency:** configuration (2) latency is whole-mission time: triage plus one
+  DIRECT reply, or about 6–12 COMPLEX generations including model swaps on the
+  6 GB GPU. Compare it with
+  single-generation latency only with that caveat.
+- **Exact-match cases:** they may lose points to verbose synthesis. This is
+  reported, not tuned away (PHX-029).
+
+**Live results (2026-10-18): the BLAZE-6 evidence for configuration (2).**
+
+Setup common to both runs:
+- **Hardware and runtime:** BLAZE-6, RTX 3050 6 GB on CUDA, Ollama 0.40.4
+  desktop app, 16K context, AC power.
+- **Task set:** the unchanged v1 task set; 0 warm-up and 1 measured run (16
+  missions).
+- **Command:** `python scripts/fyp_benchmark.py --config phoenix-multi-agent`,
+  with `--compare` against the configuration (1) GPU evidence.
+
+| Run | Path | Code | Prompts | Evidence under `validation/` |
+| --- | --- | --- | --- | --- |
+| A | forced COMPLEX (`--path complex`) | branch `1fff0cd` | v3 | `PHX-091-config2-20261018-030132` |
+| B | triage (now the default) | PHX-105 + runner integration | v4 | `PHX-091-config2-triage-20261018-033220` |
+
+| Run | Routed | Completed / failed | Accuracy | Success | Latency median | Input / output tokens | LEVI checks passed / failed |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A | 16 COMPLEX | 6 / 10 | 43% | 38% | 122 s | 39,119 / 35,038 | 13 / 2 |
+| B | 11 DIRECT, 5 COMPLEX | 11 / 5 | 64% | 69% | 1.1 s | 18,861 / 8,317 | — |
+
+Failure codes:
+- **Run A:**
+  - 4× `responder_output/schema`: planner and assignment JSON from tiny
+    outputs (6–19 tokens) on trivial tasks;
+  - 3× `responder_output/truncated`: specialist thinking hit the 4096-token
+    cap;
+  - 1× `responder_output/not_json`;
+  - 2× `verification_failed`.
+
+  All 6 completed missions were correct.
+- **Run B:**
+  - 2× `provider_unavailable`: a transient Ollama drop, possibly from
+    concurrent CPU/GPU load during an exe build;
+  - 2× `verification_failed`;
+  - 1× `responder_output/not_json`.
+
+  One DIRECT answer was wrong, on `reasoning-arithmetic-chain`. The DIRECT path
+  has no LEVI check.
+
+Comparison with configuration (1)'s best rows (same task set):
+
+| Configuration | Accuracy | Latency median |
+| --- | --- | --- |
+| (1) T1 qwen3.5:4b, thinking off | 93% | 0.3 s |
+| (1) T1 qwen3.5:4b, thinking on | 100% | 7.2 s |
+| (2) PHOENIX, triage | 64% | 1.1 s |
+| (2) PHOENIX, forced COMPLEX | 43% | 122 s |
+
+Interpretation:
+- **Single model wins here.** On these short tasks with 6 GB of VRAM,
+  multi-agent orchestration is slower and less accurate than the best single
+  small model. Most COMPLEX failures are structured-output failures (schema,
+  not_json, truncation), not wrong answers.
+- **What multi-agent adds.** No wrong answer is ever reported as verified.
+  Every forced-COMPLEX answer that passed LEVI was correct, and LEVI refused 2.
+  The one wrong triage answer came from the unverified DIRECT path.
+  Permissioned tool use (PHX-046) is the other gain; this text-only task set
+  does not exercise it.
+- **Next levers:** constrained JSON decoding, and MAHORAGA retries for
+  transient and structured-output failures (PHX-109).
+- **Caveats:** one measured run per path, so the numbers carry run-to-run
+  variance. Run B overlapped other machine load. Runs A and B use different
+  prompt sets (v3 and v4) and code.
+
+**Runner change after PHX-105 merged** (merge of `origin/main` `1b51f26`):
+- `--path triage` is real and is now the default. It passes no path, so
+  PHOENIX triages each request.
+- Each trial records the decided `path`, `triage_outcome` and `triage_reason`.
+  The summary counts missions by path and by triage outcome.
+- `--path complex` stays as the full-pipeline stress test.
+- The stale `fyp_benchmark.py` reasons were also replaced: configuration (3)
+  now says there is no adaptive routing or Colibri T3 path, and verification
+  catch rate says it needs fault-injected cases.
+
+**Security review M2 fix (2026-10-18): verified and unverified results are
+reported separately.**
+
+PHX-109 (PR #84) lets MAHORAGA answer on the DIRECT path after AIZEN's plan
+fails twice. That mission completes, but its decided path stays COMPLEX, its
+task ends `failed`, and its answer is unverified. The runner used to count it
+as multi-agent success.
+
+What the runner records now:
+- **Per trial:**
+  - `verified`: COMPLEX, completed, and the task reached `completed`;
+  - `direct_fallback`: COMPLEX and completed, but the task ended `failed`, or
+    the PHX-109 `recoveries` flag a direct fallback;
+  - `recoveries`: counts by class, action and outcome when the trace has
+    them, otherwise `None`.
+- **Summary:**
+  - headline success excluding fallbacks, plus success "completed, incl.
+    unverified fallbacks";
+  - accuracy with and without fallbacks;
+  - the LEVI-verified pass count;
+  - a per-path breakdown: DIRECT is unverified by design; COMPLEX is split into
+    LEVI-verified, fallback and failed.
+- **Comparison:** configuration (2)'s success column is the figure excluding
+  fallbacks, and the figure including them goes in a note.
+- **`recovery_success`:** MEASURED when recoveries are present; otherwise
+  NOT_RUNNABLE ("needs PHX-109"). The stale "no retries (ADR-081)" text is
+  gone.
+- **`--from-results`:** re-derives the summary and metrics from the stored
+  trials into a new folder and refuses to overwrite its source.
+- **Run A and run B:** both predate PHX-109, so they cannot contain fallbacks
+  and their figures above are unchanged.
+
+**3-run triage evidence**, re-rendered without models into new sibling folders
+(`...-rerendered-M2`). The originals are untouched.
+
+| Run | Directory under `validation/` | Code |
+| --- | --- | --- |
+| with MAHORAGA | `PHX-FYP-config2-3runs-with-mahoraga-20261018-051123` | local integration branch `ca85fad` (PHX-109, PR #84, not on main) |
+| without MAHORAGA | `PHX-FYP-config2-3runs-without-mahoraga-20261018-054420` | `46bfafb` |
+
+| 48 missions each | with MAHORAGA | without MAHORAGA |
+| --- | --- | --- |
+| Completed (incl. unverified fallbacks) | 40 (83%) | 29 (60%) |
+| DIRECT fallbacks | 3 | 0 |
+| Success excl. fallbacks | 77% | 60% |
+| Accuracy (runner-style) | 64% | 50% |
+| Accuracy excl. fallbacks | 60% | 50% |
+| DIRECT missions (unverified by design) | 34; 22/28 scored pass | 28; 20/24 |
+| COMPLEX missions | 14 | 20 |
+| COMPLEX LEVI-verified completions | 3 | 1 |
+| COMPLEX failed | 8 | 19 |
+
+- **Reproduction:** the re-render reproduces the main session's independent
+  figures exactly.
+- **Caveats:**
+  - These traces predate `MissionTrace.recoveries`, so fallbacks were detected
+    from the task states.
+  - The run with MAHORAGA has 11 more completions. 6 of them come from triage
+    routing more requests DIRECT (34 vs 28), 3 are unverified DIRECT
+    fallbacks, and 2 are extra LEVI-verified COMPLEX completions (1 to 3). The
+    runs also differ in code (integration branch vs `46bfafb`).
