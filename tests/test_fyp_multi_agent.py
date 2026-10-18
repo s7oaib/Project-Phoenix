@@ -251,7 +251,9 @@ def test_forced_complex_runs_full_pipeline_for_every_case(tmp_path: Path) -> Non
     assert not any(t["direct_fallback"] for t in results["trials_detail"])
     assert (s["levi_verified_passes"], s["direct_fallbacks"]) == (14, 0)
     assert s["success_rate_excl_fallbacks"] == s["success_rate"] == 1.0
-    assert all(t["recoveries"] is None for t in results["trials_detail"])
+    # PHX-109 traces record recoveries; this clean run needed none.
+    assert all(t["recoveries"]["count"] == 0 for t in results["trials_detail"])
+    assert not any(t["recoveries"]["direct_fallback"] for t in results["trials_detail"])
     assert results["trials"] == {"warmup": 0, "measured": 1}
 
 
@@ -380,7 +382,14 @@ def test_output_schema_privacy_and_metric_coverage(tmp_path: Path) -> None:
     assert "PHX-105" in rows["routing_accuracy"]["reason"]
     assert "fault-injected" in rows["verification_catch_rate"]["reason"]
     measured = {k for k, r in rows.items() if r["status"] == "MEASURED"}
-    assert measured == {"task_success", "ttft_latency", "ram_vram", "token_usage"}
+    # recovery_success is MEASURED now that PHX-109 traces carry recoveries.
+    assert measured == {
+        "task_success",
+        "ttft_latency",
+        "ram_vram",
+        "token_usage",
+        "recovery_success",
+    }
     summary = (out / multi.SUMMARY_NAME).read_text("utf-8")
     assert "configuration (2)" in summary and "NOT RUNNABLE" in summary
 
