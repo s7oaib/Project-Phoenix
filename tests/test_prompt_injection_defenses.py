@@ -1807,13 +1807,12 @@ PHX_112_PATHS = ("phoenix/persistence/missions.py",)
 # routes, the settings store, the native proxy allowlist and the desktop
 # adapters; all stay pinned, at the PHX-108 implementation commit (the PR must
 # merge with a merge commit so this commit stays reachable). PHX-119 moved
-# server.py and schemas.py to its own pin (below).
+# server.py and schemas.py to its own pin (below), and PHX-122 the two desktop
+# adapter files.
 PHX_108_COMMIT = "f70b201a42338cc3c38c2159d2b2ee5d1c84e416"
 PHX_108_PATHS = (
     "phoenix/api/routes/system.py",
     "phoenix/persistence/settings.py",
-    "apps/desktop/src/adapters/ConnectedApp.tsx",
-    "apps/desktop/src/adapters/connected.css",
 )
 # PHX-119 (ADR-155..ADR-158) intentionally changed runtime.py (KAIDO mission
 # path, MissionTrace.kaido), mission_events.py (phoenix.degraded/phoenix.ready
@@ -1835,13 +1834,9 @@ PHX_114_PATHS: tuple[str, ...] = ()
 # pinned, at the PHX-115 commit that merged PHX-108 into it (implementation
 # commit 459c281; server.py, routes/__init__.py, proxy.rs and core.ts carry
 # both tickets). The PR must merge with a merge commit so this commit stays
-# reachable.
+# reachable. PHX-122 moved proxy.rs and core.ts to its own pin (below).
 PHX_115_COMMIT = "253829afc1a97402519bc279ddce416daabddb95"
-PHX_115_PATHS = (
-    "phoenix/api/launcher.py",
-    "apps/desktop/src-tauri/src/proxy.rs",
-    "apps/desktop/src/adapters/core.ts",
-)
+PHX_115_PATHS = ("phoenix/api/launcher.py",)
 # PHX-092 (ADR-125, ADR-127) intentionally changed server.py (/ready
 # prerequisites) and the desktop backend sidecar (installed-mode resolution,
 # isolated bundled interpreter); both stay pinned, at the PHX-092 merge
@@ -1899,6 +1894,19 @@ PHX_TRAIN_PATHS = (
     "phoenix/api/routes/schemas.py",
     "phoenix/api/server.py",
 )
+# PHX-122 (ADR-170 to ADR-174) intentionally changed the native proxy
+# allowlist (voice and knowledge routes, the base64 upload) and the desktop
+# adapters (store, connection bar, setup views and their styles); all stay
+# pinned, at the PHX-122 implementation commit (the PR must merge with a merge
+# commit so this commit stays reachable).
+PHX_122_COMMIT = "c39c1009bfcafe6c21e00c99c0d128f479a8d129"
+PHX_122_PATHS = (
+    "apps/desktop/src-tauri/src/proxy.rs",
+    "apps/desktop/src/adapters/core.ts",
+    "apps/desktop/src/adapters/ConnectedApp.tsx",
+    "apps/desktop/src/adapters/SetupViews.tsx",
+    "apps/desktop/src/adapters/connected.css",
+)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -1933,6 +1941,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_120_PATHS
         and path not in PHX_112_PATHS
         and path not in PHX_TRAIN_PATHS
+        and path not in PHX_122_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1956,6 +1965,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_120_COMMIT, path) for path in PHX_120_PATHS]
     baselines += [(PHX_112_COMMIT, path) for path in PHX_112_PATHS]
     baselines += [(PHX_TRAIN_COMMIT, path) for path in PHX_TRAIN_PATHS]
+    baselines += [(PHX_122_COMMIT, path) for path in PHX_122_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

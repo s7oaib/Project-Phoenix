@@ -1928,6 +1928,10 @@ def test_no_action_persistence_or_dependency_change() -> None:
             # hash-pinned in test_prompt_injection_defenses.py).
             ":(exclude)phoenix/api/knowledge.py",
             ":(exclude)phoenix/api/routes/knowledge.py",
+            # PHX-122 (ADR-170 to ADR-174) adds the desktop capability views (the
+            # changed proxy and adapters are excluded above and hash-pinned in
+            # test_prompt_injection_defenses.py).
+            ":(exclude)apps/desktop/src/adapters/CapabilityViews.tsx",
         ],
         cwd=ROOT,
     )
