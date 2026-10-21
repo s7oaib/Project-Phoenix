@@ -96,7 +96,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 
 ## Phase 9 — Validation & Release
 - PHX-090 Automated test matrix — DONE
-- PHX-091 FYP benchmark suite — DONE (configuration 1 GPU baselines; configuration 2 measured live, triage and forced COMPLEX); configuration 3 NOT RUNNABLE
+- PHX-091 FYP benchmark suite — DONE (configuration 1 GPU baselines; configuration 2 measured live, triage and forced COMPLEX); configuration 3 runnable behind the PHX-116 gate
 - PHX-092 Packaging/install workflow — TODO
 - PHX-093 Final demo scenarios — TODO
 - PHX-094 Release evidence package — TODO
@@ -118,7 +118,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-113 Media and documents steps — TODO
 - PHX-114 Voice pipeline — DONE (backend: wake, STT, TTS, barge-in, /voice API, ADR-105–109; desktop mic toggle is a follow-up)
 - PHX-115 Observability — TODO
-- PHX-116 Colibri deep tier — TODO
+- PHX-116 Colibri deep tier — IN_PROGRESS (engine and model installed, gate and configuration (3) runner ready; live gate awaits a free GPU)
 - PHX-117 Metric datasets — DONE (datasets, scorers and runner; verification catch rate and intervention count measured in scripted CI; memory/research/computer control NOT RUNNABLE until PHX-110/111/112)
 - PHX-118 LEVI final-verifier reliability — DONE (deterministic grounding pre-check, ADR-100; PHX-118b narrowed it to label values the request names, 2026-10-21; proposed v5 prompt text awaits owner approval)
 - PHX-119 KAIDO fail-safe in missions — DONE (ADR-155–ADR-158; owner reviews R1–R14 and the KAIDO prompt text)

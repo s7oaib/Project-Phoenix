@@ -5354,3 +5354,104 @@ Decision:
 Limitations: the thresholds are recommended starting values, not derived from
 data. The first live runs may justify an owner-approved amendment. Nothing is
 frozen by this ADR itself.
+## ADR-120 — Colibri deep tier: official release engine, catalog container and a measured gate
+
+Status: Accepted (owner decision 2026-10-21: "yes, try it"; downloads
+pre-approved from official sources; recommended options otherwise)
+Date: 2026-10-21
+Ticket: PHX-116
+
+Context: docs/05 lists Qwen3.6-35B-A3B on Colibri as the optional T3 deep tier,
+"benchmark-gated" (ADR-007), and docs/24 FYP configuration (3) has been NOT
+RUNNABLE because Colibri was not installed (ADR-079). BLAZE-6 has 24 GB RAM
+(23.7 GiB usable, 2 x 12 GB DDR5-4800), an RTX 3050 Laptop 6 GB (compute
+capability 8.6, driver 610.62), one Samsung NVMe SSD, and no MinGW/MSVC
+toolchain.
+
+Decision:
+
+- **Engine.** The official `JustVugg/colibri` release v2.0.0 Windows archive
+  plus its CUDA overlay (`coli_cuda.dll`, compute capability 8.0 and newer;
+  bundles NVIDIA's `cudart64_12.dll`), both checked against the release's
+  `SHA256SUMS.txt` and GitHub's asset digests, unpacked to
+  `D:\Phoenix\colibri\engine-v2.0.0-cuda`. The upstream Windows build needs
+  MinGW gcc/make and MSVC for the CUDA DLL; installing system toolchains is out
+  of scope, and the project's own docs make the release archive the Windows
+  path. The source checkout (`D:\Phoenix\colibri\src`, `e0db083`) is kept for
+  reference only.
+- **Model.** The container Colibri's own setup installs for `qwen36-35b`
+  (`c/setup_catalog.py` at `e0db083`):
+  `Kreuzzelg/qwen36-35b-a3b-colibri-i4-gs64` pinned to revision `c619aa59…`,
+  int4 group-scaled experts, 23.1 GB, into
+  `D:\Phoenix\models\colibri\qwen36-35b-a3b-colibri-i4-gs64`. Its model card
+  names `Qwen/Qwen3.6-35B-A3B` as the base model; it was converted and
+  published by Kreuzzelg, a Colibri contributor (author of the group-scaled
+  path), not by Qwen. The Colibri project designates it, so it counts as the
+  project's official artifact, and it holds data files only (safetensors,
+  JSON, tokenizer), no code.
+  The alternative, converting the official Qwen bf16 checkpoint locally
+  (~70 GB download plus a PyTorch install), is recorded but not taken. The 42
+  large files' Hugging Face LFS sha256 values are pinned in
+  `benchmarks/colibri/qwen36-35b-a3b-colibri-i4-gs64.sha256` and verified by
+  the gate. Nothing under `D:\Phoenix` is committed.
+- **Port.** Colibri keeps its default `127.0.0.1:8000` (the `ColibriProvider`
+  default, ADR-028). PHOENIX's backend takes an OS-assigned port (ADR-084), so
+  they do not conflict. PHOENIX still never installs, starts or stops Colibri.
+- **Gate.** `scripts/colibri_gate.py` measures, through the unchanged
+  `ColibriProvider` and PHX-016 `BenchmarkRunner`, the fixed FYP v1 task set on
+  the served model, plus host facts, the container manifest, a sequential
+  NVMe read of the shards and the engine process's own disk reads and RSS. PASS
+  needs every criterion: success rate >= 0.9, accuracy >= 0.5, TTFT median
+  <= 60 s, output tokens / whole latency >= 2 tok/s, RAM headroom at peak
+  >= 1.5 GiB, VRAM peak <= 98% of the card, shard read >= 1000 MB/s, manifest
+  OK. The 1000 MB/s floor is pre-registered. After preliminary reads of
+  662–823 MB/s, a 600 MB/s floor was briefly considered. The owner rejected it
+  on 2026-10-21, because changing a threshold after seeing data is not
+  acceptable for the FYP. The gate report prints every measured value next to
+  its threshold, so the FYP can state which criteria failed. Any failure is FAIL: configuration (3) is then reported as measured and
+  rejected with the numbers. A missing measurement is INCOMPLETE, never PASS.
+- **Honest metrics.** TTFT is time to the first visible answer, so it includes
+  Qwen3.6's reasoning; `ColibriProvider` cannot turn thinking off without a
+  contract change. Throughput uses output tokens / whole latency (ADR-079).
+
+Limitations: the shard read is buffered and may include OS cache; the live
+run is pending a free GPU. INV-024: Colibri stays optional; no dependency,
+lock or `phoenix/` change.
+
+## ADR-121 — Configuration (3): escalate to the deep tier only on PHOENIX's own failure evidence
+
+Status: Accepted (owner decision 2026-10-21; recommended options)
+Date: 2026-10-21
+Ticket: PHX-116
+
+Decision: `scripts/fyp_adaptive_deep.py`, reached through
+`scripts/fyp_benchmark.py --config phoenix-adaptive-deep`, runs each v1 task as
+configuration (2) first (triage by default). It escalates once to a second
+runtime whose tier table puts `colibri/<deep model>` first in the default row
+(text specialists and the final answer) and the `build_engineer` row, when:
+
+- the first mission failed with `verification_failed` (LEVI rejected it) or
+  `responder_output` (unusable output after MAHORAGA's retry); or
+- it completed only through an unverified DIRECT fallback (PHX-109).
+
+Nothing else escalates: prompt-boundary refusals, permission and tool
+outcomes, cancellation, timeouts, provider and routing failures and runtime
+defects keep the first result (INV-008, INV-021). The benchmark score is never
+consulted. The escalated attempt is a forced COMPLEX mission: triage, AIZEN,
+assignment and LEVI stay on Ollama with thinking off, so a different model
+verifies the deep answer. Both runtimes share one `ModelLifecycleManager`, so
+only one heavy generation runs at a time (INV-023). A deep tier that turns
+unhealthy mid-run makes the router fall back to Ollama, and the run reports it
+as `deep_not_used` (INV-022). The run refuses to start if Colibri is not
+serving the model.
+
+Reports keep codes, counts, timings and hashes (ADR-029). They include the
+first-attempt summary (configuration (2) on the same run), the final summary,
+escalations by reason, deep generations, rescued missions (completed,
+LEVI-verified, scored passes) and the deep attempt's latency. A mission's
+latency is the sum of both attempts.
+
+`phoenix/` is unchanged: the policy lives in the FYP runner, using only the
+existing `PhoenixRuntime` multi-provider and `tier_table` parameters. Product
+escalation inside PHOENIX is a later ticket, if the gate passes and the owner
+wants it.
