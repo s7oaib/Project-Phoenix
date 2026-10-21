@@ -388,14 +388,28 @@ def test_output_schema_privacy_and_metric_coverage(tmp_path: Path) -> None:
     assert rows["routing_accuracy"]["status"] == "NOT_RUNNABLE"
     assert "PHX-105" in rows["routing_accuracy"]["reason"]
     assert "fault-injected" in rows["verification_catch_rate"]["reason"]
+    assert "scripts/metric_benchmark.py" in rows["verification_catch_rate"]["reason"]
+    for metric, ticket in (
+        ("memory_retrieval_accuracy", "PHX-110"),
+        ("research_evidence_quality", "PHX-111"),
+        ("computer_control_completion", "PHX-112"),
+    ):
+        assert ticket in rows[metric]["reason"]
+        assert "benchmarks/metrics/" in rows[metric]["reason"]
     measured = {k for k, r in rows.items() if r["status"] == "MEASURED"}
-    # recovery_success is MEASURED now that PHX-109 traces carry recoveries.
+    # recovery_success is MEASURED now that PHX-109 traces carry recoveries;
+    # PHX-117 measures permission prompts from the mission outcomes.
     assert measured == {
         "task_success",
         "ttft_latency",
         "ram_vram",
         "token_usage",
         "recovery_success",
+        "user_intervention_count",
+    }
+    assert results["summary"]["interventions"] == {
+        "permission_prompts": 0,
+        "per_mission": 0.0,
     }
     summary = (out / multi.SUMMARY_NAME).read_text("utf-8")
     assert "configuration (2)" in summary and "NOT RUNNABLE" in summary

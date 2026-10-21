@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: greeting form</title>
+</head>
+<body>
+<h1>Greeting</h1>
+<form id="form">
+<label for="name">Your name</label>
+<input id="name" name="name" type="text">
+<label for="city">City</label>
+<input id="city" name="city" type="text">
+<button id="submit" type="submit">Submit</button>
+</form>
+<p id="greeting" role="status"></p>
+<script>
+document.getElementById("form").addEventListener("submit", function (event) {
+  event.preventDefault();
+  var name = document.getElementById("name").value.trim();
+  var city = document.getElementById("city").value.trim();
+  var text = name ? "Hello, " + name : "Name is required";
+  if (name && city) {
+    text += " from " + city;
+  }
+  document.getElementById("greeting").textContent = text;
+});
+</script>
+</body>
+</html>

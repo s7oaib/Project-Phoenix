@@ -71,7 +71,33 @@ CONFIG3_REASON = (
 )
 CATCH_RATE_REASON = (
     "Needs fault-injected cases: the v1 set has no known-bad candidates, and a "
-    "LEVI rejection hides the rejected answer, so a catch cannot be scored."
+    "LEVI rejection hides the rejected answer, so a catch cannot be scored here. "
+    "Measured separately by scripts/metric_benchmark.py (PHX-117) on "
+    "benchmarks/metrics/verification-v1.toml."
+)
+# PHX-117 (ADR-117): these datasets exist and are validated by
+# scripts/metric_benchmark.py --dry-run; the metric waits for its capability.
+MEMORY_REASON = (
+    "Needs PHX-110 (memory and RAG in missions); its retrieval QA set "
+    "benchmarks/metrics/memory-v1.toml is defined and validated (PHX-117)."
+)
+RESEARCH_REASON = (
+    "Needs PHX-111 (web research in missions); its evidence rubric set "
+    "benchmarks/metrics/research-v1.toml is defined and validated (PHX-117)."
+)
+CONTROL_REASON = (
+    "Needs PHX-112 (computer-control steps); its task set "
+    "benchmarks/metrics/computer-control-v1.toml is defined and validated (PHX-117)."
+)
+RECOVERY_REASON = (
+    "A single-model baseline has no MAHORAGA; recovery is measured from "
+    "configuration (2) MissionTrace.recoveries (PHX-109) and summarized by "
+    "scripts/metric_benchmark.py --config2-results (PHX-117)."
+)
+INTERVENTION_REASON = (
+    "A single-model baseline has no permission prompts; measured by "
+    "scripts/metric_benchmark.py (PHX-117) on benchmarks/metrics/"
+    "interventions-v1.toml and per mission in configuration (2)."
 )
 NOT_RUNNABLE_CONFIGS: tuple[dict[str, str], ...] = (
     {
@@ -97,15 +123,15 @@ METRICS: tuple[tuple[str, str | None], ...] = (
         " benchmarks/routing/routing-v1.toml; not part of this baseline run.",
     ),
     ("verification_catch_rate", CATCH_RATE_REASON),
-    ("recovery_success", "Needs model-backed MAHORAGA/KAIDO execution."),
-    ("memory_retrieval_accuracy", "Needs an end-to-end RAG answering flow."),
-    ("research_evidence_quality", "Needs a model-backed URAHARA research flow."),
-    ("computer_control_completion", "Needs model-driven tool execution."),
+    ("recovery_success", RECOVERY_REASON),
+    ("memory_retrieval_accuracy", MEMORY_REASON),
+    ("research_evidence_quality", RESEARCH_REASON),
+    ("computer_control_completion", CONTROL_REASON),
     ("ttft_latency", None),
     ("ram_vram", None),
     ("token_usage", None),
     ("colibri_disk_io", "Colibri deep tier is not installed."),
-    ("user_intervention_count", "Needs interactive end-to-end task execution."),
+    ("user_intervention_count", INTERVENTION_REASON),
 )
 MEASURED_FROM = {
     "task_success": "summary.score_accuracy and summary.success_rate",

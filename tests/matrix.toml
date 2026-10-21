@@ -29,7 +29,7 @@ timeout = 1200
 [[gate]]
 # pyproject.toml is guard-pinned, so scripts/ get their own strict mypy gate.
 id = "mypy-scripts"
-command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py", "scripts/voice_setup.py", "scripts/voice_smoke.py"]
+command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py", "scripts/voice_setup.py", "scripts/voice_smoke.py", "scripts/metric_datasets.py", "scripts/metric_benchmark.py"]
 timeout = 600
 
 [[gate]]
@@ -251,6 +251,20 @@ categories = ["unit", "recovery", "forged_tool_results"]
 path = "tests/test_memory_schema.py"
 categories = ["unit", "migrations"]
 # migrations: test_real_alembic_upgrade_downgrade_reupgrade_lifecycle
+
+[[file]]
+path = "tests/test_metric_benchmark.py"
+categories = ["unit", "integration", "permissions", "forged_tool_results"]
+# PHX-117 metric runner; integration: test_scripted_run_measures_the_deterministic_floor
+# (fault-injected missions through a real PhoenixRuntime, LEVI, FilesystemTool,
+# PermissionEngine and migrated audit DB with a scripted model)
+# permissions: test_scripted_run_counts_permission_prompts (WAITING_PERMISSION, exact-request re-run grants)
+# forged_tool_results: test_scripted_run_measures_the_deterministic_floor (forged tool evidence caught by LEVI)
+
+[[file]]
+path = "tests/test_metric_datasets.py"
+categories = ["unit"]
+# PHX-117 fixed metric datasets (sha256 pins), validators and deterministic scorers
 
 [[file]]
 path = "tests/test_mission_events.py"

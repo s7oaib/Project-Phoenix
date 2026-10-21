@@ -124,18 +124,14 @@ METRICS: tuple[tuple[str, str], ...] = (
         "These traces record no MAHORAGA recoveries: MissionTrace.recoveries "
         "needs PHX-109.",
     ),
-    ("memory_retrieval_accuracy", "Needs an end-to-end RAG answering flow."),
-    ("research_evidence_quality", "Needs a model-backed URAHARA research flow."),
-    ("computer_control_completion", "Needs model-driven tool execution."),
+    ("memory_retrieval_accuracy", baseline.MEMORY_REASON),
+    ("research_evidence_quality", baseline.RESEARCH_REASON),
+    ("computer_control_completion", baseline.CONTROL_REASON),
     ("ttft_latency", ""),
     ("ram_vram", ""),
     ("token_usage", ""),
     ("colibri_disk_io", "Colibri deep tier is not part of configuration (2)."),
-    (
-        "user_intervention_count",
-        "The v1 task set is text-only, so no mission can need a permission "
-        "decision; waiting_permission counts are still reported.",
-    ),
+    ("user_intervention_count", ""),
 )
 MEASURED_FROM = {
     "task_success": "score_accuracy over measured missions (failed missions "
@@ -150,6 +146,10 @@ MEASURED_FROM = {
     "and end (boundary samples, not a continuous peak)",
     "token_usage": "sum of reported input/output tokens over every generation "
     "of every measured mission",
+    "user_intervention_count": "permission prompts (WAITING_PERMISSION "
+    "missions) over measured missions (summary.interventions; PHOENIX v1 has no "
+    "clarification turn). The v1 task set is text-only; workspace missions are "
+    "measured by scripts/metric_benchmark.py (PHX-117)",
 }
 NOT_RUNNABLE_CONFIG3 = {
     "id": "phoenix-adaptive-deep",
@@ -526,6 +526,11 @@ def summarize(trials: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "by_path": _by_path(measured),
         "recoveries": _recovery_summary(measured),
+        # PHX-117 (ADR-118): one permission prompt per WAITING_PERMISSION result.
+        "interventions": {
+            "permission_prompts": kinds[MissionKind.WAITING_PERMISSION],
+            "per_mission": kinds[MissionKind.WAITING_PERMISSION] / n if n else None,
+        },
         "category_accuracy": {
             name: {**row, "accuracy": row["passed"] / row["n"]}
             for name, row in sorted(by_category.items())
@@ -796,6 +801,11 @@ def _verification_lines(s: dict[str, Any]) -> list[str]:
             f"{_counts(recoveries['by_action'])}; by class "
             f"{_counts(recoveries['by_class'])}."
         )
+    # Derived from the outcomes, so results stored before PHX-117 render too.
+    lines.append(
+        f"- User interventions: {s['outcomes'].get('waiting_permission', 0)} "
+        "permission prompt(s); PHOENIX v1 has no clarification turn."
+    )
     return lines
 
 

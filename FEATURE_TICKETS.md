@@ -119,6 +119,6 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-114 Voice pipeline — DONE (backend: wake, STT, TTS, barge-in, /voice API, ADR-105–109; desktop mic toggle is a follow-up)
 - PHX-115 Observability — TODO
 - PHX-116 Colibri deep tier — TODO
-- PHX-117 Metric datasets — TODO
+- PHX-117 Metric datasets — DONE (datasets, scorers and runner; verification catch rate and intervention count measured in scripted CI; memory/research/computer control NOT RUNNABLE until PHX-110/111/112)
 - PHX-118 LEVI final-verifier reliability — DONE (deterministic grounding pre-check, ADR-100; PHX-118b narrowed it to label values the request names, 2026-10-21; proposed v5 prompt text awaits owner approval)
 - PHX-119 KAIDO fail-safe in missions — DONE (ADR-155–ADR-158; owner reviews R1–R14 and the KAIDO prompt text)

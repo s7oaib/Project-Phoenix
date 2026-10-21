@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: settings panel</title>
+</head>
+<body>
+<h1>Preferences</h1>
+<div role="tablist">
+<button id="tab-general" role="tab" type="button">General</button>
+<button id="tab-display" role="tab" type="button">Display</button>
+</div>
+<section id="panel" role="tabpanel">General settings</section>
+<label><input id="dark-mode" type="checkbox" disabled> Dark mode</label>
+<label for="colour">Accent colour</label>
+<select id="colour">
+<option value="red">Red</option>
+<option value="green">Green</option>
+<option value="blue">Blue</option>
+</select>
+<button id="apply" type="button">Apply</button>
+<p id="status" role="status">No changes</p>
+<script>
+document.getElementById("tab-general").addEventListener("click", function () {
+  document.getElementById("panel").textContent = "General settings";
+  document.getElementById("dark-mode").disabled = true;
+});
+document.getElementById("tab-display").addEventListener("click", function () {
+  document.getElementById("panel").textContent = "Display settings";
+  document.getElementById("dark-mode").disabled = false;
+});
+document.getElementById("apply").addEventListener("click", function () {
+  var colour = document.getElementById("colour");
+  var dark = document.getElementById("dark-mode").checked;
+  var label = colour.options[colour.selectedIndex].text;
+  document.getElementById("status").textContent =
+    "Accent " + label + (dark ? ", dark mode on" : ", dark mode off");
+});
+</script>
+</body>
+</html>
