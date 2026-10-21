@@ -1742,12 +1742,10 @@ PHX_103_PATHS = (
 # store and workspace wiring), missions.py (use_runtime; a mission keeps its
 # runtime) and alembic/env.py (settings row registration); all three stay
 # pinned, at the latest PHX-104 implementation commit (review fixes; the first
-# round was f9a075c). PHX-105 moved missions.py to its own pin (below).
+# round was f9a075c). PHX-105 moved missions.py and PHX-114 server.py to their
+# own pins (below).
 PHX_104_COMMIT = "7af605e26afcaf0e7000ee44d312e741a9107b2b"
-PHX_104_PATHS = (
-    "phoenix/api/server.py",
-    "alembic/env.py",
-)
+PHX_104_PATHS = ("alembic/env.py",)
 # PHX-105 (ADR-090) intentionally changed prompts.py (v4 TRIAGE_SYSTEM),
 # runtime.py (triage, trace fields), mission_events.py (triage allowlist),
 # api/missions.py (optional path, decisions, re-runs), persistence/missions.py
@@ -1785,8 +1783,15 @@ PHX_048_PATHS = ("phoenix/tools/filesystem.py",)
 # recovery, MissionTrace.recoveries) and mission_events.py (recovery.*
 # allowlist); both stay pinned, at the PHX-109 implementation commit.
 PHX_109_COMMIT = "2cf01ae286b4b74140769fba925a1b46a1a255e3"
-PHX_109_PATHS = (
-    "phoenix/agents/runtime.py",
+PHX_109_PATHS = ("phoenix/agents/runtime.py",)
+# PHX-114 (ADR-108) intentionally changed server.py (VoiceService wiring),
+# routes/__init__.py (voice routes) and mission_events.py (voice.* allowlist;
+# moved from the PHX-109 pin); all three stay pinned, at the PHX-114
+# implementation commit.
+PHX_114_COMMIT = "0d5de2ef19db99dbccce7177be2ff944d38ab1cb"
+PHX_114_PATHS = (
+    "phoenix/api/server.py",
+    "phoenix/api/routes/__init__.py",
     "phoenix/agents/mission_events.py",
 )
 
@@ -1810,6 +1815,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_106_PATHS
         and path not in PHX_048_PATHS
         and path not in PHX_109_PATHS
+        and path not in PHX_114_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1821,6 +1827,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_106_COMMIT, path) for path in PHX_106_PATHS]
     baselines += [(PHX_048_COMMIT, path) for path in PHX_048_PATHS]
     baselines += [(PHX_109_COMMIT, path) for path in PHX_109_PATHS]
+    baselines += [(PHX_114_COMMIT, path) for path in PHX_114_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
