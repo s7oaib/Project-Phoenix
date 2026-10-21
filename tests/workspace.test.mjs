@@ -2084,10 +2084,10 @@ test('PHX-087 suppressed sources report counts unavailable rather than claiming 
   assert.doesNotMatch(empty, /Diagnostic counts unavailable/);
 });
 
-test('PHX-108/115 the native proxy allowlist is exactly the twenty-one documented REST routes', () => {
+test('PHX-108/115/122 the native proxy allowlist is exactly the thirty-one documented REST routes', () => {
   const proxy = readFileSync(new URL('../apps/desktop/src-tauri/src/proxy.rs', import.meta.url), 'utf8');
   const table = proxy.slice(proxy.indexOf('pub const ROUTES'), proxy.indexOf('];', proxy.indexOf('pub const ROUTES')));
-  const routes = [...table.matchAll(/Method::(Get|Post|Patch),\s*"([^"]+)",\s*&\[([^\]]*)\]/g)]
+  const routes = [...table.matchAll(/Method::(Get|Post|Patch|Delete),\s*"([^"]+)",\s*&\[([^\]]*)\]/g)]
     .map(([, method, path, keys]) => `${method.toUpperCase()} ${path} [${keys.replace(/\s+/g, '')}]`);
   assert.deepEqual(routes, [
     'GET /health []', 'GET /ready []', 'POST /chat []', 'GET /missions ["conversation_id","limit","offset"]', 'GET /missions/{id} []',
@@ -2099,12 +2099,17 @@ test('PHX-108/115 the native proxy allowlist is exactly the twenty-one documente
     'GET /onboarding []', 'GET /capabilities []',
     // PHX-115 (ADR-147): read-only runtime metrics, no query.
     'GET /metrics []',
+    // PHX-122 (ADR-170, ADR-171): voice, the user's uploads and memory notes; DELETE for those two only.
+    'GET /voice/status []', 'POST /voice/start []', 'POST /voice/stop []', 'POST /files/upload ["filename"]', 'GET /files ["limit","offset"]',
+    'DELETE /files/{id} []', 'GET /memory ["limit","offset"]', 'POST /memory []', 'GET /memory/search ["q","limit"]', 'DELETE /memory/{id} []',
   ]);
   // Every fixed route the adapters name is on the allowlist (destructive routes stay absent).
   const core = readFileSync(new URL('../apps/desktop/src/adapters/core.ts', import.meta.url), 'utf8');
-  const named = [...core.matchAll(/(?:request\('(GET|POST|PATCH)', |this\.get\()[`']([^`'?$]+)[`'?]/g)].map(([, method, path]) => `${method ?? 'GET'} ${path}`);
-  for (const route of ['GET /onboarding', 'GET /capabilities', 'PATCH /settings', 'GET /settings']) assert.ok(named.includes(route), route);
-  for (const route of named) assert.ok(routes.some((entry) => entry.startsWith(`${route} `)), route);
+  const named = [...core.matchAll(/(?:request\('(GET|POST|PATCH|DELETE)', |this\.get\()[`']([^`'?$]+)[`'?$]/g)].map(([, method, path]) => `${method ?? 'GET'} ${path}`);
+  for (const route of ['GET /onboarding', 'GET /capabilities', 'PATCH /settings', 'GET /settings', 'GET /ready', 'GET /voice/status', 'POST /voice/start', 'POST /voice/stop',
+    'POST /files/upload', 'GET /files', 'DELETE /files/', 'GET /memory', 'POST /memory', 'GET /memory/search', 'DELETE /memory/']) assert.ok(named.includes(route), route);
+  // A path that continues with an ID ("/files/" + id) must match an `{id}` route of that method.
+  for (const route of named) assert.ok(routes.some((entry) => entry.startsWith(route.endsWith('/') ? `${route}{id}` : `${route} `)), route);
 });
 
 // PHX-106/107 (ADR-091, ADR-092): adapter, transport and native-boundary tests run in this file's node:test run.

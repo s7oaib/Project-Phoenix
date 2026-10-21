@@ -123,3 +123,4 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-118 LEVI final-verifier reliability — DONE (deterministic grounding pre-check, ADR-100; PHX-118b narrowed it to label values the request names, 2026-10-21; proposed v5 prompt text awaits owner approval)
 - PHX-119 KAIDO fail-safe in missions — DONE (ADR-155–ADR-158; owner reviews R1–R14 and the KAIDO prompt text)
 - PHX-120 Capability integration — DONE (PHX-110/111/113 on one `phoenix-prompts-v5`, backend wiring, capability flags; ADR-160–164; live acceptance pending)
+- PHX-122 Desktop capability UI — IN_PROGRESS (voice toggle, files and memory, KAIDO banner, approval summaries, web research status; ADR-170–174; implemented and tested on a local branch, awaiting PR review and the owner's live check)

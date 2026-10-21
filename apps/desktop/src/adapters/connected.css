@@ -66,3 +66,36 @@
 .settings-sections { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .settings-sections > section { padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
 @media (max-width: 1000px) { .settings-sections { grid-template-columns: minmax(0, 1fr); } }
+
+/* PHX-122 capability views: KAIDO banner, voice control, uploads, memory and approval summaries. */
+.kaido-banner { margin: 0; padding: 6px 10px; color: var(--text); background: var(--surface-hover); border: 1px solid var(--accent); border-left-width: 4px; border-radius: 6px; font-weight: 650; }
+/* App's built-in voice aside predates the live mic toggle; connected, the toggle above Chat replaces it. */
+.connection-bar ~ .app-shell .voice-panel { display: none; }
+.connection-bar ~ .app-shell .conversation-layout { grid-template-columns: minmax(0, 1fr); }
+.capability-card { display: grid; gap: 6px; margin-bottom: 12px; padding: 10px 12px; min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.capability-card h3, .capability-card p { margin: 0; overflow-wrap: anywhere; }
+.capability-note, .capability-feedback { color: var(--muted); }
+.voice-state { font-weight: 650; }
+.voice-unavailable, .voice-degraded_voice, .voice-text_only { color: var(--accent); }
+.capability-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.capability-actions button, .capability-list button {
+  min-height: 32px;
+  padding: 4px 10px;
+  color: var(--text);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.capability-actions button:hover, .capability-list button:hover { background: var(--surface-hover); }
+.capability-actions button:disabled, .capability-list button:disabled { cursor: not-allowed; opacity: 0.6; }
+.capability-list { display: grid; gap: 6px; margin: 4px 0; padding: 0; list-style: none; }
+.capability-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; min-width: 0; }
+.capability-list li > span { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.setup-form textarea { flex: 1 1 100%; min-width: 0; padding: 4px 10px; color: var(--text); background: var(--background); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+.capability-list li.approval-summary { display: grid; justify-content: stretch; }
+.approval-once { color: var(--accent); font-weight: 650; }
+.approval-fields { display: grid; gap: 2px; margin: 0; }
+.approval-fields > div { display: grid; grid-template-columns: minmax(90px, max-content) minmax(0, 1fr); gap: 8px; }
+.approval-fields dt { font-weight: 650; }
+.approval-fields dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }

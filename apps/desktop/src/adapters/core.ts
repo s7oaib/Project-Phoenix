@@ -9,6 +9,9 @@
 // PHX-108 (ADR-110 to ADR-114) adds the setup state: GET /onboarding (first-run checks),
 // GET /capabilities (which mission capabilities this build enables) and the saved default
 // mission path (PATCH /settings).
+// PHX-122 (ADR-170 to ADR-174): voice status and the mic toggle, the user's uploads and memory
+// notes, KAIDO's degraded mode from GET /ready, cited sources and KAIDO labels on answers, and
+// the display-only computer-control approval summary.
 
 import { agentRoster, diagnosticMetricNames, taskStates } from '../App';
 import type {
@@ -17,7 +20,7 @@ import type {
   TaskGraphPort, TaskState, TaskStep, TraceDisplayEntry,
 } from '../App';
 
-export type HttpMethod = 'GET' | 'POST' | 'PATCH';
+export type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 export type ApiResult = { readonly status: number; readonly body: unknown };
 export type BackendState = { readonly state: 'starting' | 'ready' | 'degraded'; readonly code?: string };
 export type StreamState = { readonly connected: boolean; readonly code: number | null };
@@ -89,7 +92,30 @@ export function errorCode(body: unknown): string {
 export type PendingPermission = {
   requestId: string; missionId: string; toolId: string; action: string; resource: string;
   riskLevel: string | null; requestedAt: string;
+  /** PHX-122 (ADR-173): the backend's display-only summary; never used to decide. */
+  summary?: ApprovalSummaryView;
 };
+export type ApprovalSummaryView = {
+  action: string; pageUrl: string | null; element: string | null; windowTitle: string | null; processName: string | null;
+  executablePath: string | null; processId: number | null; command: string | null; text: string | null; textMasked: boolean; note: string | null;
+};
+function nullable(value: unknown, limit: number): string | null | undefined {
+  return value === null ? null : str(value, limit);
+}
+/** PHX-112's ApprovalSummaryOut; undefined unless every field has the documented shape. */
+export function readApprovalSummary(value: unknown): ApprovalSummaryView | undefined {
+  if (!isObject(value)) return undefined;
+  const action = str(value.action, 256);
+  const fields = {
+    pageUrl: nullable(value.page_url, 2048), element: nullable(value.element, 512), windowTitle: nullable(value.window_title, 512),
+    processName: nullable(value.process_name, 256), executablePath: nullable(value.executable_path, 1024), command: nullable(value.command, 1024),
+    text: nullable(value.text, 2000), note: nullable(value.note, 1000),
+  };
+  const processId = value.process_id === null ? null : count(value.process_id) ?? undefined;
+  const textMasked = flag(value.text_masked);
+  if (!action?.trim() || processId === undefined || textMasked === undefined || Object.values(fields).some((field) => field === undefined)) return undefined;
+  return { action, ...(fields as { [K in keyof typeof fields]: string | null }), processId, textMasked, ...(textMasked ? { text: null } : {}) };
+}
 export function readPermission(value: unknown): PendingPermission | undefined {
   if (!isObject(value)) return undefined;
   const requestId = id(value.request_id);
@@ -100,7 +126,8 @@ export function readPermission(value: unknown): PendingPermission | undefined {
   const requestedAt = utc(value.requested_at);
   const risk = value.risk_level === null ? null : str(value.risk_level, 8);
   if (!requestId || !missionId || !toolId || !action || !resource || !requestedAt || risk === undefined || value.status !== 'pending') return undefined;
-  return { requestId, missionId, toolId, action, resource, riskLevel: risk, requestedAt };
+  const summary = readApprovalSummary(value.summary);
+  return { requestId, missionId, toolId, action, resource, riskLevel: risk, requestedAt, ...(summary ? { summary } : {}) };
 }
 
 export type MissionView = {
@@ -111,24 +138,43 @@ export type MissionView = {
   permissionRequestId: string | null;
   /** Review M1: whether LEVI verified a completed mission's answer (undefined until completed). */
   verification: Verification | undefined;
+  /** PHX-122 (ADR-172): the mission ran in KAIDO degraded mode (never verified). */
+  kaido: boolean;
+  /** PHX-122 (ADR-172): the sources the answer cites, in citation order. */
+  sources: SourceView[];
 };
+export type SourceView = { marker: string; label: string };
+export const SOURCE_LIMIT = 16;
+export function readSources(value: unknown): SourceView[] {
+  if (!Array.isArray(value)) return [];
+  const sources: SourceView[] = [];
+  for (const entry of value.slice(0, SOURCE_LIMIT)) {
+    const marker = isObject(entry) ? str(entry.marker, 16) : undefined;
+    const label = isObject(entry) ? str(entry.label, 512) : undefined;
+    if (marker?.trim() && label?.trim()) sources.push({ marker, label });
+  }
+  return sources;
+}
 
 // Review M1: an answer LEVI never verified must not look like a verified one. A completed
 // COMPLEX mission whose task ends `completed` passed LEVI on every step and the final answer.
 // DIRECT answers are never LEVI-verified, and a COMPLEX mission that completed while its task
 // ended `failed` was answered on the DIRECT fallback (PHX-109 MAHORAGA), so it is not
 // "planned steps". Anything else is reported unverified, never verified.
-export type Verification = 'verified' | 'unverified_direct' | 'unverified_direct_fallback' | 'unverified_unknown';
+// PHX-122 (ADR-172): a KAIDO answer is labelled as such, whatever its path.
+export type Verification = 'verified' | 'unverified_direct' | 'unverified_direct_fallback' | 'unverified_kaido' | 'unverified_unknown';
 export const verificationText: Readonly<Record<Verification, string>> = {
   verified: 'verified', unverified_direct: 'unverified · direct',
-  unverified_direct_fallback: 'unverified (direct fallback)', unverified_unknown: 'unverified (status unavailable)',
+  unverified_direct_fallback: 'unverified (direct fallback)', unverified_kaido: 'unverified (KAIDO degraded mode)', unverified_unknown: 'unverified (status unavailable)',
 };
 export const verificationBadge: Readonly<Record<Verification, string>> = {
   verified: 'Verified by LEVI', unverified_direct: 'Unverified · direct answer',
-  unverified_direct_fallback: 'Unverified · direct fallback', unverified_unknown: 'Unverified · verification status unavailable',
+  unverified_direct_fallback: 'Unverified · direct fallback', unverified_kaido: 'Unverified · KAIDO degraded mode',
+  unverified_unknown: 'Unverified · verification status unavailable',
 };
-export function verificationOf(mission: Pick<MissionView, 'status' | 'path' | 'taskStates'>): Verification | undefined {
+export function verificationOf(mission: Pick<MissionView, 'status' | 'path' | 'taskStates'> & { kaido?: boolean }): Verification | undefined {
   if (mission.status !== 'completed') return undefined;
+  if (mission.kaido) return 'unverified_kaido';
   const last = mission.taskStates[mission.taskStates.length - 1];
   if (mission.path === 'direct') return 'unverified_direct';
   if (mission.path === 'complex' && last === 'completed') return 'verified';
@@ -150,8 +196,10 @@ export function readMission(value: unknown): MissionView | undefined {
   const states = Array.isArray(value.task_states) ? value.task_states.filter((state): state is string => typeof state === 'string') : [];
   const request = isObject(value.permission_request) ? id(value.permission_request.request_id) ?? null : null;
   const path = value.path === 'direct' || value.path === 'complex' ? value.path : null;
+  const kaido = isObject(value.kaido);
   return {
-    missionId, conversationId, status, path, verification: verificationOf({ status, path, taskStates: states }),
+    missionId, conversationId, status, path, verification: verificationOf({ status, path, taskStates: states, kaido }),
+    kaido, sources: status === 'completed' ? readSources(value.sources) : [],
     triageOutcome: value.triage_outcome === 'decided' || value.triage_outcome === 'fallback' || value.triage_outcome === 'client' ? value.triage_outcome : null,
     failureCode: str(value.failure_code, 64) ?? null, rerunOf: id(value.rerun_of) ?? null,
     rerunId: id(value.rerun_id) ?? null, taskId: id(value.task_id) ?? null, taskStates: states,
@@ -160,8 +208,9 @@ export function readMission(value: unknown): MissionView | undefined {
 }
 
 /** User messages and PHOENIX answers as App ChatMessages; long answers become ordered parts.
- *  Every answer starts with a text badge, "[Verified by LEVI]" or "[Unverified · …]" (review M1). */
-export function toChatMessages(body: unknown, verifications: ReadonlyMap<string, Verification> = new Map()): ChatMessage[] {
+ *  Every answer starts with a text badge, "[Verified by LEVI]" or "[Unverified · …]" (review M1),
+ *  and ends with the sources it cites, one "[n] label" line each (PHX-122, ADR-172). */
+export function toChatMessages(body: unknown, verifications: ReadonlyMap<string, Verification> = new Map(), sources: ReadonlyMap<string, readonly SourceView[]> = new Map()): ChatMessage[] {
   const messages: ChatMessage[] = [];
   for (const entry of items(body)) {
     if (!isObject(entry)) continue;
@@ -172,7 +221,9 @@ export function toChatMessages(body: unknown, verifications: ReadonlyMap<string,
     if (!messageId || !role || raw === undefined || raw.trim().length === 0) continue;
     const missionId = role === 'assistant' ? answerMission(messageId) : undefined;
     const badge = verificationBadge[(missionId && verifications.get(missionId)) || 'unverified_unknown'];
-    const text = role === 'assistant' ? `[${badge}]\n${raw}` : raw;
+    const cited = (missionId && sources.get(missionId)) || [];
+    const citations = cited.length ? `\n\nSources:\n${cited.map((source) => `${source.marker} ${source.label}`).join('\n')}` : '';
+    const text = role === 'assistant' ? `[${badge}]\n${raw}${citations}` : raw;
     const parts = Math.ceil(text.length / MESSAGE_PART);
     for (let part = 0; part < parts; part += 1) {
       const content = text.slice(part * MESSAGE_PART, (part + 1) * MESSAGE_PART);
@@ -194,7 +245,9 @@ export function toPermissionEntries(pending: readonly PendingPermission[], actor
     const actorId = actors.get(request.requestId) ?? 'phoenix';
     const base = {
       requestId: request.requestId, actorId, toolId: request.toolId, action: request.action, resource: request.resource,
-      reason: `Mission ${request.missionId} needs ${request.action} through ${request.toolId}. Approve stores a grant for this launch (session) and queues the linked re-run; Deny fails the mission.`,
+      reason: request.riskLevel === 'P4'
+        ? `Mission ${request.missionId} needs ${request.action} through ${request.toolId}. One-time approval (P4): Approve allows this exact action once and queues the linked re-run; no grant is stored, so PHOENIX asks again next time. Deny fails the mission.`
+        : `Mission ${request.missionId} needs ${request.action} through ${request.toolId}. Approve stores a grant for this launch (session) and queues the linked re-run; Deny fails the mission.`,
       requestedAt: request.requestedAt,
     };
     const reasonCode = request.riskLevel === null ? undefined : riskReason[request.riskLevel];
@@ -329,6 +382,88 @@ export function readSettings(body: unknown): SettingsView | undefined {
 export const missionPathText: Readonly<Record<MissionPath, string>> = {
   auto: 'Automatic (PHOENIX decides)', direct: 'Direct answer', complex: 'Planned steps (AIZEN plan, workspace documents)',
 };
+
+// ---- PHX-122 voice, knowledge and KAIDO (ADR-170 to ADR-172)
+
+export const voiceStates = Object.freeze(['off', 'starting', 'sleeping', 'listening', 'thinking', 'speaking', 'degraded_voice', 'text_only', 'unavailable'] as const);
+export type VoiceState = (typeof voiceStates)[number];
+export type VoiceView = { state: VoiceState; code: string | null; wakePhrase: string; components: Array<{ id: string; status: string }> };
+function voiceState(value: unknown): VoiceState | undefined {
+  return voiceStates.find((state) => state === value);
+}
+/** GET /voice/status and the start/stop responses. */
+export function readVoice(body: unknown): VoiceView | undefined {
+  if (!isObject(body)) return undefined;
+  const state = voiceState(body.state);
+  const code = body.code === null ? null : plainId(body.code);
+  const wakePhrase = str(body.wake_phrase, 64);
+  if (!state || code === undefined || !wakePhrase) return undefined;
+  const components = (Array.isArray(body.components) ? body.components : []).slice(0, 8)
+    .map((entry) => (isObject(entry) ? { id: plainId(entry.id), status: plainId(entry.status) } : {}))
+    .filter((entry): entry is { id: string; status: string } => entry.id !== undefined && entry.status !== undefined);
+  return { state, code: code ?? null, wakePhrase, components };
+}
+/** Voice is "on" (the microphone may be open) in these states; Stop releases it. */
+export const VOICE_ACTIVE: readonly VoiceState[] = Object.freeze(['starting', 'sleeping', 'listening', 'thinking', 'speaking', 'degraded_voice']);
+
+export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024; // the backend's cap for POST /files/upload (ADR-133)
+export const MAX_FILENAME_CHARS = 255;
+export const MAX_ENCODED_QUERY = 400; // keeps the proxied path under its 512-character limit
+export const MAX_MEMORY_CHARS = 2000;
+export type DocumentView = { documentId: string; filename: string; mediaType: string; chunkCount: number; indexedAt: string };
+export type MemoryView = { memoryId: string; memoryType: string; content: string; createdAt: string };
+export type SearchHitView = { kind: 'memory' | 'document_chunk'; title: string | null; text: string; score: number };
+export function readDocuments(body: unknown): DocumentView[] | undefined {
+  if (!isObject(body) || !Array.isArray(body.items)) return undefined;
+  return body.items.slice(0, 64).flatMap((entry) => {
+    if (!isObject(entry)) return [];
+    const documentId = id(entry.document_id); const filename = str(entry.filename, 255); const mediaType = str(entry.media_type, 128);
+    const chunkCount = count(entry.chunk_count); const indexedAt = utc(entry.indexed_at);
+    return documentId && filename?.trim() && mediaType && chunkCount !== null && indexedAt ? [{ documentId, filename, mediaType, chunkCount, indexedAt }] : [];
+  });
+}
+export function readMemories(body: unknown): MemoryView[] | undefined {
+  if (!isObject(body) || !Array.isArray(body.items)) return undefined;
+  return body.items.slice(0, 64).flatMap((entry) => {
+    if (!isObject(entry)) return [];
+    const memoryId = id(entry.memory_id); const memoryType = str(entry.memory_type, 32); const content = str(entry.content, MAX_MEMORY_CHARS);
+    const createdAt = utc(entry.created_at);
+    return memoryId && memoryType && content?.trim() && createdAt ? [{ memoryId, memoryType, content, createdAt }] : [];
+  });
+}
+export function readSearch(body: unknown): SearchHitView[] | undefined {
+  if (!isObject(body) || !Array.isArray(body.items)) return undefined;
+  return body.items.slice(0, 20).flatMap((entry) => {
+    if (!isObject(entry)) return [];
+    const kind = entry.kind === 'memory' || entry.kind === 'document_chunk' ? entry.kind : undefined;
+    const title = entry.title === null ? null : str(entry.title, 255); const text = str(entry.text, 1000); const score = finite(entry.score);
+    return kind && title !== undefined && text?.trim() && score !== undefined ? [{ kind, title, text, score }] : [];
+  });
+}
+export const knowledgeErrors: Readonly<Record<string, string>> = {
+  payload_too_large: 'The file is larger than 8 MiB.',
+  unsupported_format: 'This file format is not supported for upload.',
+  media_type_mismatch: "The file's content does not match its name.",
+  invalid_upload: 'The file could not be read (empty, unparseable or a bad name).',
+  secret_rejected: 'Refused: it looks like it contains a password, key or other credential.',
+  knowledge_full: 'The knowledge store is full; delete an upload or a note first.',
+  knowledge_unavailable: 'Knowledge is unavailable: the embedding model is not running.',
+  not_found: 'It was already deleted.',
+  invalid_request: 'The request was not accepted.',
+  invalid_body: 'The file could not be sent (empty, unreadable or over 8 MiB).',
+  service_unavailable: 'The backend is starting or stopping; try again shortly.',
+};
+
+/** PHX-119's KAIDO status from GET /ready. */
+export type KaidoView = { engaged: boolean; trigger: string | null };
+export function readKaido(body: unknown): KaidoView | undefined {
+  if (!isObject(body)) return undefined;
+  if (body.kaido === null) return { engaged: false, trigger: null };
+  if (!isObject(body.kaido)) return undefined;
+  const engaged = flag(body.kaido.engaged);
+  if (engaged === undefined) return undefined;
+  return { engaged, trigger: engaged ? plainId(body.kaido.trigger) ?? null : null };
+}
 
 // ---- live evidence from content-free events
 
@@ -554,6 +689,18 @@ export type ConnectionView = {
   capabilities: CapabilityView[] | undefined;
   settings: SettingsView | undefined;
   settingsMessage: string;
+  // PHX-122
+  approvals: PendingPermission[];
+  kaido: KaidoView | undefined;
+  voice: VoiceView | undefined;
+  voiceInterrupted: boolean;
+  voiceBusy: boolean;
+  voiceMessage: string;
+  documents: DocumentView[] | undefined;
+  memories: MemoryView[] | undefined;
+  searchHits: SearchHitView[] | undefined;
+  knowledgeBusy: boolean;
+  knowledgeMessage: string;
 };
 export type PortsView = {
   chatPort: ChatPort; taskPort: TaskGraphPort; agentPort: AgentPort; permissionPort: PermissionPort;
@@ -561,8 +708,8 @@ export type PortsView = {
 };
 
 type Activity = { state: AgentStatus['state']; missionId: string; currentTask?: string };
-type Refresh = 'conversation' | 'mission' | 'permissions' | 'models' | 'settings' | 'onboarding' | 'capabilities' | 'metrics';
-const EVERYTHING: readonly Refresh[] = ['conversation', 'mission', 'permissions', 'models', 'settings', 'onboarding', 'capabilities', 'metrics'];
+type Refresh = 'conversation' | 'mission' | 'permissions' | 'models' | 'settings' | 'onboarding' | 'capabilities' | 'metrics' | 'ready' | 'voice' | 'knowledge';
+const EVERYTHING: readonly Refresh[] = ['conversation', 'mission', 'permissions', 'models', 'settings', 'onboarding', 'capabilities', 'metrics', 'ready', 'voice', 'knowledge'];
 
 export class PhoenixStore {
   private backend: BackendState = { state: 'starting' };
@@ -572,6 +719,7 @@ export class PhoenixStore {
   private activeMissionId: string | undefined;
   private mission: MissionView | undefined;
   private verifications = new Map<string, Verification>();
+  private sources = new Map<string, SourceView[]>();
   private pending: PendingPermission[] = [];
   private hiddenPermissions = 0;
   private actors = new Map<string, string>();
@@ -593,6 +741,16 @@ export class PhoenixStore {
   private capabilities: CapabilityView[] | undefined;
   private settings: SettingsView | undefined;
   private settingsMessage = '';
+  private kaido: KaidoView | undefined;
+  private voice: VoiceView | undefined;
+  private voiceInterrupted = false;
+  private voiceBusy = false;
+  private voiceMessage = '';
+  private documents: DocumentView[] | undefined;
+  private memories: MemoryView[] | undefined;
+  private searchHits: SearchHitView[] | undefined;
+  private knowledgeBusy = false;
+  private knowledgeMessage = '';
   private due = new Set<Refresh>();
   private timer: unknown;
   private poller: unknown;
@@ -630,6 +788,8 @@ export class PhoenixStore {
       if (this.backend.state === 'ready' && this.mission && !TERMINAL_STATUSES.includes(this.mission.status)) this.schedule('mission', 'permissions', 'conversation');
       this.ticks += 1;
       if (this.backend.state === 'ready' && this.ticks % METRICS_POLL_TICKS === 0) this.schedule('metrics');
+      // PHX-122 (ADR-172): while KAIDO is engaged, re-read /ready so the banner clears on release.
+      if (this.backend.state === 'ready' && this.kaido?.engaged && this.ticks % METRICS_POLL_TICKS === 0) this.schedule('ready');
       // PHX-108: while the first-run screen shows, keep re-checking so it updates as the user
       // starts the runtime or pulls a model.
       if (this.firstRunVisible()) this.schedule('onboarding');
@@ -672,9 +832,20 @@ export class PhoenixStore {
     this.traces = [...this.traces, toTrace(event)].slice(-RING);
     const metric = toMetric(event);
     if (metric) this.metrics = [...this.metrics, metric].slice(-RING);
-    const missionId = event.correlationId;
-    if (missionId) this.applyMissionEvent(missionId, event);
+    // PHX-122: voice and KAIDO events are correlated by a voice session or fail-safe ID, not a
+    // mission; they only update the voice indicator or re-read the status over REST.
+    if (event.eventType.startsWith('voice.')) this.applyVoiceEvent(event);
+    else if (event.eventType === 'phoenix.degraded' || event.eventType === 'phoenix.ready') this.schedule('ready');
+    else if (event.correlationId) this.applyMissionEvent(event.correlationId, event);
     this.changed();
+  }
+
+  private applyVoiceEvent(event: EventEnvelope): void {
+    const state = voiceState(event.payload.state);
+    if (this.voice && state) this.voice = { ...this.voice, state, code: event.payload.code === undefined ? null : plainId(event.payload.code) ?? null };
+    if (event.eventType === 'voice.interrupted') this.voiceInterrupted = true;
+    else if (event.eventType === 'voice.listening' || event.eventType === 'voice.speaking') this.voiceInterrupted = false;
+    this.schedule('voice');
   }
 
   private evidenceFor(missionId: string): MissionEvidence {
@@ -804,6 +975,9 @@ export class PhoenixStore {
       due.has('permissions') ? this.loadPermissions() : undefined,
       due.has('mission') ? this.loadMission() : undefined,
       due.has('metrics') ? this.loadMetrics() : undefined,
+      due.has('ready') ? this.loadReady() : undefined,
+      due.has('voice') ? this.loadVoice() : undefined,
+      due.has('knowledge') ? this.loadKnowledge() : undefined,
     ].map((task) => task?.catch(() => undefined)));
     if (due.has('conversation')) await this.loadConversation().catch(() => undefined);
     this.changed();
@@ -878,6 +1052,24 @@ export class PhoenixStore {
     this.models = toModelEntries(await this.get('/models'));
   }
 
+  /** /ready answers 503 while unavailable; either way its body carries the KAIDO status. */
+  private async loadReady(): Promise<void> {
+    const result = await this.transport.request('GET', '/ready');
+    const kaido = readKaido(result.body);
+    if (kaido) this.kaido = kaido;
+  }
+
+  private async loadVoice(): Promise<void> {
+    const voice = readVoice(await this.get('/voice/status'));
+    if (voice) this.voice = voice;
+  }
+
+  private async loadKnowledge(): Promise<void> {
+    const [files, memory] = await Promise.all([this.get('/files?limit=64'), this.get('/memory?limit=64')].map((task) => task.catch(() => undefined)));
+    if (files !== undefined) this.documents = readDocuments(files) ?? this.documents;
+    if (memory !== undefined) this.memories = readMemories(memory) ?? this.memories;
+  }
+
   private async loadMetrics(): Promise<void> {
     const diagnostics = toBackendDiagnostics(await this.get('/metrics'));
     if (diagnostics) this.backendDiagnostics = diagnostics;
@@ -896,6 +1088,7 @@ export class PhoenixStore {
     if (!mission) return;
     this.mission = mission;
     if (mission.verification) this.verifications.set(mission.missionId, mission.verification);
+    if (mission.verification) this.sources.set(mission.missionId, mission.sources);
     // Follow a linked re-run the user started from the Permissions view.
     if (mission.rerunId && mission.status === 'superseded') {
       this.activeMissionId = mission.rerunId;
@@ -929,8 +1122,9 @@ export class PhoenixStore {
     await Promise.all([...unknown].map(async (missionId) => {
       const mission = readMission(await this.get(`/missions/${missionId}`).catch(() => undefined));
       if (mission?.verification) this.verifications.set(missionId, mission.verification);
+      if (mission?.verification) this.sources.set(missionId, mission.sources);
     }));
-    this.messages = toChatMessages(body, this.verifications);
+    this.messages = toChatMessages(body, this.verifications, this.sources);
   }
 
   // -- port operations
@@ -1003,6 +1197,81 @@ export class PhoenixStore {
     this.changed();
   }
 
+  // -- PHX-122 voice (ADR-170): the mic toggle only starts or stops listening. Voice never
+  // approves a permission; spoken requests become ordinary missions.
+  async setVoice(on: boolean): Promise<void> {
+    if (this.voiceBusy || this.backend.state !== 'ready') return;
+    this.voiceBusy = true;
+    this.voiceMessage = '';
+    this.changed();
+    const request = on ? this.transport.request('POST', '/voice/start') : this.transport.request('POST', '/voice/stop');
+    const result = await request.catch(() => ({ status: 0, body: undefined }));
+    const voice = result.status === (on ? 202 : 200) ? readVoice(result.body) : undefined;
+    if (voice) {
+      this.voice = voice;
+      this.voiceInterrupted = false;
+    } else {
+      this.voiceMessage = `Voice ${on ? 'start' : 'stop'} was refused (${errorCode(result.body)}). Text chat stays available.`;
+    }
+    this.voiceBusy = false;
+    this.changed();
+  }
+
+  // -- PHX-122 knowledge (ADR-171): only the user writes uploads and notes.
+  private async knowledge(run: () => Promise<ApiResult>, expected: number, done: string, after?: (body: unknown) => void): Promise<void> {
+    if (this.knowledgeBusy || this.backend.state !== 'ready') return;
+    this.knowledgeBusy = true;
+    this.knowledgeMessage = '';
+    this.changed();
+    const result = await run().catch((error: unknown) => ({ status: 0, body: { error: { code: typeof error === 'string' ? error : 'request_failed' } } }));
+    if (result.status === expected) {
+      this.knowledgeMessage = done;
+      after?.(result.body);
+      this.schedule('knowledge');
+    } else {
+      const code = errorCode(result.body);
+      this.knowledgeMessage = knowledgeErrors[code] ?? `Refused (${code}).`;
+    }
+    this.knowledgeBusy = false;
+    this.changed();
+  }
+
+  /** `contentBase64` is the file's bytes in standard base64; Rust decodes it (ADR-171). */
+  async uploadFile(filename: string, size: number, contentBase64: string): Promise<void> {
+    const name = filename.trim();
+    const query = encodeURIComponent(name);
+    const invalid = !name || name.length > MAX_FILENAME_CHARS || query.length > MAX_ENCODED_QUERY ? 'Choose a file with a shorter name.' :
+      size <= 0 ? 'The file is empty.' : size > MAX_UPLOAD_BYTES ? 'The file is larger than 8 MiB; choose a smaller one.' : '';
+    if (invalid) { this.knowledgeMessage = invalid; this.changed(); return; }
+    await this.knowledge(() => this.transport.request('POST', `/files/upload?filename=${query}`, { content_base64: contentBase64 }), 201,
+      `Uploaded and indexed ${name}. Missions can now cite it.`);
+  }
+
+  async deleteFile(documentId: string): Promise<void> {
+    if (!UUID.test(documentId)) return;
+    await this.knowledge(() => this.transport.request('DELETE', `/files/${documentId}`), 204, 'Upload deleted with its index.');
+  }
+
+  async addMemory(content: string): Promise<void> {
+    const text = content.trim();
+    if (!text || text.length > MAX_MEMORY_CHARS) { this.knowledgeMessage = `Enter a note of 1–${MAX_MEMORY_CHARS} characters.`; this.changed(); return; }
+    await this.knowledge(() => this.transport.request('POST', '/memory', { content: text }), 201, 'Note saved to memory.');
+  }
+
+  async deleteMemory(memoryId: string): Promise<void> {
+    if (!UUID.test(memoryId)) return;
+    await this.knowledge(() => this.transport.request('DELETE', `/memory/${memoryId}`), 204, 'Note deleted.');
+  }
+
+  async searchMemory(text: string): Promise<void> {
+    const query = encodeURIComponent(text.trim());
+    if (!query || query.length > MAX_ENCODED_QUERY) { this.knowledgeMessage = 'Enter a shorter search.'; this.changed(); return; }
+    await this.knowledge(() => this.transport.request('GET', `/memory/search?q=${query}&limit=10`), 200, '', (body) => {
+      this.searchHits = readSearch(body) ?? [];
+      this.knowledgeMessage = `${this.searchHits.length} match(es).`;
+    });
+  }
+
   // -- snapshots
   private build(): PortsView {
     const status: ChatPort['status'] = this.backend.state === 'ready' ? 'connected' : this.backend.state === 'degraded' ? 'degraded' : 'unavailable';
@@ -1029,6 +1298,9 @@ export class PhoenixStore {
         path: this.path, mission: this.mission, missionMessage: this.missionMessage,
         onboarding: this.onboarding, onboardingDismissed: this.onboardingDismissed, checking: this.checking,
         capabilities: this.capabilities, settings: this.settings, settingsMessage: this.settingsMessage,
+        approvals: [...this.pending], kaido: this.kaido, voice: this.voice, voiceInterrupted: this.voiceInterrupted, voiceBusy: this.voiceBusy,
+        voiceMessage: this.voiceMessage, documents: this.documents, memories: this.memories, searchHits: this.searchHits,
+        knowledgeBusy: this.knowledgeBusy, knowledgeMessage: this.knowledgeMessage,
       },
     };
   }
