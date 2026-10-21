@@ -1783,9 +1783,16 @@ PHX_048_COMMIT = "2e04e22f361f64110742dd8974dece216d567a7f"
 PHX_048_PATHS = ("phoenix/tools/filesystem.py",)
 # PHX-109 (ADR-093) intentionally changed runtime.py (bounded MAHORAGA
 # recovery, MissionTrace.recoveries) and mission_events.py (recovery.*
-# allowlist); both stay pinned, at the PHX-109 implementation commit.
+# allowlist); PHX-113 moved both to its own pin (below), so nothing stays on
+# the PHX-109 commit.
 PHX_109_COMMIT = "2cf01ae286b4b74140769fba925a1b46a1a255e3"
-PHX_109_PATHS = (
+PHX_109_PATHS: tuple[str, ...] = ()
+# PHX-113 (ADR-140) intentionally changed runtime.py (opt-in capability steps,
+# MissionTrace.capability_calls) and mission_events.py (PHX-113 tool IDs,
+# actions and the media role); both stay pinned, at the PHX-113
+# implementation commit.
+PHX_113_COMMIT = "6c27714839e28ba5e494680bf36e607d70d4407a"
+PHX_113_PATHS = (
     "phoenix/agents/runtime.py",
     "phoenix/agents/mission_events.py",
 )
@@ -1810,6 +1817,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_106_PATHS
         and path not in PHX_048_PATHS
         and path not in PHX_109_PATHS
+        and path not in PHX_113_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1821,6 +1829,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_106_COMMIT, path) for path in PHX_106_PATHS]
     baselines += [(PHX_048_COMMIT, path) for path in PHX_048_PATHS]
     baselines += [(PHX_109_COMMIT, path) for path in PHX_109_PATHS]
+    baselines += [(PHX_113_COMMIT, path) for path in PHX_113_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
