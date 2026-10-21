@@ -1791,7 +1791,7 @@ PHX_118_PATHS: tuple[str, ...] = ()
 # PHX-118b (ADR-100, narrowed 2026-10-21) changed runtime.py
 # (FinalGrounding.request) and final_grounding.py (the label rule); both stay
 # pinned, at the PHX-118b merge resolution commit.
-PHX_118B_COMMIT = "8faeb3fd11a4f1fdeb7422a532bb71c8ed88c358"
+PHX_118B_COMMIT = "0a23c66c98b728d44d9859cb96c7eacc4575fa00"
 PHX_118B_PATHS = (
     "phoenix/agents/runtime.py",
     "phoenix/agents/final_grounding.py",
