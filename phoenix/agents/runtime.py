@@ -1444,6 +1444,7 @@ class PhoenixRuntime:
                     FinalGrounding(
                         step_output=outputs[plan_ids[-1]],
                         evidence=verified_tools.get(plan_ids[-1]),
+                        request=request.text,
                     )
                     if final
                     else None,

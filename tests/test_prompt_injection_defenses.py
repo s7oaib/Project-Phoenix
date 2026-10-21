@@ -1788,6 +1788,14 @@ PHX_109_PATHS: tuple[str, ...] = ()
 # pin (below), so nothing stays on the PHX-118 commit.
 PHX_118_COMMIT = "d382b11a0528df5de41772e7697687b81b836de2"
 PHX_118_PATHS: tuple[str, ...] = ()
+# PHX-118b (ADR-100, narrowed 2026-10-21) changed runtime.py
+# (FinalGrounding.request) and final_grounding.py (the label rule); both stay
+# pinned, at the PHX-118b merge resolution commit.
+PHX_118B_COMMIT = "0a23c66c98b728d44d9859cb96c7eacc4575fa00"
+PHX_118B_PATHS = (
+    "phoenix/agents/runtime.py",
+    "phoenix/agents/final_grounding.py",
+)
 # PHX-108 (ADR-110 to ADR-114) intentionally changed server.py (ModelRegistrar),
 # api/missions.py (before_run), the REST route package, schemas and settings
 # routes, the settings store, the native proxy allowlist and the desktop
@@ -1813,7 +1821,6 @@ PHX_108_PATHS = (
 # at the PHX-119 resolution commit that merged PHX-108 (with PHX-118).
 PHX_119_COMMIT = "f378ac80951eb2d6b0f1f8fd86fe08fdc32c8c7b"
 PHX_119_PATHS = (
-    "phoenix/agents/runtime.py",
     "phoenix/agents/mission_events.py",
     "phoenix/api/server.py",
     "phoenix/api/routes/missions.py",
@@ -1843,6 +1850,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_108_PATHS
         and path not in PHX_118_PATHS
         and path not in PHX_119_PATHS
+        and path not in PHX_118B_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1854,7 +1862,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_106_COMMIT, path) for path in PHX_106_PATHS]
     baselines += [(PHX_048_COMMIT, path) for path in PHX_048_PATHS]
     baselines += [(PHX_109_COMMIT, path) for path in PHX_109_PATHS]
-    baselines += [(PHX_118_COMMIT, path) for path in PHX_118_PATHS]
+    baselines += [(PHX_118B_COMMIT, path) for path in PHX_118B_PATHS]
     baselines += [(PHX_108_COMMIT, path) for path in PHX_108_PATHS]
     baselines += [(PHX_119_COMMIT, path) for path in PHX_119_PATHS]
     pinned = [path for _, path in baselines]
