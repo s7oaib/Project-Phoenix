@@ -1810,7 +1810,7 @@ PHX_108_PATHS = (
 # with PHX-108's ModelRegistrar), routes/__init__.py (voice routes, merged with
 # PHX-108's setup routes) and mission_events.py (voice.* allowlist); all three
 # stay pinned, at the PHX-114 resolution commit.
-PHX_114_COMMIT = "0d5de2ef19db99dbccce7177be2ff944d38ab1cb"
+PHX_114_COMMIT = "fc08a14b74fec8d590753b406afa5ac5651ee0f0"
 PHX_114_PATHS = (
     "phoenix/api/server.py",
     "phoenix/api/routes/__init__.py",
