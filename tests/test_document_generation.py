@@ -1050,8 +1050,8 @@ def test_no_authority_or_schema_changes_and_inert_architecture() -> None:
     assert len(EventType) == 32
     scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
     assert (
-        scripts.get_heads() == ["0008_mission_triage"]
-        and len(list(scripts.walk_revisions())) == 8
+        scripts.get_heads() == ["0009_default_mission_path"]
+        and len(list(scripts.walk_revisions())) == 9
     )
     tree = ast.parse(inspect.getsource(module))
     imports = [x.module for x in ast.walk(tree) if isinstance(x, ast.ImportFrom)]
