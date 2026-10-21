@@ -1221,7 +1221,7 @@ def test_real_migration_lifecycle_preserves_all_previous_sources(
 ) -> None:
     migration = config(tmp_path)
     scripts = ScriptDirectory.from_config(migration)
-    assert scripts.get_heads() == ["0008_mission_triage"]
+    assert scripts.get_heads() == ["0009_default_mission_path"]
     revision = scripts.get_revision("0004_embedding_records")
     assert revision is not None and revision.down_revision == "0003_document_ingestion"
     for path in (
@@ -1280,7 +1280,7 @@ def test_real_migration_lifecycle_preserves_all_previous_sources(
         with engine.connect() as connection:
             assert (
                 MigrationContext.configure(connection).get_current_revision()
-                == "0008_mission_triage"
+                == "0009_default_mission_path"
             )
             assert (
                 compare_metadata(MigrationContext.configure(connection), Base.metadata)

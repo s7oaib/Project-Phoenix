@@ -1380,7 +1380,7 @@ def test_static_security_schema_and_bounded_scope() -> None:
             assert name not in banned
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0008_mission_triage"]
+    ).get_heads() == ["0009_default_mission_path"]
 
 
 def test_uncached_guarded_import_constructor_no_io_or_collaborator_calls(

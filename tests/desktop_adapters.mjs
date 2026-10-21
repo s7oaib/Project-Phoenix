@@ -74,9 +74,31 @@ function detail(overrides = {}) {
     permission_request: { request_id: REQ, mission_id: MISSION, status: 'pending', tool_id: 'filesystem.read_text', action: 'read_text',
       resource: 'D:\\docs\\notes.txt', risk_level: 'P2', requested_at: AT, decided_at: null }, ...overrides };
 }
+function settingsBody(overrides = {}) {
+  return { workspace: { root: 'D:\\docs', status: 'active', updated_at: AT }, default_mission_path: 'auto',
+    model_tiers: { phoenix: [{ provider_id: 'ollama', model_id: 'qwen3.5:4b' }, { provider_id: 'ollama', model_id: 'qwen3.5:2b' }] },
+    default_tier: [{ provider_id: 'ollama', model_id: 'qwen3.5:4b' }], retention_days: 30, api: { host: '127.0.0.1', port: 5000 }, ...overrides };
+}
+function onboardingBody(overrides = {}) {
+  return { complete: true, runtimes: [{ provider_id: 'ollama', display_name: 'Ollama', state: 'running' }],
+    models: [
+      { provider_id: 'ollama', model_id: 'qwen3.5:4b', required: true, registered: true, install_command: null },
+      { provider_id: 'ollama', model_id: 'qwen3.5:2b', required: false, registered: true, install_command: null },
+      { provider_id: 'ollama', model_id: 'qwen3.5:9b', required: true, registered: true, install_command: null },
+    ],
+    storage: { data_dir: 'D:\\phoenix-data', free_bytes: 5 * 1024 ** 3, database_ready: true },
+    workspace: { root: 'D:\\docs', status: 'active', updated_at: AT }, ...overrides };
+}
+function capabilitiesBody(enabled = []) {
+  const flags = [['workspace_documents', 'PHX-046', 'document_analyst'], ['memory', 'PHX-110', 'memory'], ['web_research', 'PHX-111', 'web_research'],
+    ['computer_control', 'PHX-112', 'computer_control'], ['media', 'PHX-113', 'media'], ['document_generation', 'PHX-113', 'document_analyst'], ['voice', 'PHX-114', 'voice']];
+  return { capabilities: flags.map(([id, ticket, agent]) => ({ capability_id: id, enabled: id === 'workspace_documents' || enabled.includes(id), ticket, agent_id: agent })) };
+}
 function backendRoutes(overrides = {}) {
   const routes = {
-    'GET /settings': { status: 200, body: { workspace: { root: 'D:\\docs', status: 'active', updated_at: AT }, model_tiers: {}, default_tier: [], retention_days: 30, api: { host: '127.0.0.1', port: 5000 } } },
+    'GET /settings': { status: 200, body: settingsBody() },
+    'GET /onboarding': { status: 200, body: onboardingBody() },
+    'GET /capabilities': { status: 200, body: capabilitiesBody() },
     'GET /models': { status: 200, body: [{ provider_id: 'ollama', model_id: 'qwen3:8b', roles: ['default'], registered: true, provider_status: 'healthy', generating: false, context_limit_tokens: 32768 }] },
     'GET /permissions?limit=64': { status: 200, body: page([detail().permission_request]) },
     'GET /conversations?limit=1': { status: 200, body: page([{ conversation_id: CONV, created_at: AT, updated_at: AT }], 1) },
@@ -355,14 +377,14 @@ test('PHX-106/107 tauri transport uses only the two allowlisted commands and thr
 });
 
 test('PHX-106/107 no credential, backend address or network primitive exists in webview code', () => {
-  for (const path of ['main.tsx', 'adapters/core.ts', 'adapters/tauri.ts', 'adapters/ConnectedApp.tsx']) {
+  for (const path of ['main.tsx', 'adapters/core.ts', 'adapters/tauri.ts', 'adapters/ConnectedApp.tsx', 'adapters/SetupViews.tsx']) {
     const text = source(path);
     assert.doesNotMatch(text, /\btoken|bearer|authorization|phoenix\.auth|sec-websocket/i, path);
     assert.doesNotMatch(text, /\bfetch\(|XMLHttpRequest|new WebSocket|EventSource|https?:\/\/|ws:\/\/|localhost|127\.0\.0\.1|ollama|colibri/i, path);
     assert.doesNotMatch(text, /localStorage|sessionStorage|dangerouslySetInnerHTML|eval\(|new Function/, path);
   }
   // Only tauri.ts touches the IPC package, and only invoke/listen/isTauri from it.
-  for (const path of ['main.tsx', 'adapters/core.ts', 'adapters/ConnectedApp.tsx', 'App.tsx']) assert.doesNotMatch(source(path), /@tauri-apps/, path);
+  for (const path of ['main.tsx', 'adapters/core.ts', 'adapters/ConnectedApp.tsx', 'adapters/SetupViews.tsx', 'App.tsx']) assert.doesNotMatch(source(path), /@tauri-apps/, path);
   const imports = [...source('adapters/tauri.ts').matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+'([^']+)'/g)].map((match) => [match[2], match[1].split(',').map((name) => name.trim()).sort()]);
   assert.deepEqual(imports, [['@tauri-apps/api/core', ['invoke', 'isTauri']], ['@tauri-apps/api/event', ['listen']], ['./core', ['ApiResult', 'HttpMethod', 'Transport', 'TransportHandlers']]]);
 });
@@ -373,7 +395,8 @@ test('PHX-107 ConnectedApp renders the connection bar and the live App without i
   const markup = renderToStaticMarkup(createElement(connected.ConnectedApp, { store }));
   assert.match(markup, /aria-label="Backend connection"/);
   assert.match(markup, /Connected to the local PHOENIX backend through the native shell\./);
-  assert.match(markup, /D:\\docs \(active\)/);
+  assert.match(markup, /D:\\docs \(active\) · change it in Settings/);
+  assert.match(markup, /Connected to the local PHOENIX backend — live data/);
   assert.match(markup, /Latest mission 11111111: waiting for your permission[^<]*· planned steps \(PHOENIX decided\)/);
   assert.match(markup, /<option value="auto" selected="">Automatic \(PHOENIX decides\)<\/option>/);
   assert.match(markup, /Override: direct answer/);
@@ -453,6 +476,211 @@ test('M1 every PHOENIX answer in Chat carries a text badge from its own mission'
   const markup = renderToStaticMarkup(createElement(load('adapters/ConnectedApp.tsx').ConnectedApp, { store }));
   assert.match(markup, /\[Unverified · direct fallback\]/);
   assert.match(markup, /\[Verified by LEVI\]/);
+});
+
+// ---- PHX-108 (ADR-110 to ADR-114): onboarding, settings and capability views
+
+const setup = load('adapters/SetupViews.tsx');
+const connectedModule = load('adapters/ConnectedApp.tsx');
+function incomplete() {
+  return onboardingBody({ complete: false, runtimes: [{ provider_id: 'ollama', display_name: 'Ollama', state: 'not_running' }],
+    models: [
+      { provider_id: 'ollama', model_id: 'qwen3.5:4b', required: true, registered: false, install_command: 'ollama pull qwen3.5:4b' },
+      { provider_id: 'ollama', model_id: 'qwen3.5:9b', required: true, registered: false, install_command: 'ollama pull qwen3.5:9b' },
+    ], workspace: { root: null, status: 'unset', updated_at: null } });
+}
+function render(component, props) { return renderToStaticMarkup(createElement(component, props)); }
+
+test('PHX-108 setup readers admit the documented shapes and refuse malformed ones', () => {
+  const onboarding = core.readOnboarding(onboardingBody());
+  assert.deepEqual(plain(onboarding), {
+    complete: true, runtimes: [{ providerId: 'ollama', displayName: 'Ollama', state: 'running' }],
+    models: [
+      { providerId: 'ollama', modelId: 'qwen3.5:4b', required: true, registered: true, installCommand: null },
+      { providerId: 'ollama', modelId: 'qwen3.5:2b', required: false, registered: true, installCommand: null },
+      { providerId: 'ollama', modelId: 'qwen3.5:9b', required: true, registered: true, installCommand: null },
+    ],
+    storage: { dataDir: 'D:\\phoenix-data', freeBytes: 5 * 1024 ** 3, databaseReady: true },
+    workspace: { root: 'D:\\docs', status: 'active' },
+  });
+  for (const bad of [null, [], {}, onboardingBody({ complete: 'yes' }), onboardingBody({ runtimes: [{ provider_id: 'ollama', display_name: 'Ollama', state: 'started' }] }),
+    onboardingBody({ models: [{ provider_id: 'ollama', model_id: 'x', required: 1, registered: true, install_command: null }] }),
+    onboardingBody({ storage: { data_dir: 'D:\\d', free_bytes: 1, database_ready: 'true' } }), onboardingBody({ workspace: null })]) {
+    assert.equal(core.readOnboarding(bad), undefined);
+  }
+  assert.equal(core.readOnboarding(onboardingBody({ storage: { data_dir: 'D:\\d', free_bytes: -1, database_ready: true } })).storage.freeBytes, null);
+  const flags = core.readCapabilities({ capabilities: [...capabilitiesBody(['web_research']).capabilities, { capability_id: 'x', enabled: 'no' }, 7] });
+  assert.equal(flags.length, 7);
+  assert.equal(flags.find((flag) => flag.capabilityId === 'web_research').enabled, true);
+  assert.equal(core.readCapabilities({}), undefined);
+  assert.deepEqual(plain(core.readSettings(settingsBody({ default_mission_path: 'direct' }))), {
+    defaultMissionPath: 'direct', modelTiers: [{ role: 'phoenix', models: ['qwen3.5:4b', 'qwen3.5:2b'] }], defaultTier: ['qwen3.5:4b'], retentionDays: 30,
+  });
+  assert.equal(core.readSettings(settingsBody({ default_mission_path: 'fast' })), undefined);
+});
+
+test('PHX-108 the store loads setup state on ready and the saved default becomes the mission path', async () => {
+  const { store, transport, scheduler } = await readyStore(backendRoutes({ 'GET /settings': { status: 200, body: settingsBody({ default_mission_path: 'direct' }) } }));
+  const paths = transport.calls.map((call) => `${call.method} ${call.path}`);
+  for (const route of ['GET /settings', 'GET /onboarding', 'GET /capabilities']) assert.ok(paths.includes(route), route);
+  const connection = store.getSnapshot().connection;
+  assert.equal(connection.path, 'direct');
+  assert.equal(connection.onboarding.complete, true);
+  assert.equal(connection.capabilities.length, 7);
+  await store.sendText('hello');
+  assert.deepEqual(plain(transport.calls.at(-1)), { method: 'POST', path: '/chat', body: { text: 'hello', conversation_id: CONV, path: 'direct' } });
+  // A later settings read does not override a choice made in the bar for this launch.
+  store.setPath('auto');
+  store.schedule('settings');
+  await scheduler.flush();
+  assert.equal(store.getSnapshot().connection.path, 'auto');
+});
+
+test('PHX-108 saving the default mission path patches exactly that field and explains refusals', async () => {
+  const saved = settingsBody({ default_mission_path: 'complex' });
+  const { store, transport } = await readyStore(backendRoutes({ 'PATCH /settings': { status: 200, body: saved } }));
+  await store.setDefaultPath('complex');
+  assert.deepEqual(plain(transport.calls.at(-1)), { method: 'PATCH', path: '/settings', body: { default_mission_path: 'complex' } });
+  const connection = store.getSnapshot().connection;
+  assert.equal(connection.path, 'complex');
+  assert.equal(connection.settings.defaultMissionPath, 'complex');
+  assert.match(connection.settingsMessage, /Saved\. New missions use: Planned steps/);
+  const calls = transport.calls.length;
+  await store.setDefaultPath('fast');
+  assert.equal(transport.calls.length, calls); // never sent
+  const refused = await readyStore(backendRoutes({ 'PATCH /settings': { status: 422, body: { error: { code: 'invalid_request', message: 'x', request_id: 'r' } } } }));
+  await refused.store.setDefaultPath('direct');
+  assert.match(refused.store.getSnapshot().connection.settingsMessage, /not saved \(invalid_request\)/);
+  assert.equal(refused.store.getSnapshot().connection.path, 'auto');
+});
+
+test('PHX-108 first run shows the ordered setup steps instead of App until the user continues', async () => {
+  const { store } = await readyStore(backendRoutes({ 'GET /onboarding': { status: 200, body: incomplete() } }));
+  assert.equal(store.firstRunVisible(), true);
+  const markup = render(connectedModule.ConnectedApp, { store });
+  assert.match(markup, /aria-label="First-run setup"/);
+  assert.match(markup, /Welcome — set up PHOENIX/);
+  const order = ['Start the local model runtime', 'Install the required models', 'Check data storage', 'Choose your document folder'].map((title) => markup.indexOf(title));
+  assert.ok(order.every((index, position) => index > 0 && (position === 0 || index > order[position - 1])), String(order));
+  assert.match(markup, /Ollama is installed but not running\. Start Ollama, then select Re-check\./);
+  assert.match(markup, /qwen3\.5:4b \(required\) — checked once the model runtime is running/);
+  assert.match(markup, /D:\\phoenix-data \(5\.0 GB free\)/);
+  assert.match(markup, /Continue without finishing/);
+  assert.match(markup, />Re-check</);
+  assert.doesNotMatch(markup, /Primary navigation|style="/);
+  store.dismissOnboarding();
+  assert.equal(store.firstRunVisible(), false);
+  const after = render(connectedModule.ConnectedApp, { store });
+  assert.match(after, /Primary navigation/);
+  assert.doesNotMatch(after, /First-run setup/);
+});
+
+test('PHX-108 a running runtime with missing models shows the install command from the backend', async () => {
+  const body = incomplete();
+  body.runtimes[0].state = 'running';
+  const { store } = await readyStore(backendRoutes({ 'GET /onboarding': { status: 200, body } }));
+  const markup = render(setup.OnboardingPanel, { connection: store.getSnapshot().connection, store, firstRun: true });
+  assert.match(markup, /Ollama is running\./);
+  assert.match(markup, /qwen3\.5:9b \(required\) — not installed; install it with <code>ollama pull qwen3\.5:9b<\/code>/);
+});
+
+test('PHX-108 re-check reloads onboarding, models and settings; the first-run screen polls', async () => {
+  const intervals = [];
+  const transport = mockTransport(backendRoutes({ 'GET /onboarding': { status: 200, body: incomplete() } }));
+  const scheduler = {
+    setTimeout(callback) { setImmediate(callback); return 1; }, clearTimeout() {},
+    setInterval(callback) { intervals.push(callback); return 1; }, clearInterval() {},
+  };
+  const store = new core.PhoenixStore(transport, scheduler);
+  await store.start();
+  for (let tick = 0; tick < 60; tick += 1) await new Promise((resolve) => setImmediate(resolve));
+  const before = transport.calls.length;
+  await store.recheck();
+  assert.deepEqual(transport.calls.slice(before).map((call) => call.path).sort(), ['/models', '/onboarding', '/settings']);
+  assert.equal(store.getSnapshot().connection.checking, false);
+  const polled = transport.calls.length;
+  intervals[0]();
+  for (let tick = 0; tick < 60; tick += 1) await new Promise((resolve) => setImmediate(resolve));
+  const onboardingCalls = (from) => transport.calls.slice(from).filter((call) => call.path === '/onboarding').length;
+  assert.equal(onboardingCalls(polled), 1);
+  store.dismissOnboarding();
+  const quiet = transport.calls.length;
+  intervals[0]();
+  for (let tick = 0; tick < 60; tick += 1) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(onboardingCalls(quiet), 0); // no onboarding polling once dismissed
+});
+
+test('PHX-108 completed setup skips the first-run screen; Onboarding stays reachable as a view', async () => {
+  const { store } = await readyStore();
+  assert.equal(store.firstRunVisible(), false);
+  const markup = render(connectedModule.ConnectedApp, { store });
+  assert.match(markup, /Primary navigation/);
+  const panel = render(setup.OnboardingPanel, { connection: store.getSnapshot().connection, store });
+  assert.match(panel, /Setup is complete\. Every check passed\./);
+  assert.equal((panel.match(/— done/g) ?? []).length, 4);
+  assert.doesNotMatch(panel, /Continue/);
+});
+
+test('PHX-108 Settings is writable: workspace folder, default mission path, read-only tiers and honest placeholders', async () => {
+  const { store } = await readyStore();
+  const markup = render(setup.SettingsPanel, { connection: store.getSnapshot().connection, store });
+  for (const heading of ['Document workspace', 'Default mission path', 'Models', 'Voice', 'Memory and retention', 'Privacy and permissions']) assert.ok(markup.includes(`>${heading}</h4>`), heading);
+  assert.match(markup, /<input id="settings-workspace-root" type="text"/);
+  assert.match(markup, /<select id="default-mission-path">/);
+  assert.match(markup, /<option value="auto" selected="">Automatic \(PHOENIX decides\)<\/option>/);
+  assert.match(markup, />Save default</);
+  assert.match(markup, /phoenix: qwen3\.5:4b → qwen3\.5:2b/);
+  assert.match(markup, /Voice is not yet enabled in this build \(arrives with PHX-114\)\. Text chat stays fully available\./);
+  assert.match(markup, /Long-term memory is not yet enabled in this build \(arrives with PHX-110\)\. Mission history is kept for 30 days\./);
+  assert.match(markup, /PermissionEngine alone authorizes actions/);
+  assert.doesNotMatch(markup, /style="/);
+  const down = render(setup.SettingsPanel, { connection: { ...store.getSnapshot().connection, backend: { state: 'degraded', code: 'backend_exited' } }, store });
+  assert.match(down, /Settings are unavailable until the local backend is connected\./);
+  assert.doesNotMatch(down, /<input|<select/);
+});
+
+test('PHX-108 Computer Control, Research and Media follow the backend capability flags', async () => {
+  const { store } = await readyStore();
+  const connection = store.getSnapshot().connection;
+  const computer = render(setup.CapabilityPanel, { view: 'computer', connection });
+  assert.match(computer, /Computer control: not yet enabled<\/strong> — arrives with PHX-112\. PHOENIX does not attempt it in missions until then\./);
+  assert.match(computer, /Carried by KAKASHI \(Computer control\)\./);
+  assert.match(render(setup.CapabilityPanel, { view: 'research', connection }), /Web research: not yet enabled<\/strong> — arrives with PHX-111/);
+  const media = render(setup.CapabilityPanel, { view: 'media', connection });
+  assert.match(media, /Spotify and YouTube: not yet enabled<\/strong> — arrives with PHX-113/);
+  assert.match(media, /Document generation: not yet enabled/);
+  // A later ticket only flips the backend flag; the view follows without a frontend change.
+  const flipped = await readyStore(backendRoutes({ 'GET /capabilities': { status: 200, body: capabilitiesBody(['web_research']) } }));
+  const research = render(setup.CapabilityPanel, { view: 'research', connection: flipped.store.getSnapshot().connection });
+  assert.match(research, /Web research: enabled<\/strong> — ask PHOENIX in Home \/ Chat/);
+  const unknown = render(setup.CapabilityPanel, { view: 'computer', connection: { ...connection, capabilities: undefined } });
+  assert.match(unknown, /Capability status is unavailable until the local backend is connected\./);
+  for (const markup of [computer, media, research, unknown]) assert.doesNotMatch(markup, /<(button|input|form)\b|style="/);
+});
+
+test('PHX-108 App renders caller-supplied panels only for the five views it has no port for', () => {
+  const supplied = createElement('p', null, 'SUPPLIED-PANEL');
+  const panels = { onboarding: supplied, settings: supplied, computer: supplied, research: supplied, media: supplied };
+  for (const id of ['onboarding', 'settings', 'computer', 'research', 'media']) {
+    assert.match(renderToStaticMarkup(createElement(app.ViewPanel, { view: app.resolveView(id), panels })), /SUPPLIED-PANEL/, id);
+  }
+  for (const id of ['home', 'agents', 'tasks', 'permissions', 'memory', 'files', 'models', 'voice', 'observability']) {
+    assert.doesNotMatch(renderToStaticMarkup(createElement(app.ViewPanel, { view: app.resolveView(id), panels: { ...panels, [id]: supplied } })), /SUPPLIED-PANEL/, id);
+  }
+  // Without panels the honest defaults remain.
+  assert.match(renderToStaticMarkup(createElement(app.ViewPanel, { view: app.resolveView('computer') })), /This workspace is not connected yet\./);
+  assert.match(renderToStaticMarkup(createElement(app.default)), /Interface shell — backend integration pending/);
+  assert.match(renderToStaticMarkup(createElement(app.default, { statusLine: 'LIVE' })), /<p class="integration-status">LIVE<\/p>/);
+});
+
+test('PHX-108 the connection bar no longer edits the workspace; Settings and Onboarding do', async () => {
+  const { store } = await readyStore();
+  const bar = render(connectedModule.ConnectionBar, { connection: store.getSnapshot().connection, store });
+  assert.doesNotMatch(bar, /<input|Set folder/);
+  assert.match(bar, /Mission path \(this launch\)/);
+  await store.setWorkspace('D:\\link');
+  const panel = render(setup.OnboardingPanel, { connection: store.getSnapshot().connection, store });
+  assert.match(panel, /Links, junctions and reparse points are not accepted/);
 });
 
 export { loader };

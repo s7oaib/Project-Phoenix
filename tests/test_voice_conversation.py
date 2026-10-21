@@ -1379,7 +1379,7 @@ def test_static_isolation_no_concrete_engine_or_unauthorized_import() -> None:
             )
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0008_mission_triage"]
+    ).get_heads() == ["0009_default_mission_path"]
 
 
 def test_guarded_uncached_construction_no_events_or_clock_reads(

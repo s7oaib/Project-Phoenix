@@ -627,7 +627,7 @@ def test_scope_schema_and_no_content_truth_metadata() -> None:
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0008_mission_triage"]
+    ).get_heads() == ["0009_default_mission_path"]
     for value in (
         bundle(document(), memory()),
         entry(),

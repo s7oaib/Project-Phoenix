@@ -604,7 +604,8 @@ reaches JavaScript.
 
 Webview access is exactly:
 
-- `invoke('api_request', { method, path, body })` — 18 allowlisted REST v1 routes
+- `invoke('api_request', { method, path, body })` — 20 allowlisted REST v1 routes (18 from
+  PHX-106 plus PHX-108's read-only `GET /onboarding` and `GET /capabilities`)
   (docs/13), canonical UUID segments, listed query keys, JSON bodies up to 64 KiB;
   anything else is `route_not_allowed`;
 - `invoke('backend_status')` — `starting`, `ready` or `degraded` with a closed code;
@@ -622,8 +623,8 @@ linked re-run is followed), Task Graph and Agent Network (live step and agent st
 from events; objectives and dependencies are not published), Models and Observability
 (recent events and timings). Memory, Files and Voice stay unconnected. `main.tsx`
 renders `ConnectedApp` only inside the native shell; a plain browser keeps the honest
-unconnected App. App.tsx is unchanged, so its captions still describe ports as
-caller-supplied (copy update proposed for PHX-108).
+unconnected App. App.tsx is unchanged by PHX-107, so its captions still describe ports as
+caller-supplied; PHX-108 adds only the header status line (below).
 
 Verification labels (review M1): every completed mission is labelled from mission detail.
 `verified` needs path `complex` and a last task state of `completed`; a `direct` answer is
@@ -632,10 +633,44 @@ PHX-109 DIRECT fallback, `unverified (direct fallback)`, never "planned steps". 
 answer in Chat starts with a text badge, `[Verified by LEVI]` or `[Unverified · …]`, taken
 from its own mission (answer IDs are `<mission_id>:answer`).
 
-Minimal PHX-108: a connection bar above App shows backend and live-stream state, sets
-the document workspace through `PATCH /settings`, sends missions to PHX-105 triage by
-default ("Automatic (PHOENIX decides)", no `path`) with direct and planned steps as
-explicit overrides, and offers cancel / run again for the tracked mission.
+Connection bar (PHX-107, revised by PHX-108): above App it shows backend and live-stream
+state, the document workspace (read-only; it is changed in Settings or Onboarding), the
+mission path for this launch ("Automatic (PHOENIX decides)" omits `path` so PHX-105 triage
+decides; direct and planned steps are explicit overrides; it starts from the saved default),
+and cancel / run again for the tracked mission.
+
+## PHX-108 Settings, onboarding and capability views (ADR-110 to ADR-114)
+
+`src/adapters/SetupViews.tsx` renders four things from the store's backend state; every
+action is a store method over an allowlisted route.
+
+- **First-run screen.** When the backend is ready and `GET /onboarding` reports setup
+  incomplete, ConnectedApp shows the onboarding steps instead of App, in the order they
+  must be done: (1) the local model runtime (running / installed but not running / not
+  found / degraded, named by the backend), (2) the tier models, required (`qwen3.5:4b`,
+  `qwen3.5:9b`) or optional, with the backend's install command for a missing one once
+  the runtime runs, (3) the data folder, free space and database, (4) the document folder
+  (a folder form; each `workspace_*` code explained). "Re-check" reloads onboarding,
+  models and settings (the backend registers any model whose runtime started since); the
+  screen also re-checks every 3 s while shown. "Continue to PHOENIX" (or "Continue
+  without finishing") hides it for this launch; nothing is persisted, so it returns next
+  launch only if setup is still incomplete.
+- **Onboarding view.** The same steps, any time, without the continue button.
+- **Settings view (writable).** Document workspace folder; default mission path (saved
+  with `PATCH /settings`, applied to this launch at once and to new launches); read-only
+  model tiers; Voice and Memory placeholders driven by the `voice` and `memory` capability
+  flags (PHX-114, PHX-110); retention; the PermissionEngine authority note.
+- **Computer Control, Research and Media views.** Each states its capability flag(s)
+  from `GET /capabilities` (`computer_control`; `web_research`; `media` and
+  `document_generation`): "not yet enabled — arrives with PHX-11x" with the carrying
+  agent, or, once a later ticket flips the flag, "enabled — ask PHOENIX in Home / Chat".
+  Unknown status says so; no view offers an action.
+
+App.tsx changes only after `export const diagnosticMetricNames` (its historical byte
+checks are unchanged): `ViewPanel` and `App` accept optional `panels` for exactly these
+five views and an optional header `statusLine`. Without them (a plain browser, every
+existing test) App renders its honest defaults. ConnectedApp passes the panels and
+"Connected to the local PHOENIX backend — live data".
 
 Demo: `uv sync` in the repository, then `npm run tauri:dev --workspace @phoenix/desktop`
 (or run the release build from `npm run tauri:build --workspace @phoenix/desktop`).
