@@ -14,7 +14,7 @@ default 50) and `offset` (0-1,000,000) and return
 | Route | Success | Body / query | Notes |
 | --- | --- | --- | --- |
 | `GET /health` | 200 | | PHX-002, unchanged |
-| `GET /ready` | 200 / 503 | | PHX-100; PHX-092 (ADR-127) adds `prerequisites`: `{"ollama": "running" \| "not_running" \| "not_found", "missing_models": [{"provider_id", "model_id"}]}` (tier models not registered at startup), `null` while the services are unavailable. Enums and model IDs only; PHOENIX never installs Ollama or pulls models. |
+| `GET /ready` | 200 / 503 | | PHX-100; PHX-092 (ADR-127) adds `prerequisites`: `{"ollama": "running" \| "not_running" \| "not_found", "missing_models": [{"provider_id", "model_id"}]}` (tier models not registered yet; see ADR-110), `null` while the services are unavailable. Enums and model IDs only; PHOENIX never installs Ollama or pulls models. |
 | `POST /chat` | 202 | `{"text", "conversation_id"?, "path"?}` | Queues a mission and returns `{"mission_id", "conversation_id", "status": "queued", "rerun_of": null}` at once. A missing `conversation_id` starts a conversation. `path` is optional (PHX-105, ADR-090): omitted (or `null`), PHOENIX triages the request when it runs (falling back to `complex` if triage fails); `direct` or `complex` is the client's choice and is used as is. Text: 1-16,000 characters, not blank. |
 | `GET /missions` | 200 | `conversation_id`?, `limit`, `offset` | Mission summaries: IDs, status, `path` (`null` until triage decides), `triage_outcome` (`decided`, `fallback`, `client`, or `null` before a decision), failure code, responder error, `rerun_of`, timestamps. No text. |
 | `GET /missions/{mission_id}` | 200 | | Summary plus `request_text` (the user's message), `answer_text` (only when completed), `rerun_id`, `task_id`, `task_states` and the `permission_request` if any. |
@@ -31,9 +31,11 @@ default 50) and `offset` (0-1,000,000) and return
 | `DELETE /conversations/{conversation_id}` | 204 | | Deletes it with its missions and traces (cancels its running mission). |
 | `DELETE /conversations` | 204 | | Clears all chat history; grants stay. |
 | `GET /agents` | 200 | | `agent_id`, `alias`, `role` per registry agent. |
-| `GET /models` | 200 | | Per tier-table model: `roles` (placement), `registered` (at startup), `provider_status` (bounded probe as `/ready`), `generating` (holds the lease), `context_limit_tokens`. |
-| `GET /settings` | 200 | | `workspace` (`root`, `status`: `unset`, `active` or `unavailable`, `updated_at`), and read-only `model_tiers`, `default_tier`, `retention_days`, `api` (host, port). |
-| `PATCH /settings` | 200 | `{"workspace_root"}` | The only writable setting: the folder document steps may read. Validated (below), stored, and used by missions that start afterwards; a running mission keeps its workspace. |
+| `GET /models` | 200 | | Per tier-table model: `roles` (placement), `registered` (registered so far; PHX-108 registers late models, see below), `provider_status` (bounded probe as `/ready`), `generating` (holds the lease), `context_limit_tokens`. |
+| `GET /settings` | 200 | | `workspace` (`root`, `status`: `unset`, `active` or `unavailable`, `updated_at`), `default_mission_path` (`auto`, `direct` or `complex`; `auto` until saved, PHX-108), and read-only `model_tiers`, `default_tier`, `retention_days`, `api` (host, port). |
+| `PATCH /settings` | 200 | `{"workspace_root"?, "default_mission_path"?}` | At least one field. `workspace_root` is the folder document steps may read: validated (below), stored, and used by missions that start afterwards; a running mission keeps its workspace. `default_mission_path` (PHX-108, ADR-111) is stored; the desktop sends it as `path` on new missions (`auto` omits `path`), and `POST /chat` itself is unchanged. The workspace is applied first: if it is refused, nothing is saved. |
+| `GET /onboarding` | 200 | | PHX-108 (ADR-113) setup checks, in order: `runtimes` (`provider_id`, `display_name`, `state`: `running`, `degraded`, `not_running` or `not_detected`), `models` (each tier model: `required`, `registered`, `install_command` while missing), `storage` (`data_dir`, `free_bytes`, `database_ready`), `workspace` (as in settings) and `complete` (runtime running, required models registered, database ready, workspace active). Missing tier models are registered first if their provider now answers. Nothing is persisted. |
+| `GET /capabilities` | 200 | | PHX-108 (ADR-112) fixed capability flags: `capabilities` of `capability_id`, `enabled`, `ticket`, `agent_id`. A later ticket enables its capability by flipping its flag. Flags grant no permission. |
 
 Workspace validation (422, code per rule): `workspace_invalid` (not absolute,
 UNC or device path, a `..` segment, control characters, over 4,096
@@ -55,6 +57,13 @@ path (deleted, or replaced by a symlink or junction), the call fails
 `tool_failed`. Changing the workspace never touches grants: they
 match exact absolute resources, so one for a file outside the new root never
 applies.
+
+Late model registration (PHX-108, ADR-110): tier models are registered at
+startup if their provider answers, and again, bounded, whenever any is still
+missing: every 10 s while a provider is unavailable (60 s once it answers but a
+tier model is not installed), before each mission while a required model
+(`qwen3.5:4b`, `qwen3.5:9b`) is missing, and on `GET /ready`, `GET /models` and
+`GET /onboarding`. Starting Ollama after PHOENIX no longer needs a restart.
 
 Errors: 404 `not_found` (unknown ID or route), 409 `invalid_state` or
 `workspace_changed`, 413 `payload_too_large` (a request body over 64 KiB, after

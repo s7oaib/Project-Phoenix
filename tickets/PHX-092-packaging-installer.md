@@ -141,7 +141,6 @@ picked up from `uv.lock` automatically. ADR numbers 125–129.
 
 - Unsigned: SmartScreen warns on first run until a certificate is added.
 - Windows x64 only; the build script refuses other platforms.
-- Models register once at backend start; after `ollama pull`, restart PHOENIX.
 - The opt-in data removal deletes only the default data directory; a custom
   `PHOENIX_DATA_DIR` must be removed by hand. The interactive uninstaller page (opt-in
   box) was not exercised; only silent mode was run.

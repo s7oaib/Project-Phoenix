@@ -196,6 +196,14 @@ categories = ["unit", "integration", "tools", "permissions", "path_traversal", "
 # permission_bypass: test_approved_file_a_cannot_execute_file_b
 
 [[file]]
+path = "tests/test_final_grounding.py"
+categories = ["unit", "integration", "prompt_injection"]
+# PHX-118 LEVI's deterministic final-answer grounding check; integration:
+# test_grounded_final_answer_passes_without_the_final_verifier_model (real PhoenixRuntime +
+# AIZEN/router/task graph/handoff/LEVI/lifecycle + FilesystemTool/PermissionEngine on tmp_path, scripted model)
+# prompt_injection: test_ungrounded_or_wrong_final_answers_still_go_to_the_model_and_fail (injected file case)
+
+[[file]]
 path = "tests/test_fyp_benchmark.py"
 categories = ["unit", "integration"]
 # PHX-091 FYP runner; integration: test_full_run_with_fake_provider (real
@@ -332,6 +340,15 @@ categories = ["unit", "integration", "routing", "migrations", "prompt_injection"
 # migrations: test_schema_keeps_path_and_triage_outcome_consistent
 # prompt_injection: test_triage_failure_falls_back_to_complex (a reply adding a "grant" key is refused), test_event_allowlist_takes_only_closed_triage_values
 # secret_leakage: test_request_and_triage_output_never_reach_events_or_trace
+
+[[file]]
+path = "tests/test_settings_onboarding.py"
+categories = ["unit", "integration", "api_contract", "migrations", "permission_bypass", "secret_leakage"]
+# integration: test_late_start_mission_succeeds_without_restart (REST + composition root + ModelRegistrar + MissionService + PhoenixRuntime + SQLite)
+# api_contract: test_onboarding_reports_each_step_in_order, test_capability_flags_are_fixed_and_honest
+# migrations: test_migration_0009_constrains_keys_and_values_and_downgrades
+# permission_bypass: test_new_routes_require_the_token
+# secret_leakage: test_onboarding_echoes_no_provider_detail
 
 [[file]]
 path = "tests/test_rest_api.py"
