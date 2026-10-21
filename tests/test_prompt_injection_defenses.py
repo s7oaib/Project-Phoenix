@@ -1829,7 +1829,7 @@ PHX_113_PATHS: tuple[str, ...] = ()
 # mission events, assignment descriptions, backend wiring, grant store,
 # permission route, capability flags and their route) stays pinned, at the
 # PHX-120 implementation commit (the PR must merge with a merge commit).
-PHX_120_COMMIT = "0000000000000000000000000000000000000000"
+PHX_120_COMMIT = "ea7ea165147317afd873f6e61c0a3782b5e37e47"
 PHX_120_PATHS = (
     "phoenix/agents/prompts.py",
     "phoenix/agents/runtime.py",
