@@ -5765,3 +5765,545 @@ installer still builds.
 Consequences: each run downloads the embeddable Python (verified by its pinned
 digest) and the locked wheels (verified by the lock's hashes). Build outputs are
 never committed (`build/` and `target/` are ignored).
+## ADR-130 — Knowledge steps in missions: a PHOENIX-built P0 retrieval
+
+Status: Accepted (recommended defaults applied under the coordinator's
+instruction of 2026-10-21; R1–R14 in `tickets/PHX-110-memory-rag-missions.md`
+await the owner's review)
+Date: 2026-10-21
+Ticket: PHX-110
+
+Context: PHX-030 to PHX-035 built memory, ingestion, a vector store, scoped
+retrieval and citations, but no mission used them. The capability pattern
+(PHX-046) is a domain step whose tool call PermissionEngine decides, with
+guarded output and a deterministic LEVI evidence check.
+
+Decision:
+
+- **Domain.** Missions gain `knowledge_rag` (agent `knowledge_rag`), offered to
+  the assignment only when the runtime has a caller `KnowledgeSource` and the
+  source reports something indexed. `PhoenixRuntime(knowledge=...)` is
+  optional; without it nothing changes.
+- **PHOENIX builds the retrieval.** The model proposes nothing: the query is
+  the planned step objective and the scope is the caller's (every indexed
+  upload plus the `user` memory scope). Model text cannot widen the scope.
+- **Permission.** `knowledge.retrieve` is a P0 `ToolDefinition` (docs/08 lists
+  memory retrieval as P0). PHOENIX issues a `PermissionRequest` per step and
+  only an ALLOWED (`p0_internal`) decision proceeds. P0 writes no audit row.
+- **Guarded sources.** Each chunk or memory reaches a model only as one
+  numbered guarded item ("[n]", origin `uploaded_document` or
+  `external_text`); numbers are mission-wide. Both knowledge turns use the
+  structured providers.
+- **No sources.** An empty retrieval yields the fixed sentence
+  `No source answers this step.` without a generation; the model may also
+  answer with exactly that sentence.
+- **Failures.** A retrieval or embedding failure is `tool_failed`, a refused
+  decision `tool_rejected`; no new codes. The step's generation is not retried
+  (as for document steps, ADR-093); its LEVI generation is.
+- **Events.** No new event types and no allowlist change: the step publishes the
+  specialist agent phase and LEVI's events; retrievals are recorded in the
+  trace (ADR-131).
+
+Consequences: shared-file edits are additive (`runtime.py`, `prompts.py`); the
+logic lives in the new `phoenix/agents/retrieval_steps.py`. Every changed
+protected file is re-pinned to the PHX-110 implementation commit.
+
+## ADR-131 — Citations in MissionResult and the API
+
+Status: Accepted (as ADR-130)
+Date: 2026-10-21
+Ticket: PHX-110
+
+Decision:
+
+- `MissionTrace` gains `retrievals` (one `RetrievalRecord` per knowledge
+  retrieval: IDs, decision status, outcome, item counts, first number) and
+  `citations` (one `MissionCitation` per source a **verified** knowledge step
+  cited: marker, ordinal, step, retrieval ID, source kind, ID and hash, document
+  ID, upload file name, page, section, chunk, memory type and scope, and the
+  PHX-035 rendered label). Neither holds source text. Both default to empty, so
+  stored traces still load; the trace is JSON, so no migration.
+- `MissionResult.citations` returns the trace's citations.
+- `GET /missions/{id}` adds `sources` (a completed mission's citations; empty
+  otherwise). Responses still never carry source or file text.
+- The final answer may repeat the markers; it need not (an exact-format answer
+  stays exact).
+
+## ADR-132 — Memory write policy
+
+Status: Accepted (as ADR-130)
+Date: 2026-10-21
+Ticket: PHX-110
+
+Decision (docs/10: not every turn becomes memory; secrets never do; the user
+can inspect and delete):
+
+- **Only the user writes memory**, through `POST /memory`. Missions and models
+  never write memory; no chat turn is remembered automatically.
+- **Shape.** One plain note of at most 2,000 characters, typed `user`
+  (default), `project` or `semantic`, in the single `user` scope, with
+  `source_type="user_note"`, confidence 1.0, importance 0.5 and no expiry. At
+  most 2,000 memories.
+- **No secrets (INV-018).** A credential-shaped note (private-key blocks, cloud,
+  forge, chat and model API key shapes, JWTs, and `password:`/`api key=`
+  style assignments) is refused with `secret_rejected` before it is embedded or
+  stored. The same `MemoryWritePolicy` is PUDDING's admission policy. Uploads
+  with a credential-shaped chunk are refused the same way. The detector is a
+  heuristic and can miss or over-match.
+- **Visible and deletable.** `GET /memory` lists every memory with its text;
+  `GET /memory/search` searches memories and uploads and returns the matching
+  text (the user's own data); `DELETE /memory/{id}` removes a memory and its
+  vector.
+
+## ADR-133 — Upload to index wiring and the upload body cap
+
+Status: Accepted (as ADR-130)
+Date: 2026-10-21
+Ticket: PHX-110
+
+Decision:
+
+- `POST /files/upload?filename=...` takes the raw file as the request body, so
+  no multipart parser (and no new dependency) is needed. The PHX-072 parsers
+  route and parse it, PHX-032 ingests it (secret-bearing documents refused),
+  every chunk is embedded with `embeddinggemma:300m` through Ollama and stored
+  in the PHX-033 vector store. If embedding or storing fails, the document,
+  its chunks and vectors are removed: nothing half-indexed stays.
+  `GET /files` lists uploads; `DELETE /files/{id}` removes one with its chunks
+  and vectors.
+- Bounds: 8 MiB per upload, 200 documents, 2,000 chunks in total (the PHX-034
+  per-kind bound), 500 chunks per document, 1,000-character chunks with 150
+  overlapping; retrieval keeps up to 6 items and 6,000 characters above a 0.35
+  cosine floor. These are fixed in v1.
+- `body_limit.py` gives the exact path `/files/upload` its own 8 MiB cap; every
+  other route keeps 64 KiB.
+- **One lease (INV-023).** Every embedding (upload batches of 16, a memory, a
+  mission's query) holds the model lifecycle's heavy lease, so it never
+  overlaps a generation; an upload during a generation waits.
+- `ProviderSet` gains an optional `embedding` provider (the Ollama default
+  builds one); without it the knowledge base is read-only and missions are not
+  offered knowledge. `BackendServices` gains `knowledge`; every runtime gets it.
+- Ingestion and memory publish their events to a private bus, so `WS /events`
+  and its allowlist are unchanged.
+
+## ADR-134 — LEVI checks citations; `phoenix-prompts-v5`
+
+Status: Accepted for the checks (as ADR-130); the v5 prompt text awaits the
+owner's approval in the PR
+Date: 2026-10-21
+Ticket: PHX-110
+
+Decision:
+
+- **Knowledge step.** Deterministic checks first; a failure is final:
+  retrieval and permission evidence correlate with what PHOENIX issued;
+  plain text and size; every marker is a number issued for this step (at least
+  one), or the output is exactly the no-answer sentence; each citing sentence
+  shares a content term with its source or takes all its numbers from it, and
+  every number the step states comes from a cited source, the objective, the
+  request or an earlier verified output. Then the `knowledge_verifier` model
+  sees only the cited sources and judges support. The verdict stays
+  all-checks (INV-008).
+- **Final answer.** In a mission that ran a knowledge step, every marker in the
+  final answer must be a source a verified step cited, and its sentence must
+  be grounded in it, before the PHX-047 final verifier runs.
+- **Prompts.** `phoenix-prompts-v5` adds `KNOWLEDGE_ANSWER_SYSTEM`,
+  `KNOWLEDGE_VERIFICATION_SYSTEM`, `KNOWLEDGE_NO_ANSWER`, the knowledge
+  expected output, completion rule and task texts, and
+  `DOMAIN_DESCRIPTIONS["knowledge_rag"]`. Every v4 constant is unchanged; the
+  triage, planner and assignment prompts are not edited (optional v6 sentences
+  are listed in the ticket).
+
+Limitations: the deterministic support check is lexical (terms and numbers),
+so a reversed fact that keeps its terms reaches the model verifier; a final
+answer containing a bracketed number such as `[1]` is read as a citation when
+the mission ran a knowledge step. No new dependencies, event types or
+migrations.
+
+## ADR-135 — Web research steps in missions (URAHARA)
+
+Status: Proposed (PHX-111; recommended options applied under the owner's
+decisions of 2026-10-21; prompt text awaits the owner's approval)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Context: PHX-053/054 built the SearchProvider contracts, a P1 `WebSearchTool`
+and the advisory `UraharaResearchService`, but nothing let a PHOENIX mission
+search the web. The owner chose DuckDuckGo without an API key, a permission
+prompt before any query leaves the PC, untrusted fetched pages, cited answers
+checked deterministically by LEVI, and graceful rate-limit handling.
+
+Decision:
+
+- **Placement.** Logic lives in new modules: `phoenix/web/duckduckgo.py`
+  (provider), `phoenix/web/page_fetch.py` (page reader),
+  `phoenix/tools/web_research.py` (tool) and `phoenix/agents/research_steps.py`
+  (step runner, grants, LEVI responder). Shared files get small additive hooks:
+  `runtime.py` (optional `research_tool`, the `web_research` domain, a research
+  step branch, `MissionTrace.research_calls`, `rate_limited`), `prompts.py`
+  (v5 constants), `mission_events.py` (allowlist values), `api/missions.py`
+  and `api/routes/permissions.py` (research grants), `api/server.py` (wiring)
+  and `core/config.py` (`web_research_enabled`).
+- **A step mirrors PHX-046.** URAHARA proposes one query; PHOENIX builds the
+  call and permission request; the tool decides through ToolRegistry and
+  PermissionEngine (INV-004); the answer turn sees sources only as guarded
+  WEB_PAGE / WEB_SEARCH items (INV-017); grants come only from the caller
+  (INV-003). Research generations are not retried by MAHORAGA, as for
+  document steps (ADR-093), because a retry would repeat a network call.
+- **Why not WebSearchTool / UraharaResearchService.** `WebSearchTool`'s
+  resource hashes the exact query and timestamp, so a user's grant could never
+  match the re-run that follows an approval (the model proposes the query
+  again, at a new time). `UraharaResearchService` requires Playwright
+  BrowserTool evidence for every page and a separate synthesizer. Both stay
+  unchanged; the new tool reuses their PHX-053 contracts (`SearchProvider`,
+  `SearchRequest`/`SearchResponse`, public-URL admission).
+- **Capability flag.** Research steps exist only when `AppSettings.
+  web_research_enabled` is true (`PHOENIX_WEB_RESEARCH_ENABLED`); off by
+  default. PHX-108's capability endpoint is not on main, so it is not flipped
+  there yet. The research declaration is always registered so stored requests
+  can be shown and decided.
+
+## ADR-136 — DuckDuckGo over plain httpx; stdlib HTML extraction
+
+Status: Proposed (PHX-111)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Decision: the concrete provider posts the query to
+`https://html.duckduckgo.com/html/` with plain httpx and an honest
+User-Agent, and parses `result__a` / `result__snippet` anchors with the
+standard-library HTML parser. Sponsored (`y.js`) and non-public URLs are
+dropped by the PHX-053 admission. Pages are read with httpx and converted to
+text with the standard-library parser (scripts, styles and markup removed,
+block breaks kept). No dependency was added: `ddgs`/`duckduckgo-search` were
+pre-approved, but they impersonate browser TLS fingerprints to avoid bot
+detection and would add several transitive packages to the guarded lock.
+
+Page reading is bounded: public http(s) only, every hop re-admitted and its
+DNS answer required to be globally routable, at most 3 redirects, 1 MB per
+body, text/html or text/plain only, 10 s timeout, 4,000 characters per
+source, 3 sources per call. A page that cannot be read falls back, observably,
+to its search snippet (`page_failures`).
+
+Limitations: the HTML endpoint is unofficial and may change or block
+automated clients; DNS is resolved separately from httpx's connection, so a
+hostile resolver could rebind between them (as for BrowserTool).
+
+## ADR-137 — Research permission is scoped to the search provider (P1)
+
+Status: Proposed (PHX-111)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Decision: `web.research` is a P1 tool (docs/08: web search and page reading
+are "Observe", within a granted scope). Its permission resource is
+`search:<provider_id>` and its reason is the fixed `RESEARCH_TOOL_REASON`.
+Without a matching SESSION or PERSISTENT grant from the user, PermissionEngine
+answers APPROVAL_REQUIRED, nothing is sent, and the mission ends
+`waiting_permission` with the request; approving ("this session" or "always")
+through the existing API stores the grant and re-runs the mission. The user's
+approval therefore covers queries to that provider for the chosen duration and
+can be revoked at `/grants`. The approve route skips its workspace check for
+research requests only (they name no path); `MissionService.approve` still
+admits only document or research scopes (`mission_grants`).
+
+Limitations: the approval card shows the provider, not the query (the query is
+proposed again on the re-run). P1 research calls write no audit rows (INV-007
+covers P3/P4).
+
+## ADR-138 — Prompt set v5 and the `rate_limited` failure code
+
+Status: Proposed (PHX-111; exact prompt text awaits the owner's approval)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Decision:
+
+- `phoenix-prompts-v5` adds `RESEARCH_PLANNING_SYSTEM` (role
+  `research_planner`), `RESEARCH_SPECIALIST_SYSTEM`, `RESEARCH_ANSWER_SYSTEM`,
+  their task texts and step rules, and a `web_research` domain description.
+  Every v4 constant is byte-identical; `PLANNING_SYSTEM` is unchanged and still
+  used when research is disabled, so runs without the flag (including the FYP
+  configurations) see the v4 prompts.
+- A throttled search (HTTP 202/403/418/429 or an anomaly page) fails the
+  mission with the new closed `MissionFailureCode.RATE_LIMITED`
+  (`rate_limited`), with `tool.failed` code `rate_limited` and the research
+  record's `error_code`. MAHORAGA's classifier treats it as final (no
+  immediate retry against a rate limiter); other search failures are
+  `tool_failed`.
+
+## ADR-139 — LEVI checks research citations deterministically
+
+Status: Proposed (PHX-111)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Decision: the answer turn replies with claims, each citing a source URL and a
+quoted span. PHOENIX renders them (claim, title, URL, quote) as the step
+output. LEVI's research responder makes no model call and passes only if all
+checks pass:
+
+1. `research_evidence`: the result correlates with PHOENIX's call and request,
+   was ALLOWED by one of the caller's grants, and succeeded with sources;
+2. `citation_urls`: every cited URL is a fetched source (no fabricated URL);
+3. `citation_quotes`: every quote (at least 12 characters, compared after
+   case, whitespace and typographic-quote normalization) occurs in that
+   source's fetched content;
+4. `claim_numbers`: every number in a claim occurs in one of its quotes;
+5. `rendering`: the candidate equals PHOENIX's rendering of the parsed claims.
+
+After the final answer is verified, PHOENIX appends a deterministic
+`Sources:` list of the cited, fetched sources (title and URL).
+
+Limitations: the checks prove that quotes exist and numbers are quoted, not
+that a claim's wording is entailed by its quote; the final answer's own
+wording is judged by the existing final verifier.
+
+## ADR-140 — Opt-in permissioned media and document steps in missions
+
+Status: Accepted (recommended options applied under the owner's instruction,
+"recommended options"; R1–R12 in `tickets/PHX-113-media-documents.md` await the
+owner's review; the prompt text awaits explicit approval, ADR-144)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Context: missions could only read UTF-8 text through PHX-046. The parsers
+(PHX-072), the generator (PHX-073) and the Spotify/YouTube tools (PHX-070/071)
+existed but were unreachable from a mission. Other tickets edit `runtime.py`,
+`tool_steps.py` and `prompts.py` concurrently.
+
+Decision:
+
+- New modules carry the work: `phoenix/tools/document_files.py`,
+  `phoenix/agents/capability_steps.py` and `phoenix/agents/capability_prompts.py`.
+  `PhoenixRuntime` gains one opt-in argument, `capabilities: CapabilityTools`;
+  without it the runtime is unchanged. With it, a `documents` step runs on
+  `CapabilityStepRunner` (PHX-046's three read-only filesystem operations when a
+  FilesystemTool is also given, plus `read_document` and `create_document`) and a
+  `media` step offers Spotify and YouTube control.
+- The PHX-046 pattern is kept exactly: one proposal on the structured binding,
+  a closed allowlist, PHOENIX-built calls and requests, the tool's
+  PermissionEngine deciding, `waiting_permission` on APPROVAL_REQUIRED, the
+  result reaching models only as the guarded `tool_output` item (INV-017), one
+  call per step and no retries (PHX-109 R10).
+- LEVI checks the tool evidence deterministically before its model
+  (`deterministic.tool_evidence`: correlated call/request/resource/actor/tool,
+  ALLOWED by a caller grant, attempted success, effect matching the operation,
+  a verified create, an accepted P2 media command); the model check is grounded
+  in the same guarded item (INV-008). Filesystem operations keep PHX-046/047's
+  responders and `ToolCallRecord`s.
+- `MissionTrace.capability_calls` (additive, default empty; old traces load)
+  records IDs, statuses, hashes and lengths only. The PHX-103 allowlist gains
+  the PHX-113 tool IDs, their actions and the `media` agent role; the event
+  vocabulary stays at 32 types.
+- `media` is offered only when `prompts.DOMAIN_DESCRIPTIONS` describes it,
+  because the assignment prompt must describe every allowed domain.
+- The composition root is not wired; that follows prompt approval.
+- `runtime.py` and `mission_events.py` move from the PHX-109 pin to the PHX-113
+  implementation commit (`PHX_113_COMMIT`/`PHX_113_PATHS`) in a separate pin
+  commit; `prompts.py`, `tool_steps.py`, `responders.py` and every tool module
+  stay byte-identical. Merge with a merge commit.
+
+No new dependencies, event types, migrations or API changes.
+
+## ADR-141 — PHX-113 grants: exact scope, P2 for the session only
+
+Status: Accepted (recommended option; owner review pending)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Decision: grants come only from the runtime caller (INV-003). A PHX-113 grant
+names one closed tool, its own action, the exact resource PHOENIX builds (the
+absolute workspace path, or the Spotify/YouTube canonical resource including the
+query hash), the step's actor (`document_analyst` or `media`), a fixed reason
+(`CAPABILITY_DOCUMENT_REASON` or `MEDIA_TOOL_REASON`) and the tool's risk. P1
+grants may be SESSION or PERSISTENT, as in PHX-046; P2 grants (document create,
+media play/pause/open) are SESSION only, so approval to create a file or control
+playback never outlives the backend session. PHX-046 grants pass unchanged.
+Duplicate IDs or scopes, unknown tools and mismatched fields fail before the
+mission starts. No policy rule auto-approves P2.
+
+Consequence: the user approves a path or a media request, not generated
+content; a re-run regenerates content and a different query needs a new
+approval.
+
+## ADR-142 — Workspace documents: parse to text, create-only writes
+
+Status: Accepted (recommended option; owner review pending)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Decision:
+
+- `DocumentFileTool` reuses FilesystemTool's workspace rules (`_path`,
+  `_target`, `_checked_root`: no traversal, links or junctions; the root is
+  re-checked on every call; ADR-094) instead of re-implementing them.
+- `document.read` (P1) reads one `.pdf/.docx/.md/.markdown/.csv` file
+  (≤ 4 MiB) and parses it with the PHX-072 parsers and their bounds; text over
+  20,000 characters fails `limit_exceeded` and is never truncated.
+- `document.create` (P2, docs/08 "create new safe output") generates Markdown
+  or DOCX through the PHX-073 generator, or CSV through the standard library,
+  then creates the file with an exclusive open: an existing file is never
+  overwritten (`already_exists`, no effect) and missing folders are not
+  created. The file is read back and compared before `verified: true`
+  (docs/19). CSV cells that could run as spreadsheet formulas are prefixed with
+  `'` (plain numbers are kept).
+- No overwrite (P3), delete or mkdir operation and no PDF output in V1.
+- Dependencies: none added. pypdf 6.19.0, python-docx 1.2.0 and ReportLab
+  5.0.1 were already promoted and locked by PHX-072/073 (ADR-065, ADR-066), so
+  no per-dependency ADR is needed.
+
+Limitations: a create cancelled while its worker thread writes cannot be
+undone; the tool, like the parsers and generator it owns, serves one event loop.
+
+## ADR-143 — Spotify and YouTube in missions
+
+Status: Accepted (recommended option; owner review pending)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Decision: a `media` step (agent `media`, BROOK) may propose Spotify `search`
+(P1), `play` (optional track/album/artist/playlist URI) and `pause` (P2), and
+YouTube `search` (P1), `open` (the tool's `cue`: load a video without playing),
+`play` and `pause` (P2), through the unchanged PHX-070/071 tools. Transfer,
+volume, seek, queue operations and browser external-open are not offered.
+Credentials stay behind the PHX-045 SecretStore: Spotify tokens come from the
+owner's one-time PKCE link (`begin_authorization`/`complete_authorization`),
+the YouTube API key is stored as `youtube.api_key`; nothing is hardcoded and a
+missing setup fails `tool_failed`. Third-party titles are guarded tool output;
+command acceptance never proves audible or visible playback. Tests use only
+`httpx.MockTransport` and a fake player.
+
+## ADR-144 — PHX-113 prompt text stays a draft outside the approved set
+
+Status: Superseded by ADR-160 (the owner approved the text; PHX-120 moved it)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Decision: ADR-081 requires the owner to approve exact prompt text. The new
+role prompts (`document_capability`, `document_capability_answer`,
+`media_specialist`, `media_answer`, `capability_verifier`), the proposed
+`documents` and `media` domain descriptions and the proposed planner text live
+in `phoenix/agents/capability_prompts.py` as `phx-113-draft-1`, not in
+`prompts.py`, whose `PROMPT_SET_VERSION` stays `phoenix-prompts-v4`. The
+capability steps are opt-in and unwired, so no production mission uses
+unapproved text. On approval the text moves into `prompts.py` as
+`phoenix-prompts-v5` and the composition root is wired. Until then the planner
+does not plan writes or media and `media` cannot be assigned.
+
+## ADR-160 — One owner-approved `phoenix-prompts-v5` set
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Context: PHX-110 and PHX-111 each introduced a `phoenix-prompts-v5` with
+different additions, PHX-113 kept its text as a draft (`phx-113-draft-1`,
+ADR-144) and PHX-118 proposed provenance sentences for
+`FINAL_VERIFICATION_SYSTEM`. The owner approved the whole batch.
+
+Decision: `phoenix/agents/prompts.py` holds one `phoenix-prompts-v5`:
+
+- every v4 constant byte-identical, except `FINAL_VERIFICATION_SYSTEM`, which
+  gains PHX-118's five provenance sentences exactly as written in its ticket;
+- PHX-110's knowledge texts and `DOMAIN_DESCRIPTIONS["knowledge_rag"]`;
+- PHX-111's research texts and `DOMAIN_DESCRIPTIONS["web_research"]`;
+- PHX-113's draft texts moved verbatim (role prompts, operation and service
+  lines, placeholders, tasks, expected outputs, completion rules) and
+  `DOMAIN_DESCRIPTIONS["media"]`. Its two proposed *replacements* of v4 text
+  become new constants instead, so v4 stays byte-identical:
+  `CAPABILITY_PLANNING_SYSTEM` (the draft planner) and
+  `CAPABILITY_DOCUMENTS_DESCRIPTION` (the draft documents description).
+  `capability_prompts.py` is deleted.
+
+Selection: AIZEN plans with `research_planner` when the runtime holds a web
+research tool, else with `CAPABILITY_PLANNING_SYSTEM` (`CapabilityPlanningResponder`,
+role marker `planner`) when it holds PHX-113 capability tools, else with the v4
+`PLANNING_SYSTEM`. With capability documents the assignment prompt describes
+`documents` with `CAPABILITY_DOCUMENTS_DESCRIPTION`
+(`ModelStepAssignmentResponder(descriptions=...)`).
+
+Evidence: `tests/test_phoenix_runtime.py` pins the first 128 bits of the
+sha256 of every v5 addition (`V5_PROMPT_SHA256`, `V5_DOMAIN_SHA256`,
+`V5_LINES_SHA256`) and of the changed `FINAL_VERIFICATION_SYSTEM`
+(`6a162b4e3195939d9b02b0ef209565b8`); every other v3/v4 hash is unchanged. The
+exact texts and hashes are listed in `tickets/PHX-120-capability-integration.md`.
+
+Consequences: research and capability planning are exclusive. With
+`PHOENIX_WEB_RESEARCH_ENABLED=true` AIZEN does not plan document writes or media
+steps; a combined planner needs new prompt text and a new owner approval
+(open issue). No new dependency, event type or migration.
+
+## ADR-161 — Capability flags enabled; web research keeps its launch opt-in
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Decision: `phoenix/api/capabilities.py` (ADR-112) enables `memory` (PHX-110),
+`web_research` (PHX-111), `media` and `document_generation` (PHX-113).
+`computer_control` and `voice` stay off. Web research also keeps
+`PHOENIX_WEB_RESEARCH_ENABLED` (default false): its queries leave the machine,
+so a launch must opt in. `GET /capabilities` reports `web_research` enabled
+only when the flag is on and the launch opted in, so the Research view never
+claims a tool the backend did not build. Every other flag is reported as is.
+
+Consequences: a flag still grants nothing (INV-004); every call needs the
+user's grant. The desktop needs no change.
+
+## ADR-162 — PHX-113 capabilities wired into the backend
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Decision: `phoenix/api/server.py` registers the PHX-113 `document.*` and
+`youtube.*` declarations and passes `capabilities=CapabilityTools(...)` to
+every runtime: a `DocumentFileTool` under the active workspace root (none
+without a root) and one `YouTubeTool` whose API key is read from the Windows
+credential store at call time (no player adapter exists, so open, play and
+pause fail `tool_failed`). Spotify is not wired: it needs an owner-registered
+client ID and redirect URI, which have no setting yet. With capability tools a
+documents step runs through the PHX-113 runner (`document_capability` roles),
+which keeps PHX-046's filesystem operations, grants, evidence and LEVI checks.
+
+The API grant store is widened as the PHX-113 ticket required:
+`research_steps.mission_grants(..., capabilities=True)` accepts research,
+PHX-046 document and PHX-113 grants (`capability_grants`: exact tool, action,
+actor, fixed reason and risk; P1 SESSION or PERSISTENT, P2 SESSION only).
+`MissionService` uses it for stored grants and approvals, so "always" for a P2
+request is refused (422). Media requests name no workspace path, so
+`POST /permissions/{id}/approve` skips the workspace check for them, as for
+research; document requests keep it.
+
+Consequences: no new dependency, route, event type or migration; the tool
+event allowlist is the union of PHX-046, PHX-111 and PHX-113 values.
+
+## ADR-163 — Merge resolution for PHX-110, PHX-111 and PHX-113
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Decision: the three branches merge in order (110, 111, 113) onto main with
+PHX-118 and PHX-108, with merge commits. In `runtime.py` a step is dispatched
+by the first match: PHX-113 capability, PHX-046 documents, PHX-110 knowledge,
+PHX-111 research, then text. LEVI's responder is the capability responder
+when the capability runner supplies one, else `_levi_responder` with PHX-118's
+final grounding and PHX-111's research evidence; PHX-110's knowledge wrapper
+applies on top. `MissionTrace` keeps every additive field (`retrievals`,
+`citations`, `research_calls`, `capability_calls`). `mission_events` allows the
+union of tool IDs, operations and agent roles. Docs and ADR lists are unions.
+
+## ADR-164 — One PHX-120 pin for files several tickets changed
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Decision: in `tests/test_prompt_injection_defenses.py`, every protected path
+changed by more than one of PHX-108, PHX-109, PHX-110, PHX-111, PHX-113,
+PHX-118 and PHX-120 moves to `PHX_120_COMMIT`/`PHX_120_PATHS` at the PHX-120
+implementation commit (two commits: implementation, then pin), and leaves its
+older block, so each path has exactly one baseline. Paths only one ticket
+changed keep that ticket's pin. The PR must merge with a merge commit.

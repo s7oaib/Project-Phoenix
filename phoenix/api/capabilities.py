@@ -11,6 +11,11 @@ A flag is a fact about this build, not a permission: an enabled capability
 still runs only inside a mission, through ToolRegistry and PermissionEngine
 (INV-004), and the flag grants nothing. The table is fixed at import time and
 is not writable over the API.
+
+PHX-120 (ADR-161) enables memory, web research, media and document generation.
+Web research also stays opt-in per launch: ``GET /capabilities`` reports it
+enabled only while ``PHOENIX_WEB_RESEARCH_ENABLED`` is true (searches leave the
+machine), so the Research view never claims a tool the backend does not hold.
 """
 
 from dataclasses import dataclass
@@ -41,20 +46,21 @@ CAPABILITY_FLAGS = MappingProxyType(
         CapabilityId.WORKSPACE_DOCUMENTS: CapabilityFlag(
             enabled=True, ticket="PHX-046", agent_id="document_analyst"
         ),
+        # PHX-120 (ADR-161): enabled with the capability integration.
         CapabilityId.MEMORY: CapabilityFlag(
-            enabled=False, ticket="PHX-110", agent_id="memory"
+            enabled=True, ticket="PHX-110", agent_id="memory"
         ),
         CapabilityId.WEB_RESEARCH: CapabilityFlag(
-            enabled=False, ticket="PHX-111", agent_id="web_research"
+            enabled=True, ticket="PHX-111", agent_id="web_research"
         ),
         CapabilityId.COMPUTER_CONTROL: CapabilityFlag(
             enabled=False, ticket="PHX-112", agent_id="computer_control"
         ),
         CapabilityId.MEDIA: CapabilityFlag(
-            enabled=False, ticket="PHX-113", agent_id="media"
+            enabled=True, ticket="PHX-113", agent_id="media"
         ),
         CapabilityId.DOCUMENT_GENERATION: CapabilityFlag(
-            enabled=False, ticket="PHX-113", agent_id="document_analyst"
+            enabled=True, ticket="PHX-113", agent_id="document_analyst"
         ),
         # PHX-114 (ADR-108): this build has the voice pipeline. Whether it is
         # running or its models and devices are available right now is

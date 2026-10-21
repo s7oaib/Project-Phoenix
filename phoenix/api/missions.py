@@ -10,8 +10,10 @@ PermissionRequest stored. Only ``approve``, a user decision, creates a grant
 (INV-003): "this session" (SESSION, this launch's session ID) or "always"
 (PERSISTENT, until revoked). Approval supersedes the waiting mission and queues
 a linked re-run of the same request; there is no mid-mission resume (ADR-082).
-Each run receives the stored, unrevoked grants that pass ``document_grants``,
-plus this launch's session ID.
+Each run receives the stored, unrevoked grants that pass ``mission_grants``
+(document or, PHX-111, web research scope, and since PHX-120 the PHX-113
+document and media scopes: P1 "session" or "always", P2 "session" only), plus
+this launch's session ID.
 
 Lifecycle: ``start`` marks missions left queued or running by an earlier process
 ``failed/interrupted`` (nothing re-runs; ``run_again`` is the explicit path),
@@ -58,13 +60,13 @@ from pydantic import JsonValue, ValidationError
 
 from phoenix.agents.mission_events import EventPublisher, EventSink
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
+from phoenix.agents.research_steps import mission_grants
 from phoenix.agents.runtime import (
     MissionKind,
     MissionResult,
     MissionTrace,
     PhoenixRuntime,
 )
-from phoenix.agents.tool_steps import document_grants
 from phoenix.agents.triage import TriageOutcome
 from phoenix.core.events import EventType
 from phoenix.persistence.missions import (
@@ -456,13 +458,14 @@ class MissionService:
 
     @staticmethod
     def _usable(stored: tuple[PermissionGrant, ...]) -> tuple[PermissionGrant, ...]:
-        """Stored grants that pass the document-step rules, one per scope."""
+        """Stored grants that pass the document, research or (PHX-120) PHX-113
+        capability step rules, one per scope."""
         accepted: list[PermissionGrant] = []
         for grant in stored:
             try:
-                document_grants([*accepted, grant])
+                mission_grants([*accepted, grant], capabilities=True)
             except ValueError:
-                continue  # outside the document scope, or a duplicate scope
+                continue  # outside the step scopes, or a duplicate scope
             accepted.append(grant)
         return tuple(accepted)
 
@@ -662,7 +665,8 @@ class MissionService:
                 else None,
                 user_decision="approved",
             )
-            document_grants([grant])
+            # document, (PHX-111) research or (PHX-113, PHX-120) capability scope
+            mission_grants([grant], capabilities=True)
         except (ValueError, ValidationError):
             raise InvalidRequestError(
                 "Request is outside the document grant scope"

@@ -274,7 +274,23 @@ gate under `.test-matrix/logs/`.
   ADR-082): full PHOENIX missions with permissioned read-only filesystem steps,
   real orchestration, permission, tool and audit components, and a scripted
   model. Its `[[gap]]` is removed. The owner-run live counterpart,
-  `scripts/phoenix_mission_smoke.py`, is not a CI gate.
+  `scripts/phoenix_mission_smoke.py`, is not a CI gate. PHX-110 (ADR-130 to
+  ADR-134) adds `tests/test_knowledge_missions.py` (knowledge steps, citations
+  and LEVI's citation checks over a real KnowledgeService, scripted model and
+  embeddings) and `tests/test_knowledge_api.py` (upload, memory, search and
+  cited missions over REST); its live counterpart,
+  `scripts/phoenix_knowledge_smoke.py`, is not a CI gate either.
+- PHX-120 (ADR-160 to ADR-164) integrates PHX-110, PHX-111 and PHX-113 on one
+  `phoenix-prompts-v5` set; `tests/test_phoenix_runtime.py` hash-pins every v5
+  addition, `tests/test_rest_api.py` covers PHX-113 approvals through the API
+  (P2 document.create session-only, YouTube without a workspace) and
+  `tests/test_settings_onboarding.py` the enabled capability flags.
+- `tests/test_web_research.py` (PHX-111) covers web research offline: the
+  DuckDuckGo provider and page reader over `httpx.MockTransport` fixtures,
+  the P1 research tool, LEVI's deterministic citation checks and full research
+  missions (granted, waiting for permission, injected pages, fabricated
+  citations, rate limiting). Its owner-run live counterpart,
+  `scripts/research_mission_smoke.py`, is not a CI gate.
 - Native WebView2 acceptance and live model or device runs are `[[manual]]` rows
   with evidence references. They are reported as MANUAL, never as automated PASS.
 - The run fails on any gate failure or timeout, missing tool, unmapped or missing

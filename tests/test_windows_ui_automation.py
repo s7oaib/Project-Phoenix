@@ -1480,6 +1480,9 @@ def test_source_architecture_and_immutability() -> None:
         "phoenix/tools/registry.py",
         ":(exclude)apps/desktop/src/App.tsx",
         ":(exclude)apps/desktop/src/styles.css",
+        # PHX-111 (ADR-135) adds web_research_enabled; config.py is hash-pinned
+        # (PHX_111_PATHS in test_prompt_injection_defenses.py).
+        ":(exclude)phoenix/core/config.py",
         # PHX-100 (ADR-084) adds these new modules; every file that existed in
         # phoenix/api stays protected.
         ":(exclude)phoenix/api/server.py",
@@ -1548,6 +1551,11 @@ def test_source_architecture_and_immutability() -> None:
         ":(exclude)phoenix/api/observability.py",
         ":(exclude)phoenix/api/structured_logging.py",
         ":(exclude)phoenix/api/routes/observability.py",
+        # PHX-110 (ADR-130 to ADR-134) adds the knowledge service and routes (the
+        # changed server.py, routes and body cap are excluded above and
+        # hash-pinned in test_prompt_injection_defenses.py).
+        ":(exclude)phoenix/api/knowledge.py",
+        ":(exclude)phoenix/api/routes/knowledge.py",
     ]
     assert not subprocess.check_output(
         ["git", "diff", "origin/main", "--", *paths], cwd=ROOT

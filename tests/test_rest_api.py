@@ -120,6 +120,20 @@ class ScriptedProvider(ModelProvider):
                 }
             ),
             "document_answer": "The notes give the codename PELICAN-7 STEP-SENTINEL.",
+            # PHX-120 (ADR-162): the backend wires PHX-113 capability steps, so
+            # a documents step speaks the v5 document_capability roles.
+            "document_capability": json.dumps(
+                {
+                    "tool_request": {
+                        "operation": "read_text",
+                        "relative_path": "notes.txt",
+                    }
+                }
+            ),
+            "document_capability_answer": (
+                "The notes give the codename PELICAN-7 STEP-SENTINEL."
+            ),
+            "capability_verifier": PASS,
             "specialist": "The codename is PELICAN-7 SPECIALIST-SENTINEL.",
             "final_answer": "PELICAN-7",
             "verifier": PASS,
@@ -344,6 +358,16 @@ API_ROUTES = {
     ("GET", "/onboarding"),
     ("GET", "/capabilities"),
 }
+# PHX-110 (ADR-132, ADR-133) adds the knowledge routes (tests/test_knowledge_api.py).
+KNOWLEDGE_ROUTES = {
+    ("POST", "/files/upload"),
+    ("GET", "/files"),
+    ("DELETE", "/files/{document_id}"),
+    ("POST", "/memory"),
+    ("GET", "/memory"),
+    ("GET", "/memory/search"),
+    ("DELETE", "/memory/{memory_id}"),
+}
 
 
 def routes_of(app: FastAPI) -> set[tuple[str, str]]:
@@ -373,7 +397,7 @@ def test_route_table_is_exact_and_deferred_routes_do_not_exist(
     assert declared == API_ROUTES
     # PHX-114 (ADR-108) adds the voice routes; tests/test_voice_pipeline.py
     # covers them.
-    assert routes_of(backend.app()) == API_ROUTES | {
+    assert routes_of(backend.app()) == API_ROUTES | KNOWLEDGE_ROUTES | {
         ("GET", "/health"),
         ("GET", "/ready"),
         ("GET", "/voice/status"),
@@ -381,17 +405,10 @@ def test_route_table_is_exact_and_deferred_routes_do_not_exist(
         ("POST", "/voice/stop"),
         ("GET", "/metrics"),  # PHX-115 (ADR-146), tests/test_observability.py
     }
-    # PHX-110 owns these; they are not even stubs.
-    for method, path in (
-        ("POST", "/files/upload"),
-        ("GET", "/files/upload"),
-        ("GET", "/memory/search"),
-        ("POST", "/memory/search"),
-        ("GET", "/tasks"),
-    ):
-        response = client.request(method, path)
-        assert response.status_code == 404
-        assert error_code(response) == "not_found"
+    # PHX-110 added /files/upload and /memory/search; /tasks is not even a stub.
+    response = client.request("GET", "/tasks")
+    assert response.status_code == 404
+    assert error_code(response) == "not_found"
 
 
 def concrete(path: str, mission_id: str = UNKNOWN) -> str:
@@ -1195,6 +1212,139 @@ def test_approval_outside_the_active_root_is_refused(
     assert client.get(f"/missions/{mission_id}").json()["failure_code"] == (
         "permission_denied"
     )
+
+
+def test_web_research_request_is_approved_without_a_workspace(
+    backend: Backend,
+) -> None:
+    """PHX-111: a research request names the provider, not a workspace path.
+
+    The re-run's DuckDuckGo request reaches the autouse network guard, so the
+    mission fails explicitly as tool_failed: nothing leaves the test process.
+    """
+    backend.settings = AppSettings(
+        data_dir=backend.tmp / "data",
+        web_research_enabled=True,
+        _env_file=None,  # type: ignore[call-arg]
+    )
+    backend.provider.replies |= {
+        "research_planner": json.dumps(
+            {"steps": [{"objective": "Search the web for the codename."}]}
+        ),
+        "assignment": json.dumps(
+            {"assignments": [{"step_id": "s1", "domain": "web_research"}]}
+        ),
+        "research_specialist": json.dumps(
+            {"search_request": {"query": "pelican codename"}}
+        ),
+    }
+    with backend.client() as client:
+        accepted = chat(client, QUESTION, path="complex")
+        waiting = wait_for(client, accepted["mission_id"])
+        assert waiting["status"] == "waiting_permission", waiting
+        request = waiting["permission_request"]
+        pending = client.get(f"/permissions/{request['request_id']}").json()
+        assert (pending["tool_id"], pending["resource"], pending["risk_level"]) == (
+            "web.research",
+            "search:duckduckgo",
+            "P1",
+        )
+        response = client.post(
+            f"/permissions/{request['request_id']}/approve",
+            json={"duration": "session"},
+        )
+        assert response.status_code == 202, response.text
+        rerun = wait_for(client, response.json()["mission_id"])
+        assert (rerun["status"], rerun["failure_code"]) == ("failed", "tool_failed")
+        (grant,) = client.get("/grants").json()["items"]
+        assert (grant["tool_id"], grant["resource"]) == (
+            "web.research",
+            "search:duckduckgo",
+        )
+
+
+def test_document_create_request_is_p2_and_session_only(
+    backend: Backend, client: TestClient
+) -> None:
+    """PHX-120 (ADR-162): the API grant store admits PHX-113 grants; a P2
+    document.create may be approved for this session only, never "always"."""
+    set_workspace(client, backend.workspace)
+    backend.provider.replies |= {
+        "planner": json.dumps({"steps": [{"objective": "Save a summary."}]}),
+        "assignment": json.dumps(
+            {"assignments": [{"step_id": "s1", "domain": "documents"}]}
+        ),
+        "document_capability": json.dumps(
+            {
+                "tool_request": {
+                    "operation": "create_document",
+                    "relative_path": "summary.md",
+                    "title": "Summary",
+                    "sections": [{"heading": "Codename", "paragraphs": ["PELICAN"]}],
+                }
+            }
+        ),
+        "document_capability_answer": "Saved summary.md.",
+    }
+    accepted = chat(client, QUESTION, path="complex")
+    waiting = wait_for(client, accepted["mission_id"])
+    assert waiting["status"] == "waiting_permission", waiting
+    request_id = waiting["permission_request"]["request_id"]
+    pending = client.get(f"/permissions/{request_id}").json()
+    assert (pending["tool_id"], pending["risk_level"]) == ("document.create", "P2")
+    assert pending["resource"] == str(backend.workspace / "summary.md")
+    assert not (backend.workspace / "summary.md").exists()
+    refused = client.post(
+        f"/permissions/{request_id}/approve", json={"duration": "always"}
+    )
+    assert refused.status_code == 422, refused.text
+    assert client.get("/grants").json()["items"] == []
+    response = client.post(
+        f"/permissions/{request_id}/approve", json={"duration": "session"}
+    )
+    assert response.status_code == 202, response.text
+    rerun = wait_for(client, response.json()["mission_id"])
+    assert rerun["status"] == "completed", rerun
+    assert "PELICAN" in (backend.workspace / "summary.md").read_text("utf-8")
+    (grant,) = client.get("/grants").json()["items"]
+    assert (grant["tool_id"], grant["duration"]) == ("document.create", "session")
+
+
+def test_media_request_is_approved_without_a_workspace(
+    backend: Backend, client: TestClient
+) -> None:
+    """PHX-120 (ADR-162): a YouTube request names no workspace path, so it is
+    approvable without one. The re-run has no stored API key or reaches the
+    autouse network guard, so it fails explicitly as tool_failed."""
+    backend.provider.replies |= {
+        "planner": json.dumps({"steps": [{"objective": "Find a lofi video."}]}),
+        "assignment": json.dumps(
+            {"assignments": [{"step_id": "s1", "domain": "media"}]}
+        ),
+        "media_specialist": json.dumps(
+            {
+                "tool_request": {
+                    "service": "youtube",
+                    "operation": "search",
+                    "query": "lofi",
+                }
+            }
+        ),
+    }
+    accepted = chat(client, QUESTION, path="complex")
+    waiting = wait_for(client, accepted["mission_id"])
+    assert waiting["status"] == "waiting_permission", waiting
+    request_id = waiting["permission_request"]["request_id"]
+    pending = client.get(f"/permissions/{request_id}").json()
+    assert (pending["tool_id"], pending["risk_level"]) == ("youtube.search", "P1")
+    response = client.post(
+        f"/permissions/{request_id}/approve", json={"duration": "session"}
+    )
+    assert response.status_code == 202, response.text
+    rerun = wait_for(client, response.json()["mission_id"])
+    assert (rerun["status"], rerun["failure_code"]) == ("failed", "tool_failed")
+    (grant,) = client.get("/grants").json()["items"]
+    assert grant["tool_id"] == "youtube.search"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="junctions are Windows-only")

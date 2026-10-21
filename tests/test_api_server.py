@@ -30,6 +30,7 @@ from sqlalchemy import Engine, inspect
 
 from alembic import command
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
+from phoenix.agents.router import RoutingDomain
 from phoenix.agents.runtime import MissionKind, PhoenixRuntimeError
 from phoenix.api import launcher
 from phoenix.api import server as server_module
@@ -68,7 +69,10 @@ from phoenix.models.provider import (
     ProviderHealthStatus,
 )
 from phoenix.persistence.database import create_engine_for_settings
+from phoenix.tools.document_files import document_file_tool_definitions
 from phoenix.tools.filesystem import filesystem_tool_definitions
+from phoenix.tools.web_research import web_research_tool_definitions
+from phoenix.tools.youtube import youtube_tool_definitions
 
 HEAD = "0009_default_mission_path"
 ROOT = Path(__file__).resolve().parents[1]
@@ -219,20 +223,16 @@ def test_construction_is_lazy(settings: AppSettings) -> None:
     # PHX-103 (ADR-087) adds WS /events.
     assert {"/health", "/ready", "/events"} <= paths
     # PHX-104 (ADR-089) includes the REST routers (tests/test_rest_api.py owns
-    # the exact table); docs and the deferred PHX-110 routes stay absent.
+    # the exact table); docs stay absent. PHX-110 (ADR-133) adds the
+    # knowledge routes.
     included = {
         getattr(route, "path", None)
         for router in app.routes
         for route in getattr(getattr(router, "original_router", None), "routes", ())
     }
     assert {"/chat", "/missions", "/agents", "/models", "/settings"} <= included
-    assert not (paths | included) & {
-        "/tasks",
-        "/files/upload",
-        "/memory/search",
-        "/docs",
-        "/openapi.json",
-    }
+    assert {"/files/upload", "/memory", "/memory/search"} <= included
+    assert not (paths | included) & {"/tasks", "/docs", "/openapi.json"}
 
 
 def test_lifespan_builds_services_once_and_closes_them(settings: AppSettings) -> None:
@@ -252,7 +252,19 @@ def test_lifespan_builds_services_once_and_closes_them(settings: AppSettings) ->
         assert services.lifecycle.capacity == 1  # INV-023
         assert services.migration_heads == (HEAD,)
         assert services.event_bus.subscriber_count == 0
-        assert services.tool_registry.list_tools() == filesystem_tool_definitions()
+        # PHX-111: the research declaration is registered; the tool is not
+        # built because web research is disabled by default.
+        # PHX-120 (ADR-162): the PHX-113 document and YouTube declarations too.
+        assert services.tool_registry.list_tools() == (
+            *filesystem_tool_definitions(),
+            *web_research_tool_definitions(),
+            *document_file_tool_definitions(),
+            *youtube_tool_definitions(),
+        )
+        assert services.runtime._research is None
+        # No workspace yet: capability steps offer media only, not documents.
+        assert services.runtime._capabilities is not None
+        assert services.runtime._capabilities.domains == (RoutingDomain.MEDIA,)
         assert services.permission_policy.rules == ()
         assert fakes.default.closed == fakes.structured.closed == 0
     assert get_services(app) is None

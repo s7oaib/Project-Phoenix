@@ -34,7 +34,10 @@ through MissionService like ``POST /chat``, and it stops first at shutdown; a
 voice failure never stops the backend (INV-016). PHX-115
 (ADR-145, ADR-146) puts a ``MetricsCollector`` between the publishers and the
 stream: it logs and aggregates each content-free event, then forwards it, and
-serves ``GET /metrics``.
+serves ``GET /metrics``. PHX-110 (ADR-130 to ADR-134) adds the user's knowledge base
+(``KnowledgeService``): uploads and memories are embedded with the provider
+set's embedding provider (EmbeddingGemma on Ollama by default), and every
+runtime receives it as its mission KnowledgeSource.
 """
 
 import asyncio
@@ -65,6 +68,7 @@ from phoenix.agents.kaido import (
     KaidoStatus,
     system_ram_sample,
 )
+from phoenix.agents.capability_steps import CapabilityTools
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.runtime import ModelTierTable, PhoenixRuntime, default_tier_table
 from phoenix.api.app import create_app
@@ -77,6 +81,7 @@ from phoenix.api.event_stream import (
     WS_TRY_AGAIN_LATER,
     EventStream,
 )
+from phoenix.api.knowledge import KnowledgeService
 from phoenix.api.missions import MissionService
 from phoenix.api.observability import (
     MetricsCollector,
@@ -94,8 +99,10 @@ from phoenix.api.voice import ComponentFactory, VoiceService, health_probes
 from phoenix.api.workspace import WorkspaceService
 from phoenix.core.config import AppSettings
 from phoenix.core.event_bus import EventBus
+from phoenix.models.embeddings import EmbeddingProvider
 from phoenix.models.lifecycle import ModelLifecycleManager
 from phoenix.models.ollama import OllamaProvider
+from phoenix.models.ollama_embeddings import OllamaEmbeddingProvider
 from phoenix.models.provider import (
     ModelProvider,
     ModelProviderError,
@@ -112,8 +119,17 @@ from phoenix.persistence.missions import MissionStore
 from phoenix.persistence.settings import SettingsStore
 from phoenix.security.audit import AuditTrail
 from phoenix.security.permissions import PermissionPolicy
+from phoenix.security.secrets import WindowsCredentialStore
+from phoenix.tools.document_files import (
+    DocumentFileTool,
+    document_file_tool_definitions,
+)
 from phoenix.tools.filesystem import FilesystemTool, filesystem_tool_definitions
 from phoenix.tools.registry import ToolRegistry
+from phoenix.tools.web_research import WebResearchTool, web_research_tool_definitions
+from phoenix.tools.youtube import YouTubeTool, youtube_tool_definitions
+from phoenix.web.duckduckgo import DuckDuckGoSearchProvider
+from phoenix.web.page_fetch import HttpPageFetcher
 
 if sys.platform == "win32":
     import msvcrt
@@ -195,6 +211,8 @@ class ProviderSet:
 
     providers: tuple[ModelProvider, ...]
     structured: tuple[ModelProvider, ...] = ()
+    # PHX-110: embeddings for the knowledge base; None leaves it read-only.
+    embedding: EmbeddingProvider | None = None
 
 
 ProviderFactory = Callable[[ServerConfig], ProviderSet]
@@ -205,6 +223,7 @@ def ollama_providers(config: ServerConfig) -> ProviderSet:
     return ProviderSet(
         providers=(OllamaProvider(config.ollama_base_url),),
         structured=(OllamaProvider(config.ollama_base_url, think=False),),
+        embedding=OllamaEmbeddingProvider(config.ollama_base_url),
     )
 
 
@@ -268,6 +287,8 @@ class BackendServices:
     kaido: KaidoMonitor  # PHX-119: shared by readiness and every runtime
     model_registrar: "ModelRegistrar"  # PHX-108: late provider start
     voice: VoiceService  # PHX-114
+    knowledge: KnowledgeService  # PHX-110
+    observability: MetricsCollector | None = None  # PHX-115
 
 
 @dataclass(frozen=True)
@@ -288,7 +309,6 @@ class _BackendHealth:
         return bool(statuses) and all(
             status == ProviderHealthStatus.HEALTHY for status in statuses
         )
-    observability: MetricsCollector | None = None  # PHX-115
 
 
 class ReadinessStatus(StrEnum):
@@ -567,7 +587,7 @@ class ModelRegistrar:
                 await self.refresh()
 
 
-async def _close_provider(provider: ModelProvider) -> None:
+async def _close_provider(provider: ModelProvider | EmbeddingProvider) -> None:
     close = getattr(provider, "aclose", None)
     if callable(close):
         await close()
@@ -606,6 +626,8 @@ async def open_services(
         provider_set = factory(config)
         for provider in (*provider_set.providers, *provider_set.structured):
             stack.push_async_callback(_close_provider, provider)
+        if provider_set.embedding is not None:
+            stack.push_async_callback(_close_provider, provider_set.embedding)
         agents = build_default_agent_registry()
         table = default_tier_table()
         capabilities = ModelCapabilityRegistry()
@@ -619,7 +641,26 @@ async def open_services(
             pass  # keep what registered; readiness reports the gap (INV-022)
         lifecycle = ModelLifecycleManager()
         session_factory = create_session_factory(engine)
-        tools = ToolRegistry(filesystem_tool_definitions())
+        # PHX-111: the research declaration is always registered (so a stored
+        # research request can be shown and decided); the tool itself exists
+        # only when web research is enabled.
+        # PHX-120 (ADR-162): the PHX-113 document and YouTube declarations are
+        # registered too, so their stored requests can be shown and decided.
+        tools = ToolRegistry(
+            (
+                *filesystem_tool_definitions(),
+                *web_research_tool_definitions(),
+                *document_file_tool_definitions(),
+                *youtube_tool_definitions(),
+            )
+        )
+        research: WebResearchTool | None = None
+        if settings.web_research_enabled:
+            search = DuckDuckGoSearchProvider()
+            stack.push_async_callback(search.aclose)
+            fetcher = HttpPageFetcher()
+            stack.push_async_callback(fetcher.aclose)
+            research = WebResearchTool(tools, search, fetcher)
         bus = EventBus(capacity=EVENT_BUS_CAPACITY)
         stream = EventStream(
             bus,
@@ -651,6 +692,18 @@ async def open_services(
             resource_probe=system_ram_sample if config.kaido_ram_probe else None,
             events=observer,
         )
+        # PHX-120 (ADR-162): PHX-113 media steps. YouTube reads its API key from
+        # the Windows credential store at call time (no key: tool_failed); no
+        # player adapter exists yet, so open/play/pause fail explicitly. Spotify
+        # needs an owner-registered client ID and is not wired.
+        youtube = YouTubeTool(tools, policy, WindowsCredentialStore())
+        stack.push_async_callback(youtube.aclose)
+        knowledge = KnowledgeService(
+            sessions=session_factory,
+            embedding=provider_set.embedding,
+            lifecycle=lifecycle,
+            agent_registry=agents,
+        )
 
         def build_runtime(workspace_root: str | None = None) -> PhoenixRuntime:
             """PHX-104: one runtime per workspace root; None has no documents."""
@@ -666,6 +719,16 @@ async def open_services(
                 else FilesystemTool(workspace_root, tools, policy, audit),
                 events=observer,
                 kaido=kaido,
+                knowledge=knowledge,
+                research_tool=research,
+                # PHX-120 (ADR-162): PHX-113 document read/create under the
+                # same workspace root, and YouTube media steps.
+                capabilities=CapabilityTools(
+                    documents=None
+                    if workspace_root is None
+                    else DocumentFileTool(workspace_root, tools, policy),
+                    youtube=youtube,
+                ),
             )
 
         runtime = build_runtime()
@@ -723,6 +786,7 @@ async def open_services(
             kaido=kaido,
             model_registrar=registrar,
             voice=voice,
+            knowledge=knowledge,
             observability=observer,
         )
         refresher: asyncio.Task[None] | None = None

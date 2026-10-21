@@ -4,7 +4,8 @@ Every schema forbids extra fields. Responses carry only the user's message
 text, PHOENIX's final answer text, IDs, statuses, codes and timestamps, and a
 pending permission's tool, action, resource path and risk so the user can
 decide on it. Raw model output, tool output and file content are never part of
-any schema.
+any schema. PHX-110 (ADR-131): a mission also lists the sources its answer
+cites (marker, provenance and file name; never the source text).
 
 Request bodies hold only what the user chooses. An approval names a duration;
 the tool, action, resource and actor always come from the stored request
@@ -101,6 +102,21 @@ class KaidoOut(Contract):
     recovery_id: str | None
 
 
+class SourceOut(Contract):
+    """PHX-110: one cited source; ``marker`` is the "[n]" used in the answer."""
+
+    marker: str
+    kind: Literal["memory", "document_chunk"]
+    source_id: str
+    document_id: str | None
+    title: str | None
+    page: int | None
+    section: str | None
+    chunk_index: int | None
+    memory_type: str | None
+    label: str
+
+
 class MissionDetail(MissionSummary):
     request_text: str | None
     answer_text: str | None
@@ -110,6 +126,8 @@ class MissionDetail(MissionSummary):
     permission_request: PermissionRequestOut | None
     # PHX-119: set when KAIDO engaged for this mission (degraded mode).
     kaido: KaidoOut | None
+    # PHX-110: the sources behind the answer, in citation order.
+    sources: tuple[SourceOut, ...] = ()
 
 
 class CancelResult(Contract):
