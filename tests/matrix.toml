@@ -29,7 +29,7 @@ timeout = 1200
 [[gate]]
 # pyproject.toml is guard-pinned, so scripts/ get their own strict mypy gate.
 id = "mypy-scripts"
-command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py"]
+command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py", "scripts/fyp_adaptive_deep.py", "scripts/colibri_gate.py"]
 timeout = 600
 
 [[gate]]
@@ -150,6 +150,12 @@ categories = ["unit", "integration", "model_provider_contracts", "secret_leakage
 # secret_leakage: test_auth_headers_and_repr_privacy
 
 [[file]]
+path = "tests/test_colibri_gate.py"
+categories = ["unit", "integration"]
+# PHX-116 deep-tier gate; integration: test_live_run_measures_the_served_model_without_content
+# (real BenchmarkRunner + ModelLifecycleManager driving a fake Colibri provider)
+
+[[file]]
 path = "tests/test_config.py"
 categories = ["unit"]
 
@@ -188,6 +194,15 @@ path = "tests/test_filesystem_tool.py"
 categories = ["unit", "integration", "tools", "permissions", "path_traversal", "permission_bypass", "prompt_injection", "forged_tool_results"]
 # path_traversal: test_real_symlink_escape_rejected, test_real_windows_junction_escape_rejected
 # permission_bypass: test_approved_file_a_cannot_execute_file_b
+
+[[file]]
+path = "tests/test_fyp_adaptive_deep.py"
+categories = ["unit", "integration", "routing"]
+# PHX-116 configuration (3) runner; integration:
+# test_only_rejected_answers_escalate_and_the_deep_tier_rescues_them (real
+# PhoenixRuntime triage, AIZEN, router, LEVI with scripted Ollama + Colibri)
+# routing: test_escalation_policy_uses_closed_runtime_evidence_only,
+# test_deep_tier_serves_text_answers_and_never_control_roles
 
 [[file]]
 path = "tests/test_fyp_benchmark.py"

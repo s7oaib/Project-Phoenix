@@ -124,8 +124,30 @@ behaviour.
     Caveat: those traces predate `MissionTrace.recoveries`, so fallbacks were
     detected from the task states (a completed mission whose COMPLEX task
     ended `failed`).
-- Configuration (3) is reported as NOT RUNNABLE: the runtime has no adaptive
-  routing or Colibri deep-tier path.
+- Configuration (3) runs with `--config phoenix-adaptive-deep`
+  (`scripts/fyp_adaptive_deep.py`, PHX-116, ADR-121), only after the deep tier
+  passes its gate.
+  - **Deep tier.** Qwen3.6-35B-A3B (Colibri int4 gs64 container) served by the
+    Colibri v2.0.0 CUDA release with `coli serve` on `127.0.0.1:8000`. PHOENIX
+    never starts it (ADR-028, ADR-120).
+  - **Gate.** `scripts/colibri_gate.py --io-bench --live` runs the v1 task set
+    on the served model through `ColibriProvider` and the PHX-016 harness. It
+    reports PASS, FAIL or INCOMPLETE against fixed criteria: success, accuracy,
+    TTFT, throughput, RAM headroom, VRAM, NVMe read speed and the container's
+    sha256 manifest (`--verify-manifest`). It also records the engine process's
+    disk reads (`colibri_disk_io`). A FAIL means configuration (3) is reported
+    as measured and rejected, with the gate's numbers.
+  - **Adaptive routing.** Each task first runs as configuration (2). It
+    escalates once to a COMPLEX mission with Colibri first for the text
+    specialists and the final answer. Escalation happens only when LEVI
+    rejected the answer (`verification_failed`), the output stayed unusable
+    (`responder_output`), or the answer came from an unverified DIRECT
+    fallback. Refusals, permissions, tools, timeouts and provider failures
+    never escalate, and the score is never consulted. LEVI and the control
+    roles stay on Ollama.
+  - **Report.** The first-attempt summary (configuration (2) on the same run),
+    the final summary, escalations by reason, deep generations and rescued
+    missions. A deep tier that drops mid-run shows as `deep_not_used`.
 - Every metric above is reported either as measured or as NOT RUNNABLE with a
   reason (ADR-079).
 - Changing any case requires a new task-set version.
