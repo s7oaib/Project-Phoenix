@@ -1529,6 +1529,11 @@ def test_source_architecture_and_immutability() -> None:
         ":(exclude)apps/desktop/src-tauri/src/backend.rs",
         ":(exclude)apps/desktop/src-tauri/src/proxy.rs",
         ":(exclude)apps/desktop/src-tauri/src/events.rs",
+        # PHX-110 (ADR-130 to ADR-134) adds the knowledge service and routes (the
+        # changed server.py, routes and body cap are excluded above and
+        # hash-pinned in test_prompt_injection_defenses.py).
+        ":(exclude)phoenix/api/knowledge.py",
+        ":(exclude)phoenix/api/routes/knowledge.py",
     ]
     assert not subprocess.check_output(
         ["git", "diff", "origin/main", "--", *paths], cwd=ROOT

@@ -5,13 +5,15 @@
 at once. Progress arrives over ``WS /events``; the answer comes from
 ``GET /missions/{id}``. No request is held open for a mission. Without a
 ``path`` PHOENIX triages the request (PHX-105); missions report the path and
-who decided it (``triage_outcome``).
+who decided it (``triage_outcome``). PHX-110: a completed mission's detail
+lists the sources its answer cites (``sources``), read from its trace.
 """
 
 import contextlib
 
 from fastapi import APIRouter, Request, Response
 
+from phoenix.agents.retrieval_steps import MissionCitation
 from phoenix.api.missions import CancelOutcome, MissionService
 from phoenix.api.routes.common import (
     DEFAULT_PAGE,
@@ -33,6 +35,7 @@ from phoenix.api.routes.schemas import (
     MissionDetail,
     MissionSummary,
     PermissionRequestOut,
+    SourceOut,
 )
 from phoenix.persistence.missions import MissionRecord, PermissionRequestRecord
 from phoenix.tools.registry import ToolRegistry
@@ -104,7 +107,28 @@ async def _detail(
             "permission_request": None
             if pending is None
             else permission_out(pending, tools),
+            # PHX-110: only an answer has sources to show.
+            "sources": ()
+            if trace is None or record.answer_message_id is None
+            else tuple(source_out(citation) for citation in trace.citations),
         }
+    )
+
+
+def source_out(citation: MissionCitation) -> SourceOut:
+    return SourceOut(
+        marker=citation.marker,
+        kind=citation.source_kind,
+        source_id=citation.source_id,
+        document_id=citation.document_id,
+        title=citation.title,
+        page=citation.page,
+        section=citation.section,
+        chunk_index=citation.chunk_index,
+        memory_type=None
+        if citation.memory_type is None
+        else citation.memory_type.value,
+        label=citation.label,
     )
 
 

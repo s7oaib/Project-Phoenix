@@ -19,6 +19,10 @@ closes every connection when the backend stops. PHX-104 (ADR-089) adds the REST
 API v1 routes (``phoenix.api.routes``) and the document workspace: the stored
 root is re-validated at startup, and setting it builds a FilesystemTool and a
 runtime that missions starting afterwards use (``WorkspaceService``).
+PHX-110 (ADR-130 to ADR-134) adds the user's knowledge base
+(``KnowledgeService``): uploads and memories are embedded with the provider
+set's embedding provider (EmbeddingGemma on Ollama by default), and every
+runtime receives it as its mission KnowledgeSource.
 """
 
 import asyncio
@@ -53,6 +57,7 @@ from phoenix.api.event_stream import (
     WS_TRY_AGAIN_LATER,
     EventStream,
 )
+from phoenix.api.knowledge import KnowledgeService
 from phoenix.api.missions import MissionService
 from phoenix.api.security import (
     LocalApiSecurity,
@@ -63,8 +68,10 @@ from phoenix.api.security import (
 from phoenix.api.workspace import WorkspaceService
 from phoenix.core.config import AppSettings
 from phoenix.core.event_bus import EventBus
+from phoenix.models.embeddings import EmbeddingProvider
 from phoenix.models.lifecycle import ModelLifecycleManager
 from phoenix.models.ollama import OllamaProvider
+from phoenix.models.ollama_embeddings import OllamaEmbeddingProvider
 from phoenix.models.provider import (
     ModelProvider,
     ModelProviderError,
@@ -146,6 +153,8 @@ class ProviderSet:
 
     providers: tuple[ModelProvider, ...]
     structured: tuple[ModelProvider, ...] = ()
+    # PHX-110: embeddings for the knowledge base; None leaves it read-only.
+    embedding: EmbeddingProvider | None = None
 
 
 ProviderFactory = Callable[[ServerConfig], ProviderSet]
@@ -156,6 +165,7 @@ def ollama_providers(config: ServerConfig) -> ProviderSet:
     return ProviderSet(
         providers=(OllamaProvider(config.ollama_base_url),),
         structured=(OllamaProvider(config.ollama_base_url, think=False),),
+        embedding=OllamaEmbeddingProvider(config.ollama_base_url),
     )
 
 
@@ -216,6 +226,7 @@ class BackendServices:
     missions: MissionService
     settings_store: SettingsStore
     workspace: WorkspaceService
+    knowledge: KnowledgeService  # PHX-110
 
 
 class ReadinessStatus(StrEnum):
@@ -357,7 +368,7 @@ async def register_tier_models(
                 registry.register(capabilities)
 
 
-async def _close_provider(provider: ModelProvider) -> None:
+async def _close_provider(provider: ModelProvider | EmbeddingProvider) -> None:
     close = getattr(provider, "aclose", None)
     if callable(close):
         await close()
@@ -392,6 +403,8 @@ async def open_services(
         provider_set = factory(config)
         for provider in (*provider_set.providers, *provider_set.structured):
             stack.push_async_callback(_close_provider, provider)
+        if provider_set.embedding is not None:
+            stack.push_async_callback(_close_provider, provider_set.embedding)
         agents = build_default_agent_registry()
         table = default_tier_table()
         capabilities = ModelCapabilityRegistry()
@@ -416,6 +429,12 @@ async def open_services(
         )
         policy = PermissionPolicy()
         audit = AuditTrail(session_factory, tools)
+        knowledge = KnowledgeService(
+            sessions=session_factory,
+            embedding=provider_set.embedding,
+            lifecycle=lifecycle,
+            agent_registry=agents,
+        )
 
         def build_runtime(workspace_root: str | None = None) -> PhoenixRuntime:
             """PHX-104: one runtime per workspace root; None has no documents."""
@@ -430,6 +449,7 @@ async def open_services(
                 if workspace_root is None
                 else FilesystemTool(workspace_root, tools, policy, audit),
                 events=stream,
+                knowledge=knowledge,
             )
 
         runtime = build_runtime()
@@ -466,6 +486,7 @@ async def open_services(
                 build_runtime=build_runtime,
                 data_dir=settings.data_dir,
             ),
+            knowledge=knowledge,
         )
         try:
             await services.workspace.load()  # before the first mission runs

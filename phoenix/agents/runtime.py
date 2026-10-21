@@ -29,6 +29,12 @@ falls back to the DIRECT path. LEVI's rejection is never retried (INV-008).
 MissionTrace records every recovery decision and recovery.* events publish them,
 with closed values only (INV-022); exhaustion keeps the original failure code.
 
+PHX-110 (ADR-130 to ADR-134): with a caller KnowledgeSource, a step assigned to
+``knowledge_rag`` runs one PHOENIX-built P0 retrieval over the user's indexed
+uploads and memories (see retrieval_steps). Sources reach the model only as
+numbered guarded items; LEVI checks the citations against them, and the trace
+records retrievals and the cited sources' provenance, never their content.
+
 Task state is task-level: intermediate step verification runs while RUNNING, and
 VERIFYING is the final-answer verification phase. Callers refresh capability
 records; provider health is probed once per mission. No resource monitor exists
@@ -102,6 +108,17 @@ from phoenix.agents.responders import (
     ModelStepAssignmentResponder,
     ResponderErrorCode,
     ResponderOutputError,
+)
+from phoenix.agents.retrieval_steps import (
+    KNOWLEDGE_TOOL_ID,
+    CitedFinalVerificationResponder,
+    KnowledgeEvidence,
+    KnowledgeLedger,
+    KnowledgeSource,
+    KnowledgeStepRunner,
+    KnowledgeVerificationResponder,
+    MissionCitation,
+    RetrievalRecord,
 )
 from phoenix.agents.router import (
     DOMAIN_AGENT_IDS,
@@ -326,6 +343,10 @@ class MissionTrace(_Value):
     ``switch_agent`` means PHOENIX answered on the DIRECT path after AIZEN's
     plan failed: ``path`` stays the decided COMPLEX and the task never
     COMPLETED, so it never counts as COMPLEX success.
+
+    PHX-110: ``retrievals`` lists each knowledge retrieval (IDs and counts) and
+    ``citations`` the sources verified knowledge steps cited (provenance only,
+    never content). Both default to empty for earlier traces.
     """
 
     prompt_set_version: Identifier
@@ -339,6 +360,8 @@ class MissionTrace(_Value):
     triage_outcome: TriageOutcome | None = None
     triage_reason: TriageFallbackReason | None = None
     recoveries: tuple[RecoveryRecord, ...] = ()
+    retrievals: tuple[RetrievalRecord, ...] = ()
+    citations: tuple[MissionCitation, ...] = ()
 
     @model_validator(mode="after")
     def consistent_triage(self) -> Self:
@@ -392,6 +415,11 @@ class MissionResult(_Value):
             raise ValueError("Only waiting missions carry a pending permission")
         return self
 
+    @property
+    def citations(self) -> tuple[MissionCitation, ...]:
+        """PHX-110: the sources behind the answer, in citation order."""
+        return self.trace.citations
+
 
 class PhoenixRuntimeError(Exception):
     """A runtime contract or mission lifetime requirement was violated."""
@@ -424,6 +452,8 @@ class _Evidence:
     recoveries: list[RecoveryRecord] = field(default_factory=list)
     # PHX-109: a direct fallback already settled the failed task as FAILED.
     task_failed: bool = False
+    # PHX-110: retrievals and verified citations (cited text stays in memory).
+    knowledge: KnowledgeLedger = field(default_factory=KnowledgeLedger)
 
     @property
     def recovery_actions(self) -> int:
@@ -472,6 +502,8 @@ class _Evidence:
                 triage_outcome=self.triage_outcome,
                 triage_reason=self.triage_reason,
                 recoveries=tuple(self.recoveries),
+                retrievals=tuple(self.knowledge.records),
+                citations=tuple(self.knowledge.citations),
             ),
         )
 
@@ -497,6 +529,10 @@ class PhoenixRuntime:
     events optionally receives PHX-103 progress events (e.g. an EventBus). It
     must not block; anything it raises is swallowed and counted in
     dropped_events, so a mission never fails or waits because of it.
+
+    knowledge optionally enables PHX-110 knowledge steps over the caller's
+    KnowledgeSource; the knowledge_rag domain is offered to a mission only
+    while the source has something indexed (see retrieval_steps).
     """
 
     def __init__(
@@ -511,6 +547,7 @@ class PhoenixRuntime:
         limits: RuntimeLimits | None = None,
         filesystem_tool: FilesystemTool | None = None,
         events: EventSink | None = None,
+        knowledge: KnowledgeSource | None = None,
     ) -> None:
         registry = (
             build_default_agent_registry() if agent_registry is None else agent_registry
@@ -544,6 +581,9 @@ class PhoenixRuntime:
                 max_read_bytes=self._limits.max_output_chars,
             )
             self._domains = (*TEXT_DOMAINS, RoutingDomain.DOCUMENTS)
+        self._knowledge = (
+            None if knowledge is None else KnowledgeStepRunner(knowledge, self._guard)
+        )
         try:
             self._recovery = MahoragaRecovery(self._agents)
         except MahoragaRecoveryError:
@@ -1054,6 +1094,11 @@ class PhoenixRuntime:
         await events.emit(EventType.TASK_CREATED, path=OrchestrationPath.COMPLEX.value)
         await _transition(events, machine, TaskState.PLANNING)
         health = await self._health(evidence)
+        domains = self._domains
+        # PHX-110: knowledge steps are offered only while there is something
+        # indexed to search.
+        if self._knowledge is not None and await self._knowledge.available():
+            domains = (*domains, RoutingDomain.KNOWLEDGE_RAG)
 
         planning = PlanningRequest(
             request_id=request.request_id, objective=request.text
@@ -1086,7 +1131,7 @@ class PhoenixRuntime:
                             "phoenix", health, evidence, tier="assignment"
                         ),
                         attempt=lambda binding: ModelStepAssignmentResponder(
-                            binding, self._guard, allowed_domains=self._domains
+                            binding, self._guard, allowed_domains=domains
                         ).assign(planned),
                     )
         except ResponderOutputError as error:
@@ -1106,6 +1151,11 @@ class PhoenixRuntime:
             for step_id, route in routes.items()
             if route.domain == RoutingDomain.DOCUMENTS
         }
+        knowledge = {
+            step_id
+            for step_id, route in routes.items()
+            if route.domain == RoutingDomain.KNOWLEDGE_RAG
+        }
         steps = [
             TaskStepDefinition(
                 step_id=step.step_id,
@@ -1115,10 +1165,14 @@ class PhoenixRuntime:
                 input_refs=plan_ids[index - 1 : index],
                 expected_output=prompts.DOCUMENT_STEP_EXPECTED_OUTPUT
                 if step.step_id in documents
+                else prompts.KNOWLEDGE_STEP_EXPECTED_OUTPUT
+                if step.step_id in knowledge
                 else prompts.STEP_EXPECTED_OUTPUT,
                 timeout_seconds=limits.step_timeout_seconds,
                 completion_rule=prompts.DOCUMENT_STEP_COMPLETION_RULE
                 if step.step_id in documents
+                else prompts.KNOWLEDGE_STEP_COMPLETION_RULE
+                if step.step_id in knowledge
                 else prompts.STEP_COMPLETION_RULE,
             )
             for index, step in enumerate(plan.steps)
@@ -1165,14 +1219,25 @@ class PhoenixRuntime:
                 source_agent_id="phoenix",
                 expected_output_schema=step.expected_output,
                 verification_required=True,
-                permission_scope=DOCUMENT_TOOL_IDS if step_id in documents else (),
+                permission_scope=DOCUMENT_TOOL_IDS
+                if step_id in documents
+                else (KNOWLEDGE_TOOL_ID,)
+                if step_id in knowledge
+                else (),
             )
-            # PHX-047: both document turns run on the structured providers.
+            # PHX-047: both document turns run on the structured providers;
+            # PHX-110: so does the knowledge answer.
             binding = self._binding(
-                decision.agent_id, producer, evidence, structured=step_id in documents
+                decision.agent_id,
+                producer,
+                evidence,
+                structured=step_id in documents or step_id in knowledge,
             )
             prior = tuple((ref, outputs[ref]) for ref in step.input_refs)
             tool_evidence: ToolEvidence | None = None
+            knowledge_evidence: KnowledgeEvidence | None = None
+            # PHX-110: a knowledge step publishes the specialist phase (the
+            # PHX-103 role allowlist is unchanged); its agent ID tells it apart.
             role = (
                 "final_answer"
                 if final
@@ -1194,6 +1259,18 @@ class PhoenixRuntime:
                             session_id=session_id,
                             record=evidence.tool_calls.append,
                             events=events,
+                        )
+                    elif step_id in knowledge:
+                        assert self._knowledge is not None  # offered with a source
+                        (
+                            candidate,
+                            knowledge_evidence,
+                        ) = await self._knowledge.perform(
+                            binding,
+                            handoff,
+                            user_request=request.text,
+                            evidence=prior,
+                            ledger=evidence.knowledge,
                         )
                     else:
                         candidate = await self._recovering(
@@ -1223,6 +1300,17 @@ class PhoenixRuntime:
                 levi = _levi_responder(
                     self._guard, request.text, prior, final, tool_evidence, grants
                 )
+                if knowledge_evidence is not None or (
+                    final and evidence.knowledge.records
+                ):
+                    levi = _knowledge_levi(
+                        self._guard,
+                        request.text,
+                        prior,
+                        knowledge_evidence,
+                        evidence.knowledge,
+                        levi,
+                    )
                 async with asyncio.timeout(limits.verification_timeout_seconds):
                     # PHX-109: only LEVI's failed generation is retried, never
                     # its verdict: a FAILED result returns from here as is.
@@ -1255,6 +1343,8 @@ class PhoenixRuntime:
             )
             if not satisfied:
                 raise _VerificationFailed
+            if knowledge_evidence is not None:
+                evidence.knowledge.accept(knowledge_evidence, candidate)
             outputs[step_id] = candidate
             await events.emit(
                 EventType.STEP_COMPLETED,
@@ -1315,6 +1405,31 @@ def _levi_responder(
             tool_evidence,
             grants,
         )
+
+    return responder
+
+
+def _knowledge_levi(
+    guard: PromptInjectionGuard,
+    user_request: str,
+    prior: tuple[tuple[str, str], ...],
+    knowledge: KnowledgeEvidence | None,
+    ledger: KnowledgeLedger,
+    default: Callable[[ModelBinding], VerificationResponder],
+) -> Callable[[ModelBinding], VerificationResponder]:
+    """PHX-110: LEVI for a knowledge step, or for the final answer of a
+    mission that ran one (its citations must name verified sources)."""
+
+    def responder(verifier: ModelBinding) -> VerificationResponder:
+        if knowledge is not None:
+            return KnowledgeVerificationResponder(
+                verifier,
+                guard,
+                original_request=user_request,
+                evidence=knowledge,
+                prior=prior,
+            )
+        return CitedFinalVerificationResponder(default(verifier), ledger)
 
     return responder
 

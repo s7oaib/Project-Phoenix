@@ -29,7 +29,7 @@ timeout = 1200
 [[gate]]
 # pyproject.toml is guard-pinned, so scripts/ get their own strict mypy gate.
 id = "mypy-scripts"
-command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py"]
+command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/phoenix_knowledge_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py"]
 timeout = 600
 
 [[gate]]
@@ -209,6 +209,32 @@ categories = ["unit"]
 path = "tests/test_kaido_failsafe.py"
 categories = ["unit", "recovery"]
 # recovery: test_decision_is_degraded_only
+
+[[file]]
+path = "tests/test_knowledge_api.py"
+categories = ["unit", "integration", "api_contract", "migrations", "permission_bypass", "secret_leakage"]
+# PHX-110 knowledge routes and cited missions over REST (composition root, middleware, MissionService,
+# PhoenixRuntime, KnowledgeService, migrated SQLite; scripted model and embeddings)
+# integration: test_cited_mission_answer_and_sources_over_the_api
+# api_contract: test_upload_lists_and_deletes_a_document, test_invalid_uploads_are_refused_and_leave_nothing,
+# test_memory_request_shape_is_exact, test_upload_has_its_own_body_cap
+# migrations: test_knowledge_runs_on_the_backend_event_loop (knowledge persists across launches)
+# permission_bypass: test_every_knowledge_route_requires_the_token
+# secret_leakage: test_secret_memory_is_refused, test_invalid_uploads_are_refused_and_leave_nothing
+
+[[file]]
+path = "tests/test_knowledge_missions.py"
+categories = ["unit", "integration", "end_to_end", "permissions", "tools", "prompt_injection", "forged_tool_results", "secret_leakage"]
+# PHX-110 knowledge steps in full missions (real orchestrator/AIZEN/router/task graph/handoff/LEVI/lifecycle,
+# PermissionEngine, prompt guard, KnowledgeService with parsers/ingestion/vector store/retrieval/citations
+# on migrated SQLite; scripted model and embeddings)
+# end_to_end: test_cited_answer_completes_with_sources_and_no_content_in_trace
+# permissions: test_knowledge_retrieval_is_p0_through_permission_engine
+# tools: test_embedding_failure_is_an_explicit_tool_failure
+# prompt_injection: test_injected_document_stays_inert_guarded_data, test_sources_reach_models_only_as_numbered_guarded_items
+# forged_tool_results: test_forged_citation_number_fails_without_the_model_verifier,
+# test_forged_retrieval_evidence_fails_levi, test_final_answer_with_a_forged_citation_fails
+# secret_leakage: test_secrets_never_become_memory_or_vectors
 
 [[file]]
 path = "tests/test_levi_verification.py"

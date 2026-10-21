@@ -112,7 +112,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-107 Frontend port adapters — DONE (R1–R11 confirmed by the owner 2026-10-18)
 - PHX-108 Settings and onboarding — TODO
 - PHX-109 MAHORAGA/KAIDO in missions — DONE (MAHORAGA bounded recovery, ADR-093; KAIDO deferred)
-- PHX-110 Memory and RAG in missions — TODO
+- PHX-110 Memory and RAG in missions — DONE (knowledge steps with cited, LEVI-checked answers, ADR-130–134; `phoenix-prompts-v5` text awaits owner approval; live smoke pending)
 - PHX-111 Web research — TODO
 - PHX-112 Computer control steps — TODO
 - PHX-113 Media and documents steps — TODO

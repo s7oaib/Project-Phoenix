@@ -1,19 +1,19 @@
 """PHX-104 REST API v1 routes (ADR-089); installed by ``build_server_app``.
 
 Every route sits behind the PHX-101 middleware (Host, Origin, token). The
-routes are thin: MissionService and WorkspaceService own the behaviour.
-``/files/upload`` and ``/memory/search`` are deferred to PHX-110 and do not
-exist.
+routes are thin: MissionService, WorkspaceService and (PHX-110, ADR-132 and
+ADR-133) KnowledgeService own the behaviour. PHX-110 adds ``/files/upload``,
+``/files``, ``/memory`` and ``/memory/search`` (see ``knowledge``).
 """
 
 from fastapi import FastAPI
 
-from phoenix.api.routes import missions, permissions, system
+from phoenix.api.routes import knowledge, missions, permissions, system
 from phoenix.api.routes.common import OPTIONS_KEY, ApiOptions, install_error_handlers
 
 
 def install_api_routes(app: FastAPI, *, probe_timeout_seconds: float) -> None:
     setattr(app.state, OPTIONS_KEY, ApiOptions(probe_timeout_seconds))
     install_error_handlers(app)
-    for module in (missions, permissions, system):
+    for module in (missions, permissions, system, knowledge):
         app.include_router(module.router)

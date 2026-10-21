@@ -4596,3 +4596,158 @@ linked spelling. A swap between the root check and a later operation within one
 call stays outside the V1 threat model: the residual window shrinks from a
 whole mission to the inside of one call. No new dependencies and no new event
 types.
+
+## ADR-130 — Knowledge steps in missions: a PHOENIX-built P0 retrieval
+
+Status: Accepted (recommended defaults applied under the coordinator's
+instruction of 2026-10-21; R1–R14 in `tickets/PHX-110-memory-rag-missions.md`
+await the owner's review)
+Date: 2026-10-21
+Ticket: PHX-110
+
+Context: PHX-030 to PHX-035 built memory, ingestion, a vector store, scoped
+retrieval and citations, but no mission used them. The capability pattern
+(PHX-046) is a domain step whose tool call PermissionEngine decides, with
+guarded output and a deterministic LEVI evidence check.
+
+Decision:
+
+- **Domain.** Missions gain `knowledge_rag` (agent `knowledge_rag`), offered to
+  the assignment only when the runtime has a caller `KnowledgeSource` and the
+  source reports something indexed. `PhoenixRuntime(knowledge=...)` is
+  optional; without it nothing changes.
+- **PHOENIX builds the retrieval.** The model proposes nothing: the query is
+  the planned step objective and the scope is the caller's (every indexed
+  upload plus the `user` memory scope). Model text cannot widen the scope.
+- **Permission.** `knowledge.retrieve` is a P0 `ToolDefinition` (docs/08 lists
+  memory retrieval as P0). PHOENIX issues a `PermissionRequest` per step and
+  only an ALLOWED (`p0_internal`) decision proceeds. P0 writes no audit row.
+- **Guarded sources.** Each chunk or memory reaches a model only as one
+  numbered guarded item ("[n]", origin `uploaded_document` or
+  `external_text`); numbers are mission-wide. Both knowledge turns use the
+  structured providers.
+- **No sources.** An empty retrieval yields the fixed sentence
+  `No source answers this step.` without a generation; the model may also
+  answer with exactly that sentence.
+- **Failures.** A retrieval or embedding failure is `tool_failed`, a refused
+  decision `tool_rejected`; no new codes. The step's generation is not retried
+  (as for document steps, ADR-093); its LEVI generation is.
+- **Events.** No new event types and no allowlist change: the step publishes the
+  specialist agent phase and LEVI's events; retrievals are recorded in the
+  trace (ADR-131).
+
+Consequences: shared-file edits are additive (`runtime.py`, `prompts.py`); the
+logic lives in the new `phoenix/agents/retrieval_steps.py`. Every changed
+protected file is re-pinned to the PHX-110 implementation commit.
+
+## ADR-131 — Citations in MissionResult and the API
+
+Status: Accepted (as ADR-130)
+Date: 2026-10-21
+Ticket: PHX-110
+
+Decision:
+
+- `MissionTrace` gains `retrievals` (one `RetrievalRecord` per knowledge
+  retrieval: IDs, decision status, outcome, item counts, first number) and
+  `citations` (one `MissionCitation` per source a **verified** knowledge step
+  cited: marker, ordinal, step, retrieval ID, source kind, ID and hash, document
+  ID, upload file name, page, section, chunk, memory type and scope, and the
+  PHX-035 rendered label). Neither holds source text. Both default to empty, so
+  stored traces still load; the trace is JSON, so no migration.
+- `MissionResult.citations` returns the trace's citations.
+- `GET /missions/{id}` adds `sources` (a completed mission's citations; empty
+  otherwise). Responses still never carry source or file text.
+- The final answer may repeat the markers; it need not (an exact-format answer
+  stays exact).
+
+## ADR-132 — Memory write policy
+
+Status: Accepted (as ADR-130)
+Date: 2026-10-21
+Ticket: PHX-110
+
+Decision (docs/10: not every turn becomes memory; secrets never do; the user
+can inspect and delete):
+
+- **Only the user writes memory**, through `POST /memory`. Missions and models
+  never write memory; no chat turn is remembered automatically.
+- **Shape.** One plain note of at most 2,000 characters, typed `user`
+  (default), `project` or `semantic`, in the single `user` scope, with
+  `source_type="user_note"`, confidence 1.0, importance 0.5 and no expiry. At
+  most 2,000 memories.
+- **No secrets (INV-018).** A credential-shaped note (private-key blocks, cloud,
+  forge, chat and model API key shapes, JWTs, and `password:`/`api key=`
+  style assignments) is refused with `secret_rejected` before it is embedded or
+  stored. The same `MemoryWritePolicy` is PUDDING's admission policy. Uploads
+  with a credential-shaped chunk are refused the same way. The detector is a
+  heuristic and can miss or over-match.
+- **Visible and deletable.** `GET /memory` lists every memory with its text;
+  `GET /memory/search` searches memories and uploads and returns the matching
+  text (the user's own data); `DELETE /memory/{id}` removes a memory and its
+  vector.
+
+## ADR-133 — Upload to index wiring and the upload body cap
+
+Status: Accepted (as ADR-130)
+Date: 2026-10-21
+Ticket: PHX-110
+
+Decision:
+
+- `POST /files/upload?filename=...` takes the raw file as the request body, so
+  no multipart parser (and no new dependency) is needed. The PHX-072 parsers
+  route and parse it, PHX-032 ingests it (secret-bearing documents refused),
+  every chunk is embedded with `embeddinggemma:300m` through Ollama and stored
+  in the PHX-033 vector store. If embedding or storing fails, the document,
+  its chunks and vectors are removed: nothing half-indexed stays.
+  `GET /files` lists uploads; `DELETE /files/{id}` removes one with its chunks
+  and vectors.
+- Bounds: 8 MiB per upload, 200 documents, 2,000 chunks in total (the PHX-034
+  per-kind bound), 500 chunks per document, 1,000-character chunks with 150
+  overlapping; retrieval keeps up to 6 items and 6,000 characters above a 0.35
+  cosine floor. These are fixed in v1.
+- `body_limit.py` gives the exact path `/files/upload` its own 8 MiB cap; every
+  other route keeps 64 KiB.
+- **One lease (INV-023).** Every embedding (upload batches of 16, a memory, a
+  mission's query) holds the model lifecycle's heavy lease, so it never
+  overlaps a generation; an upload during a generation waits.
+- `ProviderSet` gains an optional `embedding` provider (the Ollama default
+  builds one); without it the knowledge base is read-only and missions are not
+  offered knowledge. `BackendServices` gains `knowledge`; every runtime gets it.
+- Ingestion and memory publish their events to a private bus, so `WS /events`
+  and its allowlist are unchanged.
+
+## ADR-134 — LEVI checks citations; `phoenix-prompts-v5`
+
+Status: Accepted for the checks (as ADR-130); the v5 prompt text awaits the
+owner's approval in the PR
+Date: 2026-10-21
+Ticket: PHX-110
+
+Decision:
+
+- **Knowledge step.** Deterministic checks first; a failure is final:
+  retrieval and permission evidence correlate with what PHOENIX issued;
+  plain text and size; every marker is a number issued for this step (at least
+  one), or the output is exactly the no-answer sentence; each citing sentence
+  shares a content term with its source or takes all its numbers from it, and
+  every number the step states comes from a cited source, the objective, the
+  request or an earlier verified output. Then the `knowledge_verifier` model
+  sees only the cited sources and judges support. The verdict stays
+  all-checks (INV-008).
+- **Final answer.** In a mission that ran a knowledge step, every marker in the
+  final answer must be a source a verified step cited, and its sentence must
+  be grounded in it, before the PHX-047 final verifier runs.
+- **Prompts.** `phoenix-prompts-v5` adds `KNOWLEDGE_ANSWER_SYSTEM`,
+  `KNOWLEDGE_VERIFICATION_SYSTEM`, `KNOWLEDGE_NO_ANSWER`, the knowledge
+  expected output, completion rule and task texts, and
+  `DOMAIN_DESCRIPTIONS["knowledge_rag"]`. Every v4 constant is unchanged; the
+  triage, planner and assignment prompts are not edited (optional v6 sentences
+  are listed in the ticket).
+
+Limitations: the deterministic support check is lexical (terms and numbers),
+so a reversed fact that keeps its terms reaches the model verifier; a final
+answer containing a bracketed number such as `[1]` is read as a citation when
+the mission ran a knowledge step. No new dependencies, event types or
+migrations.
