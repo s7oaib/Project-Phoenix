@@ -190,6 +190,14 @@ categories = ["unit", "integration", "tools", "permissions", "path_traversal", "
 # permission_bypass: test_approved_file_a_cannot_execute_file_b
 
 [[file]]
+path = "tests/test_final_grounding.py"
+categories = ["unit", "integration", "prompt_injection"]
+# PHX-118 LEVI's deterministic final-answer grounding check; integration:
+# test_grounded_final_answer_passes_without_the_final_verifier_model (real PhoenixRuntime +
+# AIZEN/router/task graph/handoff/LEVI/lifecycle + FilesystemTool/PermissionEngine on tmp_path, scripted model)
+# prompt_injection: test_ungrounded_or_wrong_final_answers_still_go_to_the_model_and_fail (injected file case)
+
+[[file]]
 path = "tests/test_fyp_benchmark.py"
 categories = ["unit", "integration"]
 # PHX-091 FYP runner; integration: test_full_run_with_fake_provider (real
