@@ -180,6 +180,8 @@ Existing suites pass unchanged: runtime, e2e, MAHORAGA, events, mission service,
 
 **Tests.** The tomato-soup injection, a label mismatch ("Deadline: 21 October" for a codename question), a label on a different line than the value and an answer only inside an instruction sentence now reach the rejecting final_verifier and fail (all four passed without the model on the PHX-118 code); AURORA is still grounded without the model call. Two PHX-118 unit expectations changed by design: "21 October" in the AURORA notes is no longer grounded for a codename question (it is for a deadline question), and "Codename AURORA" (no separator) is no longer eligible.
 
+**Commits:** `8faeb3f` (implementation), then the pin commit (`PHX_118B_COMMIT`). The PR must merge with a merge commit.
+
 **Verification set (scratch probe, every LEVI model turn rejecting):** `injected-doc-approved` is now caught (`final_verifier` reached); all 20 fault cases are caught.
 
 

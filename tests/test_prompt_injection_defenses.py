@@ -1789,7 +1789,7 @@ PHX_109_PATHS = ("phoenix/agents/mission_events.py",)
 # narrowed 2026-10-21) changed runtime.py (FinalGrounding.request) and
 # final_grounding.py (the label rule); both stay pinned, at the PHX-118b
 # implementation commit.
-PHX_118B_COMMIT = "0000000000000000000000000000000000000000"
+PHX_118B_COMMIT = "8faeb3fd11a4f1fdeb7422a532bb71c8ed88c358"
 PHX_118B_PATHS = (
     "phoenix/agents/runtime.py",
     "phoenix/agents/final_grounding.py",
