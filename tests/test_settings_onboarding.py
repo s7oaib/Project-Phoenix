@@ -433,7 +433,7 @@ EXPECTED_FLAGS = [
     ("workspace_documents", True, "PHX-046", "document_analyst"),
     ("memory", True, "PHX-110", "memory"),
     ("web_research", False, "PHX-111", "web_research"),
-    ("computer_control", False, "PHX-112", "computer_control"),
+    ("computer_control", True, "PHX-112", "computer_control"),  # ADR-152
     ("media", True, "PHX-113", "media"),
     ("document_generation", True, "PHX-113", "document_analyst"),
     ("voice", True, "PHX-114", "voice"),  # PHX-114 (ADR-108)
@@ -469,8 +469,9 @@ def test_a_later_ticket_only_flips_a_flag(
     backend: Backend, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     flipped = dict(CAPABILITY_FLAGS)
-    flipped[CapabilityId.COMPUTER_CONTROL] = CapabilityFlag(
-        enabled=True, ticket="PHX-112", agent_id="computer_control"
+    # Every flag is on in this build, so the flip turns one off.
+    flipped[CapabilityId.VOICE] = CapabilityFlag(
+        enabled=False, ticket="PHX-114", agent_id="voice"
     )
     monkeypatch.setattr(
         capability_module, "CAPABILITY_FLAGS", MappingProxyType(flipped)

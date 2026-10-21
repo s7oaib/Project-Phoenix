@@ -53,8 +53,9 @@ CAPABILITY_FLAGS = MappingProxyType(
         CapabilityId.WEB_RESEARCH: CapabilityFlag(
             enabled=True, ticket="PHX-111", agent_id="web_research"
         ),
+        # PHX-112 (ADR-152): browser and Windows UI control steps.
         CapabilityId.COMPUTER_CONTROL: CapabilityFlag(
-            enabled=False, ticket="PHX-112", agent_id="computer_control"
+            enabled=True, ticket="PHX-112", agent_id="computer_control"
         ),
         CapabilityId.MEDIA: CapabilityFlag(
             enabled=True, ticket="PHX-113", agent_id="media"

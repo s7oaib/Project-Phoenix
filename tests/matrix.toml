@@ -29,7 +29,7 @@ timeout = 1200
 [[gate]]
 # pyproject.toml is guard-pinned, so scripts/ get their own strict mypy gate.
 id = "mypy-scripts"
-command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py", "scripts/voice_setup.py", "scripts/voice_smoke.py", "scripts/metric_datasets.py", "scripts/metric_benchmark.py", "scripts/fyp_adaptive_deep.py", "scripts/colibri_gate.py", "scripts/build_installer.py", "scripts/phoenix_knowledge_smoke.py", "scripts/research_mission_smoke.py"]
+command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py", "scripts/voice_setup.py", "scripts/voice_smoke.py", "scripts/metric_datasets.py", "scripts/metric_benchmark.py", "scripts/fyp_adaptive_deep.py", "scripts/colibri_gate.py", "scripts/build_installer.py", "scripts/phoenix_knowledge_smoke.py", "scripts/research_mission_smoke.py", "scripts/phoenix_control_smoke.py", "scripts/install_control_browser.py"]
 timeout = 600
 
 [[gate]]
@@ -160,6 +160,20 @@ path = "tests/test_colibri_gate.py"
 categories = ["unit", "integration"]
 # PHX-116 deep-tier gate; integration: test_live_run_measures_the_served_model_without_content
 # (real BenchmarkRunner + ModelLifecycleManager driving a fake Colibri provider)
+
+[[file]]
+path = "tests/test_computer_control_steps.py"
+categories = ["integration", "end_to_end", "permissions", "tools", "prompt_injection", "permission_bypass", "command_argument_injection", "forged_tool_results"]
+# PHX-112 computer-control missions (real runtime, ToolRegistry/PermissionEngine, real Browser/
+# WindowsUI/Screenshot/Terminal tools over fixture backends, migrated SQLite audit, MissionService
+# approve -> re-run loop; scripted model, local fixture pages and fixture windows only)
+# end_to_end: test_approve_rerun_loop_grants_p2_and_p1_then_completes
+# permissions: test_p4_click_needs_one_explicit_approval_and_is_audited, test_p5_is_blocked_before_any_tool_call
+# tools: test_cancel_trips_the_kill_switch_and_stops_the_step (kill switch), test_terminal_profiles_run_with_their_own_risk
+# prompt_injection: test_injected_page_content_stays_inert, test_an_answer_that_echoes_an_injected_action_runs_nothing
+# permission_bypass: test_model_text_cannot_supply_authority, test_caller_evidence_outside_the_control_scope_is_refused
+# command_argument_injection: test_terminal_arguments_outside_the_profile_are_rejected
+# forged_tool_results: test_forged_tool_evidence_fails_levi_before_its_model
 
 [[file]]
 path = "tests/test_config.py"

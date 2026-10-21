@@ -60,6 +60,10 @@ with a WebResearchTool, else the PHX-113 capability planner with capability
 tools (which also describe the documents domain with the capability text), else
 the v4 planner. Grants pass ``mission_grants`` (research, document and, with
 capability tools, PHX-113 scopes).
+PHX-112 (ADR-150): with an optional ControlStepRunner, computer_control steps
+run permissioned browser, Windows UI, screenshot and terminal actions (see
+control_steps), with control grants and exact P4 approvals from the caller
+only. cancel() trips the mission's kill switch before it cancels the task.
 
 Task state is task-level: intermediate step verification runs while RUNNING, and
 VERIFYING is the final-answer verification phase. Callers refresh capability
@@ -86,13 +90,23 @@ from pydantic import (
     model_validator,
 )
 
-from phoenix.agents import prompts
-from phoenix.agents.failsafe import FailSafeDecision, FailSafeTrigger
+from phoenix.agents import control_prompts, prompts
 from phoenix.agents.capability_steps import (
     CapabilityCallRecord,
     CapabilityStepRunner,
     CapabilityTools,
 )
+from phoenix.agents.control_steps import (
+    CONTROL_ACTOR_ID,
+    CONTROL_TOOL_IDS,
+    ControlApproval,
+    ControlCallRecord,
+    ControlEvidence,
+    ControlMission,
+    ControlStepRunner,
+    control_grants,
+)
+from phoenix.agents.failsafe import FailSafeDecision, FailSafeTrigger
 from phoenix.agents.final_grounding import (
     GROUNDED_CHECK_ID,
     FinalGrounding,
@@ -449,6 +463,8 @@ class MissionTrace(_Value):
     # PHX-111: one record per research call (IDs, statuses, counts, hashes).
     research_calls: tuple[ResearchCallRecord, ...] = ()
     capability_calls: tuple[CapabilityCallRecord, ...] = ()
+    # PHX-112 (ADR-150): computer-control actions, IDs/codes/hashes only.
+    control_calls: tuple[ControlCallRecord, ...] = ()
 
     @model_validator(mode="after")
     def consistent_triage(self) -> Self:
@@ -536,6 +552,8 @@ class _VerificationFailed(Exception):
 class _Mission:
     task: asyncio.Task[object]
     cancellation_requested: bool = False
+    # PHX-112: the mission's control state; cancel() trips its kill switch.
+    control: ControlMission | None = None
 
 
 @dataclass
@@ -548,6 +566,7 @@ class _Evidence:
     generations: list[GenerationRecord] = field(default_factory=list)
     verifications: list[StepVerification] = field(default_factory=list)
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
+    control_calls: list[ControlCallRecord] = field(default_factory=list)
     recoveries: list[RecoveryRecord] = field(default_factory=list)
     research_calls: list[ResearchCallRecord] = field(default_factory=list)
     capability_calls: list[CapabilityCallRecord] = field(default_factory=list)
@@ -611,6 +630,7 @@ class _Evidence:
                 citations=tuple(self.knowledge.citations),
                 research_calls=tuple(self.research_calls),
                 capability_calls=tuple(self.capability_calls),
+                control_calls=tuple(self.control_calls),
             ),
         )
 
@@ -666,6 +686,7 @@ class PhoenixRuntime:
         knowledge: KnowledgeSource | None = None,
         research_tool: WebResearchTool | None = None,
         capabilities: CapabilityTools | None = None,
+        control: ControlStepRunner | None = None,
     ) -> None:
         registry = (
             build_default_agent_registry() if agent_registry is None else agent_registry
@@ -735,6 +756,20 @@ class PhoenixRuntime:
                 **prompts.DOMAIN_DESCRIPTIONS,
                 RoutingDomain.DOCUMENTS.value: prompts.CAPABILITY_DOCUMENTS_DESCRIPTION,
             }
+        # PHX-112 (ADR-150): computer-control steps only with an explicit runner.
+        if control is not None and type(control) is not ControlStepRunner:
+            raise PhoenixRuntimeError("Expected a ControlStepRunner")
+        self._control_steps = control
+        if control is not None:
+            self._domains = (*self._domains, RoutingDomain.COMPUTER_CONTROL)
+            # Train (PHX-112 with PHX-120): the assignment prompt describes the
+            # computer_control domain with the approved control text.
+            self._descriptions = {
+                **self._descriptions,
+                RoutingDomain.COMPUTER_CONTROL.value: (
+                    control_prompts.CONTROL_DOMAIN_DESCRIPTION
+                ),
+            }
         try:
             self._recovery = MahoragaRecovery(self._agents)
         except MahoragaRecoveryError:
@@ -756,6 +791,11 @@ class PhoenixRuntime:
         return self._kaido
 
     @property
+    def control_enabled(self) -> bool:
+        """PHX-112: whether control grants and approvals are accepted."""
+        return self._control_steps is not None
+
+    @property
     def dropped_events(self) -> int:
         """Events the sink refused or that failed the allowlist (INV-022)."""
         return self._events.dropped
@@ -774,8 +814,13 @@ class PhoenixRuntime:
         grants: Sequence[PermissionGrant] = (),
         session_id: str | None = None,
         decided_by: TriageOutcome = TriageOutcome.CLIENT,
+        approvals: Sequence[ControlApproval] = (),
     ) -> MissionResult:
         """grants and session_id are caller (user) evidence for document steps.
+
+        PHX-112: with a ControlStepRunner, grants may also hold control-step
+        grants (actor computer_control), and approvals the user's explicit
+        decisions on exact P4 control requests; both come only from the caller.
 
         Without a path PHOENIX triages the request (PHX-105). With one,
         decided_by records who chose it: the caller (default), or an earlier
@@ -795,10 +840,30 @@ class PhoenixRuntime:
             decider == TriageOutcome.FALLBACK and directive != OrchestrationPath.COMPLEX
         ):
             raise PhoenixRuntimeError("Inconsistent path decision")
+        control = self._control_steps
         try:
-            accepted = mission_grants(
-                grants, capabilities=self._capabilities is not None
-            )
+            if control is None:
+                accepted = mission_grants(
+                    grants, capabilities=self._capabilities is not None
+                )
+                if tuple(approvals):
+                    raise ValueError("Approvals need computer-control steps")
+                mission_control = None
+            else:
+                if type(grants) not in (tuple, list):
+                    raise ValueError("Grants require an ordered sequence")
+                others: list[object] = []
+                controlling: list[object] = []
+                for grant in grants:
+                    is_control = getattr(grant, "actor_id", None) == CONTROL_ACTOR_ID
+                    (controlling if is_control else others).append(grant)
+                accepted = (
+                    *mission_grants(
+                        others, capabilities=self._capabilities is not None
+                    ),
+                    *control_grants(controlling),
+                )
+                mission_control = control.mission(approvals)
             session = (
                 None if session_id is None else _identifier.validate_python(session_id)
             )
@@ -811,7 +876,7 @@ class PhoenixRuntime:
             raise PhoenixRuntimeError("A mission requires a caller task")
         if any(active.task is task for active in self._active.values()):
             raise PhoenixRuntimeError("Caller task already owns an active mission")
-        mission = _Mission(task)
+        mission = _Mission(task, control=mission_control)
         self._active[request.request_id] = mission
         evidence = _Evidence(directive)
         if directive is not None:
@@ -832,7 +897,12 @@ class PhoenixRuntime:
                             text = await self._direct(request, evidence, events)
                         else:
                             text = await self._complex(
-                                request, evidence, events, accepted, session
+                                request,
+                                evidence,
+                                events,
+                                accepted,
+                                session,
+                                mission.control,
                             )
                     except (ResponderOutputError, ModelProviderError) as error:
                         text = await self._after_exhaustion(
@@ -893,6 +963,9 @@ class PhoenixRuntime:
             )
         if not mission.cancellation_requested:
             mission.cancellation_requested = True
+            if mission.control is not None:
+                # PHX-112 kill switch: no further control action starts.
+                mission.control.kill.trip()
             mission.task.cancel()
         return CancellationResult(
             request_id=identity, status=CancellationStatus.ACCEPTED
@@ -1111,6 +1184,8 @@ class PhoenixRuntime:
                 if self._capabilities is not None and self._capabilities.handles(domain)
                 else PermissionRisk.P1
                 if documents
+                else PermissionRisk.P4
+                if domain == RoutingDomain.COMPUTER_CONTROL
                 else PermissionRisk.P0,
             )
         )
@@ -1378,8 +1453,10 @@ class PhoenixRuntime:
         events: MissionEvents,
         grants: tuple[PermissionGrant, ...],
         session_id: str | None,
+        control: ControlMission | None = None,
     ) -> str:
         limits = self._limits
+        steps_runner = self._control_steps
         handover = await self._orchestrator.execute(request, OrchestrationPath.COMPLEX)
         if handover.kind != PhoenixResultKind.PLANNING_REQUIRED:
             raise PhoenixRuntimeError("Complex path did not require planning")
@@ -1412,14 +1489,21 @@ class PhoenixRuntime:
                             planning,
                             # PHX-111: research_planner only with the tool;
                             # PHX-120 (ADR-160): else the capability planner
-                            # with PHX-113 capability steps.
+                            # with PHX-113 capability steps; PHX-112: else the
+                            # control planner, which replaces the v4 planner.
                             responder=(
                                 ResearchPlanningResponder
                                 if self._research is not None
                                 else CapabilityPlanningResponder
                                 if self._capabilities is not None
                                 else ModelPlanningResponder
-                            )(binding, max_steps=limits.max_plan_steps),
+                            )(binding, max_steps=limits.max_plan_steps)
+                            if steps_runner is None
+                            or self._research is not None
+                            or self._capabilities is not None
+                            else steps_runner.planning_responder(
+                                binding, max_steps=limits.max_plan_steps
+                            ),
                         ),
                     )
                 async with _agent_phase(events, "phoenix", "assignment"):
@@ -1473,6 +1557,12 @@ class PhoenixRuntime:
             for step_id, route in routes.items()
             if route.domain == RoutingDomain.WEB_RESEARCH
         }
+        # PHX-112: computer-control steps (allowlisted only with a runner).
+        controls = {
+            step_id
+            for step_id, route in routes.items()
+            if route.domain == RoutingDomain.COMPUTER_CONTROL
+        }
         steps = [
             TaskStepDefinition(
                 step_id=step.step_id,
@@ -1490,6 +1580,8 @@ class PhoenixRuntime:
                 if step.step_id in knowledge
                 else prompts.RESEARCH_STEP_EXPECTED_OUTPUT
                 if step.step_id in research
+                else control_prompts.CONTROL_STEP_EXPECTED_OUTPUT
+                if step.step_id in controls
                 else prompts.STEP_EXPECTED_OUTPUT,
                 timeout_seconds=limits.step_timeout_seconds,
                 completion_rule=CapabilityStepRunner.completion_rule(
@@ -1502,6 +1594,8 @@ class PhoenixRuntime:
                 if step.step_id in knowledge
                 else prompts.RESEARCH_STEP_COMPLETION_RULE
                 if step.step_id in research
+                else control_prompts.CONTROL_STEP_COMPLETION_RULE
+                if step.step_id in controls
                 else prompts.STEP_COMPLETION_RULE,
             )
             for index, step in enumerate(plan.steps)
@@ -1559,11 +1653,13 @@ class PhoenixRuntime:
                 if step_id in knowledge
                 else RESEARCH_TOOL_IDS
                 if step_id in research
+                else CONTROL_TOOL_IDS
+                if step_id in controls
                 else (),
             )
             # PHX-047: both document turns run on the structured providers;
             # PHX-110: so does the knowledge answer; PHX-111: so do both
-            # research turns.
+            # research turns; PHX-112: so do both control turns.
             binding = self._binding(
                 decision.agent_id,
                 producer,
@@ -1571,10 +1667,12 @@ class PhoenixRuntime:
                 structured=step_id in documents
                 or step_id in capability
                 or step_id in knowledge
-                or step_id in research,
+                or step_id in research
+                or step_id in controls,
             )
             prior = tuple((ref, outputs[ref]) for ref in step.input_refs)
             tool_evidence: ToolEvidence | None = None
+            control_evidence: ControlEvidence | None = None
             knowledge_evidence: KnowledgeEvidence | None = None
             research_evidence: ResearchEvidence | None = None
             capability_levi: Callable[[ModelBinding], VerificationResponder] | None
@@ -1590,12 +1688,28 @@ class PhoenixRuntime:
                 if step_id in documents
                 else RESEARCH_ROLE
                 if step_id in research
+                else "control"
+                if step_id in controls
                 else "specialist"
             )
             # Outside the step deadline, so a step timeout reports "timeout".
             async with _agent_phase(events, decision.agent_id, role, step_id):
                 async with asyncio.timeout(step.timeout_seconds):
-                    if self._capabilities is not None and step_id in capability:
+                    if step_id in controls:
+                        # Allowlisted only with a runner; its mission state exists.
+                        assert steps_runner is not None and control is not None
+                        candidate, control_evidence = await steps_runner.perform(
+                            binding,
+                            self._guard,
+                            handoff,
+                            user_request=request.text,
+                            evidence=prior,
+                            grants=grants,
+                            session_id=session_id,
+                            mission=control,
+                            record=evidence.control_calls.append,
+                        )
+                    elif self._capabilities is not None and step_id in capability:
                         # PHX-113: one permissioned call; not retried (PHX-109 R10).
                         candidate, capability_levi = await self._capabilities.perform(
                             binding,
@@ -1696,6 +1810,15 @@ class PhoenixRuntime:
                         knowledge_evidence,
                         evidence.knowledge,
                         levi,
+                    )
+                if control_evidence is not None:
+                    assert steps_runner is not None
+                    levi = _control_levi(
+                        steps_runner,
+                        self._guard,
+                        request.text,
+                        control_evidence,
+                        grants,
                     )
                 async with asyncio.timeout(limits.verification_timeout_seconds):
                     # PHX-109: only LEVI's failed generation is retried, never
@@ -1838,6 +1961,27 @@ def _knowledge_levi(
                 prior=prior,
             )
         return CitedFinalVerificationResponder(default(verifier), ledger)
+
+    return responder
+
+
+def _control_levi(
+    runner: ControlStepRunner,
+    guard: PromptInjectionGuard,
+    user_request: str,
+    evidence: ControlEvidence,
+    grants: tuple[PermissionGrant, ...],
+) -> Callable[[ModelBinding], VerificationResponder]:
+    """PHX-112: LEVI checks the control evidence, then its grounded model check."""
+
+    def responder(verifier: ModelBinding) -> VerificationResponder:
+        return runner.levi_responder(
+            verifier,
+            guard,
+            original_request=user_request,
+            evidence=evidence,
+            grants=grants,
+        )
 
     return responder
 

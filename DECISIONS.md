@@ -4855,6 +4855,199 @@ Ticket: PHX-114
   generic synthetic voice that imitates no character or voice actor, built from
   a public-domain dataset. This is a declaration, not proof of rights (PHX-063).
 
+## ADR-150 — Computer-control steps in PHOENIX missions
+
+Status: Accepted (owner decisions relayed for PHX-112 on 2026-10-21; the
+control prompts of ADR-152 approved by the owner the same day)
+Date: 2026-10-21
+Ticket: PHX-112
+
+PHX-050–052 and PHX-044 built the browser, Windows UI, screenshot/vision and
+terminal tools, but no mission could use them. ADR numbers 150–154 are reserved
+for PHX-112 (parallel tickets hold other ranges).
+
+Decision:
+
+- **A new step kind, owned by `computer_control` (KAKASHI).** A runtime built
+  with a `ControlStepRunner` (new `phoenix/agents/control_steps.py`) allowlists
+  the `computer_control` routing domain; without one nothing changes. The
+  runtime hook is additive: an optional constructor argument, an optional
+  `approvals` argument on `run()`, a `control_calls` trace field (IDs, codes,
+  hashes only) and a dispatch branch next to the document step.
+- **The model only proposes.** One `control_request` of at most four actions
+  per step. PHOENIX builds every call and `PermissionRequest` itself: it opens
+  and closes its own browser session (fixed session ID), uses the page URL the
+  browser actually reached (never a model URL) for later page actions, and
+  resolves a window title through one permissioned `list_windows` call, so the
+  model never supplies session IDs, window handles, process IDs or classes.
+- **PermissionEngine decides every action (INV-004).** PHOENIX first
+  pre-checks, with its own engine snapshot, every action whose resource is
+  already known; the first that needs approval ends the mission
+  `waiting_permission` before any effect. Each tool then decides again with its
+  own engine and writes the P3/P4 audit rows itself (INV-007). P0 and P5 are
+  rejected before any call (INV-006). Risk levels are the tools' canonical
+  ones (see `docs/08_PERMISSION_MATRIX.md`).
+- **LEVI checks the evidence first.** Every action must correlate with the
+  PHOENIX-issued call and request, be ALLOWED by a caller grant, PHOENIX's
+  teardown rule or the user's P4 decision, have succeeded, and carry both
+  audit IDs when P3/P4; only then does the grounded model check run (INV-008).
+- **One worker thread.** All tool calls run on the runner's single worker
+  thread, in order. Playwright's synchronous API stays on one thread, and a
+  hung call delays only later control actions (bounded by tool timeouts).
+- **PHOENIX's own browser.** BrowserTool already launches Playwright's bundled
+  Chromium with a fresh in-memory context: an isolated profile, never the
+  owner's Chrome/Edge profile. The Chromium binary lives in the PHOENIX-owned
+  folder `D:\Phoenix\browsers` (`PHOENIX_BROWSERS_PATH` overrides it), set for
+  the process by `phoenix/tools/browser_setup.py` and installed only by the
+  explicit, owner-run `scripts/install_control_browser.py --install`. Nothing
+  downloads at runtime; end users get the browser only through that step.
+- **Vision is advisory.** A screenshot step captures one resolved window (P1)
+  and asks the vision service one bounded question under the heavy-generation
+  lease (INV-023); only its text summary is rendered, never the frame.
+
+Limitations: control steps publish no `tool.*`/`permission.requested` events
+(the PHX-103 allowlist names filesystem tools only; extending it belongs to
+PHX-115); the step runs at most four actions per proposal and cannot observe a
+page before choosing its next action within one step; the backend composition
+root enables browser and Windows UI control steps only (ADR-152). No new
+dependencies, migrations, event types or API routes.
+
+## ADR-151 — Control approvals in the approve → re-run loop
+
+Status: Accepted (PHX-112, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-112
+
+There is no mid-mission resume (ADR-082): approving a request supersedes the
+waiting mission and queues a linked re-run, which issues new requests. A P2/P3
+grant can match a new request; a P4 action has no grant form (PermissionGrant
+allows P1–P3 only) and needs an explicit decision tied to one request.
+
+Decision:
+
+- **P1/P2:** the user's choice, a SESSION ("this session") or PERSISTENT
+  ("always") grant, as for documents.
+- **P3:** SESSION only; "always" is refused (PermissionEngine never matches a
+  persistent P3 grant, so storing one would only mislead).
+- **P4:** one explicit `UserPermissionDecision` on the exact stored request,
+  kept in the mission service's memory for the one linked re-run
+  (`MissionStore.approve_once` marks the request approved and queues the
+  re-run; no grant row). The re-run reuses that exact request when it proposes
+  the same action, so the decision correlates; any other action asks again. It
+  is used at most once, whatever duration the user picked (never broader than
+  asked), and a restart drops it with the interrupted re-run (fail-closed).
+- **At most one P4 action per mission.** A re-run repeats earlier actions, so
+  a second P4 would either loop forever or repeat the first effect; it is
+  rejected (`tool_rejected`) instead.
+- **Display-only approval summary (amended after review).** The stored
+  request names a window by handle/process/class and fill/set_text text by
+  hash only, and a window title can be spoofed by any program. When a control
+  request needs approval, PHOENIX records an `ApprovalSummary` built from the
+  call it issued and what it observed: the action in words, the page URL the
+  browser reached and the element selector, or the listed window title plus
+  the real process name, executable path and PID (`psutil`, read-only), the
+  terminal profile and arguments, and the exact text to be typed. Text that
+  looks like a password, key or token (known prefixes, password-shaped or long
+  token-shaped words; the heuristic errs toward hiding) is masked as
+  `[hidden: N characters]` with a note. `GET /permissions`,
+  `GET /permissions/{id}` and the mission detail return it as `summary` next to
+  the raw request. It is display only: approve and deny still take only the
+  request ID and duration, the grant or P4 decision binds to the stored
+  request's exact tool, action and resource, and the summary is never read by
+  PermissionEngine, the runner's correlation or the API's approval path; a
+  summary whose tool differs from the stored request's is not shown. Summaries
+  live in the runner's memory only (at most 256, so the typed text never
+  reaches the database); after a restart a pending request shows its raw
+  resource only.
+- **No workspace check for control requests.** The approve route's
+  `workspace_changed` check applies to document requests only; a control
+  request names no workspace path. MissionService still refuses any request
+  outside the canonical control scope.
+- One control step runs at a time, and a P3 action may not precede a deferred
+  P4 page action in one proposal (a re-run would repeat the P3 effect).
+- Stored grants pass to a run through `control_grants` only when the run's
+  runtime has control steps; grants, approvals and decisions never come from
+  model text (INV-003).
+
+## ADR-152 — The control prompts are a separate set; the backend enables control
+
+Status: Accepted (amended 2026-10-21: the owner approved the prompt texts)
+Date: 2026-10-21
+Ticket: PHX-112
+
+The approved `phoenix-prompts-v4` planner prompt forbids tool use other than
+workspace reads, and the assignment prompt describes only the existing domains,
+so control steps need new text. Parallel tickets edit `prompts.py`.
+
+Decision: the new texts live in `phoenix/agents/control_prompts.py` (planner
+variant, the `computer_control` domain description, specialist, answer and
+verifier prompts, step contract strings), hash-pinned in
+`tests/test_computer_control_steps.py`. `prompts.py` stays byte-identical; the
+runner swaps in the control planner and assignment responders only when it is
+configured. They were drafted as `phoenix-control-prompts-v1-draft`; the owner
+approved them unchanged on 2026-10-21, so the set is now
+`phoenix-control-prompts-v1` (only the version string changed).
+
+Amendment (enabling): the backend composition root (`phoenix/api/server.py`)
+now builds one `ControlStepRunner`, shared by every runtime it builds (the
+startup runtime and each workspace runtime), over PHOENIX's own isolated
+browser and the Windows UI tool. The one ToolRegistry holds the filesystem and
+the canonical control definitions; the policy is `control_permission_policy()`
+(its only rule is the browser teardown); Playwright is pointed at the
+PHOENIX-owned browser folder for the backend's lifetime (nothing downloads; a
+missing Chromium fails the action explicitly). The screenshot/vision and
+terminal control tools are not wired: they need a vision model binding and an
+owner-chosen terminal root and profile set. The PHX-108 capability flag
+`computer_control` is now enabled. The runner's worker is shut down with the
+backend.
+
+## ADR-153 — Kill switch and PHOENIX's browser teardown
+
+Status: Accepted (PHX-112, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-112
+
+The control tools are synchronous and declare no cancellation: an in-flight
+Playwright, UI Automation or child-process call cannot be pre-empted from
+outside without changing the frozen tools.
+
+Decision:
+
+- **Kill switch.** Each mission has a `ControlKillSwitch`. `PhoenixRuntime.cancel`
+  (and so the mission service's cancel and shutdown) trips it before cancelling
+  the task. The mission ends `cancelled` at once; no further control action
+  starts (the worker checks the switch right before each call); the in-flight
+  call finishes on its tool's own timeout (browser 30 s, Windows UI 10 s,
+  terminal profile ≤ 300 s), and its result is discarded, never shown to a
+  model.
+- **Teardown.** After a cancel, the browser session close is queued behind the
+  in-flight call on the same worker. Closing PHOENIX's own session is allowed
+  by the one standing policy rule `phx-112.browser-teardown` (P2
+  `browser.session_close`, fixed session resource) from
+  `control_permission_policy()`: teardown removes capability and has no
+  external effect, so it never waits for a user. It still goes through
+  PermissionEngine (MATCHING_POLICY). Opening the session needs a user grant.
+
+Limitations: a terminal child process or a hung UI Automation call runs until
+its own timeout after a cancel; real pre-emption needs tool-level cancellation
+(a later ticket).
+
+## ADR-154 — Page and screen content stay untrusted data
+
+Status: Accepted (PHX-112, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-112
+
+Decision: page text, element text, window and control text, vision summaries
+and command output reach models only as one guarded `TOOL_OUTPUT` item
+(INV-017), the same item for the answer turn and LEVI's model check; system
+prompts and the text outside the guarded block never contain them. The answer
+turn cannot act: a reply that repeats an injected action is plain model text,
+fails LEVI's plain-text check and runs nothing. Window-title resolution never
+renders the window list (other windows' titles stay private); a screenshot
+frame is never rendered or traced, only the advisory vision text; traces keep
+IDs, statuses, codes, hashes and lengths only. Password and file inputs stay
+blocked by the tools themselves.
 ## ADR-110 — Tier models register whenever their provider becomes available
 
 Status: Accepted (recommended option, under the owner's instruction "use

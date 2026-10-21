@@ -291,6 +291,12 @@ gate under `.test-matrix/logs/`.
   missions (granted, waiting for permission, injected pages, fabricated
   citations, rate limiting). Its owner-run live counterpart,
   `scripts/research_mission_smoke.py`, is not a CI gate.
+- `tests/test_computer_control_steps.py` (PHX-112, ADR-150–154) runs computer-control
+  missions with the real browser, Windows UI, screenshot and terminal tools over
+  fixture backends (local fixture pages, fixture windows), the real permission,
+  audit and approve → re-run components and a scripted model. The owner-run live
+  counterparts, `scripts/install_control_browser.py` and
+  `scripts/phoenix_control_smoke.py`, are not CI gates.
 - Native WebView2 acceptance and live model or device runs are `[[manual]]` rows
   with evidence references. They are reported as MANUAL, never as automated PASS.
 - The run fails on any gate failure or timeout, missing tool, unmapped or missing

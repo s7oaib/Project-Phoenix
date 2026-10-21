@@ -114,7 +114,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-109 MAHORAGA/KAIDO in missions — DONE (MAHORAGA bounded recovery, ADR-093; KAIDO deferred)
 - PHX-110 Memory and RAG in missions — DONE (knowledge steps with cited, LEVI-checked answers, ADR-130–134; v5 text approved and integrated by PHX-120; live smoke pending)
 - PHX-111 Web research — DONE (offline acceptance, ADR-135 to ADR-139; v5 text approved and integrated by PHX-120; live smoke awaits the owner)
-- PHX-112 Computer control steps — TODO
+- PHX-112 Computer control steps — IN_PROGRESS (implemented and tested on a local branch; control prompts approved and browser/Windows UI control enabled in the backend with display-only approval summaries; awaiting PR review and the owner's live smoke, ADR-150–154)
 - PHX-113 Media and documents steps — DONE (ADR-140–144; prompts approved into v5 and backend wired by PHX-120; Spotify wiring and live smoke await owner setup)
 - PHX-114 Voice pipeline — DONE (backend: wake, STT, TTS, barge-in, /voice API, ADR-105–109; desktop mic toggle is a follow-up)
 - PHX-115 Observability — DONE (structured JSON logs, `GET /metrics`, Observability view live; ADR-145–148; R1–R10 applied under the owner's "recommended options" instruction, pending review)

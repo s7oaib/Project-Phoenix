@@ -31,3 +31,31 @@ Owner: **KAKASHI**.
 ## Verification
 
 Prefer observable evidence such as process/window existence, DOM state, file state, or command exit code.
+
+## Mission steps (PHX-112)
+
+`computer_control` (KAKASHI) steps run in PHOENIX missions when the runtime has
+a `ControlStepRunner` (`phoenix/agents/control_steps.py`, ADR-150–154):
+
+- The model proposes up to four browser, Windows UI, screenshot or terminal
+  actions; PHOENIX builds every call and permission request itself.
+- PHOENIX pre-checks known actions before any effect; each tool decides again
+  through ToolRegistry and PermissionEngine and audits P3/P4 itself. Approval
+  uses the approve → re-run loop (see `docs/08_PERMISSION_MATRIX.md`).
+- The browser is PHOENIX's own Playwright Chromium with a fresh isolated
+  profile; its binary lives in `D:\Phoenix\browsers`, installed only by
+  `scripts/install_control_browser.py --install`.
+- Windows are targeted by exact title, resolved by one permissioned listing;
+  the model never supplies handles or process IDs.
+- Cancel trips the mission's kill switch: no further action starts, the
+  in-flight call ends on its tool's timeout and is discarded, and the browser
+  is closed after it.
+- Page, window, screenshot and command content is untrusted `TOOL_OUTPUT`
+  data; LEVI checks the tool evidence before its model check.
+- A pending control request carries a display-only `summary` in the
+  permissions API: the action in words, the page URL and element, or the
+  window title with its real process name and executable path, and the exact
+  text to be typed (masked when it looks like a secret). The approval binds to
+  the stored request only (ADR-151).
+- The owner approved the control prompts (`phoenix-control-prompts-v1`); the
+  backend enables browser and Windows UI control steps (ADR-152).

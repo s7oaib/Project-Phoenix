@@ -1751,10 +1751,11 @@ PHX_104_PATHS = ("alembic/env.py",)
 # api/missions.py (optional path, decisions, re-runs), persistence/missions.py
 # (nullable path, triage_outcome) and the REST routes and schemas; all stay
 # pinned, at the PHX-105 implementation commit. PHX-109 moved runtime.py and
-# mission_events.py, PHX-108 api/missions.py and schemas.py, and PHX-110
-# prompts.py and routes/missions.py, to their own pins (below).
+# mission_events.py, PHX-108 api/missions.py and schemas.py, PHX-110
+# prompts.py and routes/missions.py, and PHX-112 persistence/missions.py, to
+# their own pins (below), so nothing stays on the PHX-105 commit.
 PHX_105_COMMIT = "e34142ca0062dc14c05a5a1d18720b64446cdaa7"
-PHX_105_PATHS = ("phoenix/persistence/missions.py",)
+PHX_105_PATHS: tuple[str, ...] = ()
 # PHX-106/107 (ADR-091, ADR-092) intentionally changed the desktop manifest,
 # entry point, Tauri config (capability and CSP) and native host (backend
 # sidecar, proxy and event bridge); they stay pinned, at the PHX-106/107
@@ -1792,6 +1793,26 @@ PHX_118B_COMMIT = "0a23c66c98b728d44d9859cb96c7eacc4575fa00"
 PHX_118B_PATHS = (
     "phoenix/agents/runtime.py",
     "phoenix/agents/final_grounding.py",
+)
+# PHX-112 (ADR-150 to ADR-152) intentionally changed runtime.py (optional
+# ControlStepRunner, approvals, MissionTrace.control_calls, kill switch),
+# api/missions.py (control grants and one-time P4 approvals in the approve ->
+# re-run loop), persistence/missions.py (approve_once), server.py (the
+# ControlStepRunner), capabilities.py (computer_control enabled), and the
+# missions, permissions and schemas routes (display-only approval summary; no
+# workspace check for control requests); all stay pinned, at the PHX-112
+# resolution commit on top of PHX-108 and PHX-118 (the PR must merge with a
+# merge commit so this commit stays reachable).
+PHX_112_COMMIT = "b71e716046595a7c16e9e94c71f6dd7ccf93f4aa"
+PHX_112_PATHS = (
+    "phoenix/agents/runtime.py",
+    "phoenix/api/capabilities.py",
+    "phoenix/api/missions.py",
+    "phoenix/api/routes/missions.py",
+    "phoenix/api/routes/permissions.py",
+    "phoenix/api/routes/schemas.py",
+    "phoenix/api/server.py",
+    "phoenix/persistence/missions.py",
 )
 # PHX-108 (ADR-110 to ADR-114) intentionally changed server.py (ModelRegistrar),
 # api/missions.py (before_run), the REST route package, schemas and settings
@@ -1928,6 +1949,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_111_PATHS
         and path not in PHX_113_PATHS
         and path not in PHX_120_PATHS
+        and path not in PHX_112_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1949,6 +1971,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_111_COMMIT, path) for path in PHX_111_PATHS]
     baselines += [(PHX_113_COMMIT, path) for path in PHX_113_PATHS]
     baselines += [(PHX_120_COMMIT, path) for path in PHX_120_PATHS]
+    baselines += [(PHX_112_COMMIT, path) for path in PHX_112_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

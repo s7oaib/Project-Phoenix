@@ -38,6 +38,11 @@ serves ``GET /metrics``. PHX-110 (ADR-130 to ADR-134) adds the user's knowledge 
 (``KnowledgeService``): uploads and memories are embedded with the provider
 set's embedding provider (EmbeddingGemma on Ollama by default), and every
 runtime receives it as its mission KnowledgeSource.
+PHX-112 (ADR-152) enables computer-control steps: one ControlStepRunner over
+PHOENIX's own isolated browser (Chromium from the PHOENIX-owned browser folder)
+and the Windows UI tool, shared by every runtime. Every action still goes
+through ToolRegistry and PermissionEngine and waits for the user's approval;
+the screenshot/vision and terminal control tools are not wired here.
 """
 
 import asyncio
@@ -62,13 +67,18 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from alembic import command
+from phoenix.agents.capability_steps import CapabilityTools
+from phoenix.agents.control_steps import (
+    ControlStepRunner,
+    control_permission_policy,
+    control_tool_definitions,
+)
 from phoenix.agents.kaido import (
     KaidoMonitor,
     KaidoPolicy,
     KaidoStatus,
     system_ram_sample,
 )
-from phoenix.agents.capability_steps import CapabilityTools
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.runtime import ModelTierTable, PhoenixRuntime, default_tier_table
 from phoenix.api.app import create_app
@@ -120,6 +130,12 @@ from phoenix.persistence.settings import SettingsStore
 from phoenix.security.audit import AuditTrail
 from phoenix.security.permissions import PermissionPolicy
 from phoenix.security.secrets import WindowsCredentialStore
+from phoenix.tools.browser import BrowserTool
+from phoenix.tools.browser_setup import (
+    PLAYWRIGHT_ENV,
+    browsers_path,
+    use_phoenix_browsers,
+)
 from phoenix.tools.document_files import (
     DocumentFileTool,
     document_file_tool_definitions,
@@ -127,6 +143,7 @@ from phoenix.tools.document_files import (
 from phoenix.tools.filesystem import FilesystemTool, filesystem_tool_definitions
 from phoenix.tools.registry import ToolRegistry
 from phoenix.tools.web_research import WebResearchTool, web_research_tool_definitions
+from phoenix.tools.windows_ui import WindowsUITool
 from phoenix.tools.youtube import YouTubeTool, youtube_tool_definitions
 from phoenix.web.duckduckgo import DuckDuckGoSearchProvider
 from phoenix.web.page_fetch import HttpPageFetcher
@@ -289,6 +306,7 @@ class BackendServices:
     voice: VoiceService  # PHX-114
     knowledge: KnowledgeService  # PHX-110
     observability: MetricsCollector | None = None  # PHX-115
+    control_steps: ControlStepRunner | None = None  # PHX-112 (ADR-152)
 
 
 @dataclass(frozen=True)
@@ -587,6 +605,13 @@ class ModelRegistrar:
                 await self.refresh()
 
 
+def _restore_env(name: str, value: str | None) -> None:
+    if value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = value
+
+
 async def _close_provider(provider: ModelProvider | EmbeddingProvider) -> None:
     close = getattr(provider, "aclose", None)
     if callable(close):
@@ -652,6 +677,7 @@ async def open_services(
                 *web_research_tool_definitions(),
                 *document_file_tool_definitions(),
                 *youtube_tool_definitions(),
+                *control_tool_definitions(),
             )
         )
         research: WebResearchTool | None = None
@@ -667,7 +693,8 @@ async def open_services(
             client_buffer=config.event_client_buffer,
             max_connections=config.event_max_connections,
         )
-        policy = PermissionPolicy()
+        # PHX-112: the one standing rule lets PHOENIX close its own browser.
+        policy = control_permission_policy()
         audit = AuditTrail(session_factory, tools)
         # PHX-115: VRAM comes from Ollama's placement report, only when the
         # configured providers include Ollama.
@@ -704,6 +731,16 @@ async def open_services(
             lifecycle=lifecycle,
             agent_registry=agents,
         )
+        previous_browsers = os.environ.get(PLAYWRIGHT_ENV)
+        use_phoenix_browsers(browsers_path())  # never downloads (ADR-150)
+        stack.callback(_restore_env, PLAYWRIGHT_ENV, previous_browsers)
+        control = ControlStepRunner(
+            registry=tools,
+            policy=policy,
+            browser=BrowserTool(tools, policy, audit),
+            windows=WindowsUITool(tools, policy, audit),
+        )
+        stack.callback(control.close)
 
         def build_runtime(workspace_root: str | None = None) -> PhoenixRuntime:
             """PHX-104: one runtime per workspace root; None has no documents."""
@@ -729,6 +766,7 @@ async def open_services(
                     else DocumentFileTool(workspace_root, tools, policy),
                     youtube=youtube,
                 ),
+                control=control,
             )
 
         runtime = build_runtime()
@@ -788,6 +826,7 @@ async def open_services(
             voice=voice,
             knowledge=knowledge,
             observability=observer,
+            control_steps=control,
         )
         refresher: asyncio.Task[None] | None = None
         try:

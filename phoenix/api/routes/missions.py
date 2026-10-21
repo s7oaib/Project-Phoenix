@@ -14,6 +14,7 @@ import contextlib
 from fastapi import APIRouter, Request, Response
 
 from phoenix.agents.retrieval_steps import MissionCitation
+from phoenix.agents.control_steps import ControlStepRunner
 from phoenix.api.missions import CancelOutcome, MissionService
 from phoenix.api.routes.common import (
     DEFAULT_PAGE,
@@ -27,6 +28,7 @@ from phoenix.api.routes.common import (
     services,
 )
 from phoenix.api.routes.schemas import (
+    ApprovalSummaryOut,
     CancelResult,
     ChatRequest,
     ConversationOut,
@@ -45,10 +47,23 @@ router = APIRouter()
 
 
 def permission_out(
-    record: PermissionRequestRecord, tools: ToolRegistry
+    record: PermissionRequestRecord,
+    tools: ToolRegistry,
+    control: ControlStepRunner | None = None,
 ) -> PermissionRequestOut:
     request = record.request
     tool = tools.get(request.tool_id)
+    # PHX-112 (ADR-151): display only; approve and deny use the stored request.
+    found = None if control is None else control.approval_summary(request.request_id)
+    summary = (
+        None
+        if found is None or found.tool_id != request.tool_id
+        else ApprovalSummaryOut.model_validate(
+            found.model_dump(
+                mode="json", exclude={"request_id", "tool_id", "risk_level"}
+            )
+        )
+    )
     return PermissionRequestOut(
         request_id=request.request_id,
         mission_id=record.mission_id,
@@ -59,6 +74,7 @@ def permission_out(
         risk_level=None if tool is None else tool.risk_level.value,
         requested_at=request.requested_at,
         decided_at=record.decided_at,
+        summary=summary,
     )
 
 
@@ -83,7 +99,10 @@ def summary(record: MissionRecord) -> MissionSummary:
 
 
 async def _detail(
-    missions: MissionService, record: MissionRecord, tools: ToolRegistry
+    missions: MissionService,
+    record: MissionRecord,
+    tools: ToolRegistry,
+    control: ControlStepRunner | None,
 ) -> MissionDetail:
     messages = {
         message.message_id: message.text
@@ -107,7 +126,7 @@ async def _detail(
             "task_states": () if trace is None else trace.states,
             "permission_request": None
             if pending is None
-            else permission_out(pending, tools),
+            else permission_out(pending, tools, control),
             "kaido": None
             if trace is None or trace.kaido is None
             else KaidoOut.model_validate(
@@ -182,7 +201,9 @@ async def list_missions(
 async def get_mission(mission_id: Uuid, request: Request) -> MissionDetail:
     backend = services(request)
     record = await backend.missions.get_mission(mission_id)
-    return await _detail(backend.missions, record, backend.tool_registry)
+    return await _detail(
+        backend.missions, record, backend.tool_registry, backend.control_steps
+    )
 
 
 @router.post(
