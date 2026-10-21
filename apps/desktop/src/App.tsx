@@ -1332,7 +1332,12 @@ export function ObservabilityWorkspace({ diagnostics }: { diagnostics: Observabi
   </section>;
 }
 
-export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, permissions, memory, files, models, voice, diagnostics }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft; agentPort?: AgentPort; directory?: AgentDirectory; task?: TaskPresentation; permissions?: PermissionPresentation; memory?: EvidenceBrowser<MemoryPresentationRecord>; files?: EvidenceBrowser<FilePresentationRecord>; models?: ModelBrowser; voice?: VoiceBrowser; diagnostics?: ObservabilityPresentation }) {
+/** PHX-108 (ADR-114): caller-rendered panels for the five views App has no port for. The native
+ *  shell's adapters supply them; without one, App keeps its honest default for that view. */
+export type ConnectedPanels = Partial<Record<'onboarding' | 'settings' | 'computer' | 'research' | 'media', ReturnType<typeof ChatWorkspace>>>;
+export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, permissions, memory, files, models, voice, diagnostics, panels }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft; agentPort?: AgentPort; directory?: AgentDirectory; task?: TaskPresentation; permissions?: PermissionPresentation; memory?: EvidenceBrowser<MemoryPresentationRecord>; files?: EvidenceBrowser<FilePresentationRecord>; models?: ModelBrowser; voice?: VoiceBrowser; diagnostics?: ObservabilityPresentation; panels?: ConnectedPanels }) {
+  const supplied = panels && (view.id === 'onboarding' || view.id === 'settings' || view.id === 'computer' || view.id === 'research' || view.id === 'media') ? panels[view.id] : undefined;
+  if (supplied !== undefined) return <>{supplied}</>;
   if (view.id === 'home') {
     return chat ? <ChatWorkspace chatPort={chatPort} chat={chat} /> : null;
   }
@@ -1358,7 +1363,7 @@ export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, pe
   );
 }
 
-export default function App({ chatPort, agentPort, taskPort, permissionPort, memoryPort, filePort, modelPort, voicePort, observabilityPort }: { chatPort?: ChatPort; agentPort?: AgentPort; taskPort?: TaskGraphPort; permissionPort?: PermissionPort; memoryPort?: MemoryPort; filePort?: FilePort; modelPort?: ModelPort; voicePort?: VoicePort; observabilityPort?: ObservabilityPort } = {}) {
+export default function App({ chatPort, agentPort, taskPort, permissionPort, memoryPort, filePort, modelPort, voicePort, observabilityPort, panels, statusLine }: { chatPort?: ChatPort; agentPort?: AgentPort; taskPort?: TaskGraphPort; permissionPort?: PermissionPort; memoryPort?: MemoryPort; filePort?: FilePort; modelPort?: ModelPort; voicePort?: VoicePort; observabilityPort?: ObservabilityPort; panels?: ConnectedPanels; statusLine?: string } = {}) {
   const [selectedView, setSelectedView] = useState<ViewId>('home');
   const mainRef = useRef<HTMLElement>(null);
   const focusRequested = useRef(false);
@@ -1425,12 +1430,12 @@ export default function App({ chatPort, agentPort, taskPort, permissionPort, mem
       </aside>
       <main id="main-content" ref={mainRef} tabIndex={-1} aria-labelledby="page-title">
         <header className="page-header">
-          <p className="integration-status">Interface shell — backend integration pending</p>
+          <p className="integration-status">{statusLine ?? 'Interface shell — backend integration pending'}</p>
           <p className="eyebrow">{currentView.group}</p>
           <h2 id="page-title">{currentView.label}</h2>
           <p className="page-purpose">{currentView.purpose}</p>
         </header>
-        <div className="page-content"><ViewPanel view={currentView} chatPort={chatPort} chat={chat} agentPort={agentPort} directory={directory} task={task} permissions={permissions} memory={memory} files={files} models={models} voice={voice} diagnostics={diagnostics} /></div>
+        <div className="page-content"><ViewPanel view={currentView} chatPort={chatPort} chat={chat} agentPort={agentPort} directory={directory} task={task} permissions={permissions} memory={memory} files={files} models={models} voice={voice} diagnostics={diagnostics} panels={panels} /></div>
       </main>
     </div>
   );

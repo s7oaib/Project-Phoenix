@@ -1742,24 +1742,21 @@ PHX_103_PATHS = (
 # store and workspace wiring), missions.py (use_runtime; a mission keeps its
 # runtime) and alembic/env.py (settings row registration); all three stay
 # pinned, at the latest PHX-104 implementation commit (review fixes; the first
-# round was f9a075c). PHX-105 moved missions.py to its own pin (below).
+# round was f9a075c). PHX-105 moved missions.py and PHX-108 server.py to
+# their own pins (below).
 PHX_104_COMMIT = "7af605e26afcaf0e7000ee44d312e741a9107b2b"
-PHX_104_PATHS = (
-    "phoenix/api/server.py",
-    "alembic/env.py",
-)
+PHX_104_PATHS = ("alembic/env.py",)
 # PHX-105 (ADR-090) intentionally changed prompts.py (v4 TRIAGE_SYSTEM),
 # runtime.py (triage, trace fields), mission_events.py (triage allowlist),
 # api/missions.py (optional path, decisions, re-runs), persistence/missions.py
 # (nullable path, triage_outcome) and the REST routes and schemas; all stay
 # pinned, at the PHX-105 implementation commit. PHX-109 moved runtime.py and
-# mission_events.py to its own pin (below); PHX-112 moved api/missions.py and
-# persistence/missions.py to its own pin (below).
+# mission_events.py, PHX-108 schemas.py, and PHX-112 api/missions.py and
+# persistence/missions.py to their own pins (below).
 PHX_105_COMMIT = "e34142ca0062dc14c05a5a1d18720b64446cdaa7"
 PHX_105_PATHS = (
     "phoenix/agents/prompts.py",
     "phoenix/api/routes/missions.py",
-    "phoenix/api/routes/schemas.py",
 )
 # PHX-106/107 (ADR-091, ADR-092) intentionally changed the desktop manifest,
 # entry point, Tauri config (capability and CSP) and native host (backend
@@ -1803,6 +1800,22 @@ PHX_112_PATHS = (
     "phoenix/api/missions.py",
     "phoenix/persistence/missions.py",
 )
+# PHX-108 (ADR-110 to ADR-114) intentionally changed server.py (ModelRegistrar),
+# the REST route package, schemas and settings routes, the settings store, the native proxy allowlist and the desktop
+# adapters; all stay pinned, at the PHX-108 implementation commit (the PR must
+# merge with a merge commit so this commit stays reachable).
+PHX_108_COMMIT = "f70b201a42338cc3c38c2159d2b2ee5d1c84e416"
+PHX_108_PATHS = (
+    "phoenix/api/server.py",
+    "phoenix/api/routes/__init__.py",
+    "phoenix/api/routes/schemas.py",
+    "phoenix/api/routes/system.py",
+    "phoenix/persistence/settings.py",
+    "apps/desktop/src-tauri/src/proxy.rs",
+    "apps/desktop/src/adapters/core.ts",
+    "apps/desktop/src/adapters/ConnectedApp.tsx",
+    "apps/desktop/src/adapters/connected.css",
+)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -1824,6 +1837,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_106_PATHS
         and path not in PHX_048_PATHS
         and path not in PHX_109_PATHS
+        and path not in PHX_108_PATHS
         and path not in PHX_118_PATHS
         and path not in PHX_112_PATHS
     ]
@@ -1838,6 +1852,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_048_COMMIT, path) for path in PHX_048_PATHS]
     baselines += [(PHX_109_COMMIT, path) for path in PHX_109_PATHS]
     baselines += [(PHX_118_COMMIT, path) for path in PHX_118_PATHS]
+    baselines += [(PHX_108_COMMIT, path) for path in PHX_108_PATHS]
     baselines += [(PHX_112_COMMIT, path) for path in PHX_112_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
@@ -1851,10 +1866,11 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         assert actual == expected, path
     assert len(EventType) == 32
     # PHX-102 (ADR-086) adds migration 0006_missions; PHX-104 (ADR-089) adds
-    # 0007_app_settings; PHX-105 (ADR-090) adds 0008_mission_triage.
+    # 0007_app_settings; PHX-105 (ADR-090) adds 0008_mission_triage;
+    # PHX-108 (ADR-111) adds 0009_default_mission_path.
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0008_mission_triage"]
+    ).get_heads() == ["0009_default_mission_path"]
 
 
 def test_credential_signature_scan_new_sources() -> None:

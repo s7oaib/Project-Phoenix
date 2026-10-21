@@ -1,13 +1,17 @@
 """PHX-104 agents, models and settings (ADR-089).
 
-Only the document workspace root is writable (``PATCH /settings``); model
-tiers, the API address and retention are read-only in v1. ``GET /models``
-reports what the backend already knows: the tier-table placement, whether
-each model registered at startup, the provider's health from the same bounded
-probe as ``/ready``, and whether the model holds the generation lease now.
+The document workspace root and (PHX-108, ADR-111) the default mission path
+are writable (``PATCH /settings``); model tiers, the API address and
+retention are read-only in v1. ``GET /models`` reports what the backend
+already knows: the tier-table placement, whether each model is registered
+(PHX-108 registers late ones first), the provider's health from the same
+bounded probe as ``/ready``, and whether the model holds the generation lease
+now.
 """
 
 import asyncio
+from datetime import UTC, datetime
+from typing import cast
 
 from fastapi import APIRouter, Request
 
@@ -18,6 +22,7 @@ from phoenix.api.routes.common import services as backend
 from phoenix.api.routes.schemas import (
     AgentOut,
     ApiAddress,
+    MissionPathChoice,
     ModelOut,
     ModelRef,
     SettingsOut,
@@ -48,6 +53,7 @@ async def list_agents(request: Request) -> tuple[AgentOut, ...]:
 async def list_models(request: Request) -> tuple[ModelOut, ...]:
     services = backend(request)
     timeout = options(request).probe_timeout_seconds
+    await services.model_registrar.refresh()  # PHX-108: late provider start
     statuses = dict(
         zip(
             (provider.provider_id for provider in services.providers),
@@ -87,8 +93,9 @@ async def list_models(request: Request) -> tuple[ModelOut, ...]:
     return tuple(models)
 
 
-def _settings(services: BackendServices, request: Request) -> SettingsOut:
+async def _settings(services: BackendServices, request: Request) -> SettingsOut:
     security: LocalApiSecurity = getattr(request.app.state, SECURITY_KEY)
+    stored = await asyncio.to_thread(services.settings_store.get_default_mission_path)
     workspace = services.workspace.state
     table = services.tier_table
 
@@ -104,6 +111,9 @@ def _settings(services: BackendServices, request: Request) -> SettingsOut:
             status=workspace.status,
             updated_at=workspace.updated_at,
         ),
+        default_mission_path=cast(
+            MissionPathChoice, "auto" if stored is None else stored.value
+        ),
         model_tiers={role: refs(values) for role, values in table.roles.items()},
         default_tier=refs(table.default),
         retention_days=DEFAULT_RETENTION.days,
@@ -113,12 +123,21 @@ def _settings(services: BackendServices, request: Request) -> SettingsOut:
 
 @router.get("/settings", response_model=SettingsOut)
 async def get_settings(request: Request) -> SettingsOut:
-    return _settings(backend(request), request)
+    return await _settings(backend(request), request)
 
 
 @router.patch("/settings", response_model=SettingsOut)
 async def patch_settings(body: SettingsPatch, request: Request) -> SettingsOut:
+    """The workspace is validated and applied first; if it is refused, the
+    mission path is not saved either."""
     services = backend(request)
     workspace: WorkspaceService = services.workspace
-    await workspace.set_root(body.workspace_root)
-    return _settings(services, request)
+    if body.workspace_root is not None:
+        await workspace.set_root(body.workspace_root)
+    if body.default_mission_path is not None:
+        await asyncio.to_thread(
+            services.settings_store.set_default_mission_path,
+            body.default_mission_path,
+            datetime.now(UTC),
+        )
+    return await _settings(services, request)

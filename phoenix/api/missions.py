@@ -46,6 +46,7 @@ imports no FastAPI; the PHX-104 routes call it.
 """
 
 import asyncio
+import contextlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -163,6 +164,7 @@ class MissionService:
         shutdown_grace_seconds: float = DEFAULT_SHUTDOWN_GRACE_SECONDS,
         clock: Callable[[], datetime] = _utcnow,
         events: EventSink | None = None,
+        before_run: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         if retention <= timedelta(0):
             raise ValueError("Retention must be positive")
@@ -170,6 +172,10 @@ class MissionService:
             raise ValueError("Intervals must be positive")
         self._runtime = runtime
         self._preflight: Preflight | None = None
+        # PHX-108 (ADR-110): awaited before each mission runs (the composition
+        # root registers tier models whose provider started late). A failure
+        # here is ignored; the run itself reports any missing model.
+        self._before_run = before_run
         self._store = store
         self._tools = tool_registry
         # One ID per backend launch; SESSION grants end with it (owner decision).
@@ -394,6 +400,9 @@ class MissionService:
             await self._status(mission_id, MissionStatus.RUNNING)
             try:
                 refused = None
+                if self._before_run is not None:
+                    with contextlib.suppress(Exception):
+                        await self._before_run()
                 if current.preflight is not None:
                     refused = await current.preflight()
                 found = await self._io(self._store.active_grants, self._session_id)
