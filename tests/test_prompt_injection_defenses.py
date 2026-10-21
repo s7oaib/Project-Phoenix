@@ -1876,7 +1876,6 @@ PHX_113_PATHS: tuple[str, ...] = ()
 # PHX-120 implementation commit (the PR must merge with a merge commit).
 PHX_120_COMMIT = "ea7ea165147317afd873f6e61c0a3782b5e37e47"
 PHX_120_PATHS = (
-    "phoenix/agents/prompts.py",
     "phoenix/agents/responders.py",
     "phoenix/api/routes/setup.py",
 )
@@ -1890,7 +1889,6 @@ PHX_120_PATHS = (
 PHX_TRAIN_COMMIT = "65b3d935d51b241fa9c7d1e6eefaf321184b3460"
 PHX_TRAIN_PATHS = (
     "phoenix/agents/mission_events.py",
-    "phoenix/agents/runtime.py",
     "phoenix/api/capabilities.py",
     "phoenix/api/missions.py",
     "phoenix/api/routes/__init__.py",
@@ -1898,6 +1896,17 @@ PHX_TRAIN_PATHS = (
     "phoenix/api/routes/permissions.py",
     "phoenix/api/routes/schemas.py",
     "phoenix/api/server.py",
+)
+# PHX-121 (ADR-166) intentionally changed prompts.py (phoenix-prompts-v6 adds
+# the combined planner; every v5 constant unchanged) and runtime.py (planner
+# choice per mission), and added combined_planning.py; prompts.py left the
+# PHX-120 block and runtime.py the train block. All three stay pinned, at the
+# PHX-121 implementation commit (the PR must merge with a merge commit).
+PHX_121_COMMIT = "9a6c2cbfcd6059af75626e8d91059994e60c4348"
+PHX_121_PATHS = (
+    "phoenix/agents/combined_planning.py",
+    "phoenix/agents/prompts.py",
+    "phoenix/agents/runtime.py",
 )
 
 
@@ -1933,6 +1942,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_120_PATHS
         and path not in PHX_112_PATHS
         and path not in PHX_TRAIN_PATHS
+        and path not in PHX_121_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1956,6 +1966,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_120_COMMIT, path) for path in PHX_120_PATHS]
     baselines += [(PHX_112_COMMIT, path) for path in PHX_112_PATHS]
     baselines += [(PHX_TRAIN_COMMIT, path) for path in PHX_TRAIN_PATHS]
+    baselines += [(PHX_121_COMMIT, path) for path in PHX_121_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
