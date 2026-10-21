@@ -12,7 +12,9 @@ The launcher:
   desktop shell: ``{"event": "phoenix.backend.ready", "host": ..., "port": ...,
   "pid": ..., "version": ...}``.
 
-Logs go to stderr; the access log and proxy headers are off. SIGINT, SIGTERM and
+Logs are structured JSON (PHX-115, ADR-145): to stderr and to a rotating
+``logs/phoenix.jsonl`` in the data directory, with the token registered for
+redaction; the access log and proxy headers are off. SIGINT, SIGTERM and
 Windows CTRL_BREAK shut down gracefully, cancelling active missions first.
 """
 
@@ -44,6 +46,11 @@ from phoenix.api.server import (
     build_server_app,
     cancel_active_missions,
     get_services,
+)
+from phoenix.api.structured_logging import (
+    configure_logging,
+    forget_secret,
+    register_secret,
 )
 from phoenix.core.config import AppSettings
 
@@ -249,16 +256,20 @@ def main(
     except LaunchError as error:
         err.write(f"phoenix.api: {error}\n")
         return EXIT_USAGE
-    logging.basicConfig(
-        stream=err, level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
-    )
-    server, sock = create_server(
-        options, settings=load_settings(options), token=token, stdout=out
-    )
+    settings = load_settings(options)
+    register_secret(token)
+    logs = configure_logging(settings.data_dir, err, level=logging.INFO)
     try:
-        server.run(sockets=[sock])
-    except KeyboardInterrupt:
-        pass  # uvicorn re-raises the captured signal after a graceful shutdown
+        server, sock = create_server(
+            options, settings=settings, token=token, stdout=out
+        )
+        try:
+            server.run(sockets=[sock])
+        except KeyboardInterrupt:
+            pass  # uvicorn re-raises the captured signal after a graceful shutdown
+        finally:
+            sock.close()
     finally:
-        sock.close()
+        logs.close()
+        forget_secret(token)
     return 0 if server.started else 1

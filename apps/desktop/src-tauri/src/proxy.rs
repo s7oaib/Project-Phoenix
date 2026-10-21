@@ -60,6 +60,8 @@ pub const ROUTES: &[(Method, &str, &[&str])] = &[
     (Method::Get, "/models", &[]),
     (Method::Get, "/settings", &[]),
     (Method::Patch, "/settings", &[]),
+    // PHX-115 (ADR-147): read-only runtime metrics, no query.
+    (Method::Get, "/metrics", &[]),
 ];
 
 /// Closed failure codes returned to the webview.
@@ -281,6 +283,7 @@ mod tests {
             ("GET", "/agents".to_owned()),
             ("GET", "/models".to_owned()),
             ("GET", "/settings".to_owned()),
+            ("GET", "/metrics".to_owned()),
         ] {
             let admitted =
                 admit(method, &path, None).unwrap_or_else(|e| panic!("{method} {path}: {e:?}"));
@@ -307,7 +310,7 @@ mod tests {
             Some(json!({"workspace_root": "D:\\work"}))
         )
         .is_ok());
-        assert_eq!(ROUTES.len(), 18);
+        assert_eq!(ROUTES.len(), 19);
     }
 
     #[test]
@@ -340,6 +343,11 @@ mod tests {
             ("GET", "/missions?limit=".to_owned()),
             ("GET", "/missions?limit".to_owned()),
             ("GET", "/agents?limit=1".to_owned()),
+            ("GET", "/metrics?verbose=1".to_owned()),
+            ("GET", "/metrics/".to_owned()),
+            ("GET", format!("/metrics/{ID}")),
+            ("POST", "/metrics".to_owned()),
+            ("PATCH", "/metrics".to_owned()),
             ("GET", "/health\r\nX: y".to_owned()),
             ("GET", "/héalth".to_owned()),
             ("GET", format!("/missions?offset={}", "1".repeat(MAX_PATH))),

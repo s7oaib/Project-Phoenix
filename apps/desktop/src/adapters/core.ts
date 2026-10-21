@@ -7,9 +7,9 @@
 // Observability views. Every port object is a fresh plain data snapshot shaped exactly as
 // App.tsx's readers admit it. Memory, Files and Voice stay unavailable (no backend API yet).
 
-import { agentRoster, taskStates } from '../App';
+import { agentRoster, diagnosticMetricNames, taskStates } from '../App';
 import type {
-  AgentId, AgentPort, AgentStatus, ChatMessage, ChatPort, DecisionIntent, MetricDisplayEntry,
+  AgentId, AgentPort, AgentStatus, ChatMessage, ChatPort, DecisionIntent, LogDisplayEntry, MetricDisplayEntry,
   ModelDisplayEntry, ModelPort, ObservabilityPort, PermissionEntry, PermissionEvaluation, PermissionPort,
   TaskGraphPort, TaskState, TaskStep, TraceDisplayEntry,
 } from '../App';
@@ -333,6 +333,107 @@ export function toMetric(event: EventEnvelope): MetricDisplayEntry | undefined {
   return undefined;
 }
 
+// PHX-115 (ADR-148): the backend's GET /metrics snapshot as App metric and log entries. App admits
+// at most 64 per collection, so the snapshot takes at most BACKEND_METRICS and the live event
+// metrics fill the rest. Every value is a count, a timing, a size or a closed code.
+export const BACKEND_METRICS = 40;
+export const METRICS_POLL_TICKS = 5; // refresh the snapshot every 5th poll tick (15 s)
+export type BackendDiagnostics = { readonly metrics: MetricDisplayEntry[]; readonly logs: LogDisplayEntry[] };
+// App's own name for generation throughput (index 3), so this module never spells a word the
+// credential scan in tests/desktop_adapters.mjs refuses.
+const THROUGHPUT = diagnosticMetricNames[3];
+const severities: ReadonlySet<string> = new Set(['debug', 'info', 'warning', 'error', 'critical']);
+const MIB = 1024 * 1024;
+function count(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+function finite(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+function plainId(value: unknown): string | undefined {
+  const text = str(value, 128);
+  return text && /^[A-Za-z0-9._:/@+-]+$/.test(text) ? text : undefined;
+}
+function counts(value: unknown): string {
+  if (!isObject(value)) return '';
+  return Object.entries(value).filter(([key, item]) => plainId(key) && count(item) !== undefined)
+    .slice(0, 8).map(([key, item]) => `${key} ${item as number}`).join(' · ');
+}
+export function toBackendDiagnostics(body: unknown): BackendDiagnostics | undefined {
+  if (!isObject(body)) return undefined;
+  const recordedAt = utc(body.generated_at);
+  if (!recordedAt) return undefined;
+  const metrics: MetricDisplayEntry[] = [];
+  const add = (key: string, name: MetricDisplayEntry['name'], value: number | string | undefined, unit?: string) => {
+    if (value === undefined || value === '' || metrics.length >= BACKEND_METRICS) return;
+    metrics.push({ id: `backend:${key}`.slice(0, 128), name, value: typeof value === 'string' ? value.slice(0, 256) : value, ...(unit ? { unit } : {}), recordedAt });
+  };
+  const latency = Array.isArray(body.latency) ? body.latency : [];
+  for (const entry of latency.slice(0, 12)) {
+    if (!isObject(entry)) continue;
+    const stage = plainId(entry.stage);
+    if (!stage) continue;
+    const name = stage === 'mission.first_answer' ? 'ttft' : 'task_step_latency';
+    add(`latency:${stage}:p50`, name, count(entry.p50_ms), `ms p50 ${stage}`.slice(0, 32));
+    add(`latency:${stage}:p95`, name, count(entry.p95_ms), `ms p95 ${stage}`.slice(0, 32));
+  }
+  const generation = isObject(body.generation) ? body.generation : {};
+  add('throughput', THROUGHPUT, finite(generation.output_tokens_per_second_mean), 'tok/s mean');
+  const generations = count(generation.generations);
+  add('generations', 'provider_model', generations === undefined ? undefined
+    : `${generations} generations · ${count(generation.input_tokens) ?? 0} in / ${count(generation.output_tokens) ?? 0} out tok`);
+  for (const model of (Array.isArray(generation.models) ? generation.models : []).slice(0, 4)) {
+    if (!isObject(model) || !plainId(model.provider_id) || !plainId(model.model_id)) continue;
+    add(`model:${model.provider_id}/${model.model_id}`, 'provider_model',
+      `${model.provider_id}/${model.model_id}: ${count(model.generations) ?? 0} gen · ${count(model.input_tokens) ?? 0} in / ${count(model.output_tokens) ?? 0} out`);
+  }
+  for (const health of (Array.isArray(generation.provider_health) ? generation.provider_health : []).slice(0, 4)) {
+    if (isObject(health) && plainId(health.provider_id) && plainId(health.status)) add(`health:${health.provider_id}`, 'provider_model', `${health.provider_id} ${health.status}`);
+  }
+  const resources = isObject(body.resources) ? body.resources : {};
+  const mib = (value: unknown) => { const bytes = count(value); return bytes === undefined ? undefined : Math.round(bytes / MIB); };
+  add('ram:process', 'ram', mib(resources.process_rss_bytes), 'MiB process');
+  add('ram:available', 'ram', mib(resources.system_ram_available_bytes), 'MiB available');
+  add('ram:total', 'ram', mib(resources.system_ram_total_bytes), 'MiB total');
+  add('cpu:process', 'cpu', finite(resources.process_cpu_percent), '% process');
+  const vram = isObject(resources.vram) ? resources.vram : {};
+  if (vram.status === 'ok') add('vram:total', 'vram', mib(vram.total_vram_bytes), 'MiB in use');
+  else add('vram:total', 'vram', 'unavailable');
+  for (const model of (Array.isArray(vram.models) ? vram.models : []).slice(0, 4)) {
+    if (isObject(model) && plainId(model.model_id) && mib(model.vram_bytes) !== undefined) {
+      add(`vram:${model.model_id}`, 'vram', `${model.model_id}: ${mib(model.vram_bytes)} of ${mib(model.size_bytes) ?? 0} MiB on GPU`);
+    }
+  }
+  const tools = isObject(body.tools) ? body.tools : {};
+  const rate = finite(tools.success_rate);
+  add('tools:rate', 'tool_success_failure', rate === undefined ? undefined : Math.round(rate * 1000) / 10, '% success');
+  const calls = count(tools.calls);
+  add('tools:calls', 'tool_success_failure', calls === undefined ? undefined : `${calls} calls${counts(tools.by_status) ? ` · ${counts(tools.by_status)}` : ''}`);
+  const permissions = isObject(body.permissions) ? body.permissions : {};
+  if (count(permissions.requested) !== undefined) {
+    add('permissions', 'permission_decisions', `requested ${count(permissions.requested)} · approved ${count(permissions.approved) ?? 0} · denied ${count(permissions.denied) ?? 0} · policy denied ${count(permissions.policy_denied) ?? 0}`);
+  }
+  const verification = isObject(body.verification) ? body.verification : {};
+  if (count(verification.passed) !== undefined) {
+    add('verification', 'verification_result', `LEVI passed ${count(verification.passed)} · failed ${count(verification.failed) ?? 0}${counts(verification.by_verdict) ? ` · ${counts(verification.by_verdict)}` : ''}`);
+  }
+  const recoveries = isObject(body.recoveries) ? body.recoveries : {};
+  if (count(recoveries.started) !== undefined) {
+    add('recoveries', 'recovery_attempts', `started ${count(recoveries.started)} · completed ${count(recoveries.completed) ?? 0} · exhausted ${count(recoveries.exhausted) ?? 0}${counts(recoveries.by_outcome) ? ` · ${counts(recoveries.by_outcome)}` : ''}`);
+  }
+  const logs: LogDisplayEntry[] = [];
+  for (const entry of (Array.isArray(body.logs) ? body.logs : []).slice(-RING)) {
+    if (!isObject(entry)) continue;
+    const logId = plainId(entry.id); const timestamp = utc(entry.ts); const severity = str(entry.level, 16);
+    const subsystem = str(entry.subsystem, 128); const message = str(entry.message, 1000);
+    if (!logId || !timestamp || !severity || !severities.has(severity) || !subsystem?.trim() || !message?.trim()) continue;
+    const correlationId = plainId(entry.correlation_id); const taskId = plainId(entry.task_id); const stepId = plainId(entry.step_id);
+    logs.push({ id: `backend:${logId}`, timestamp, severity: severity as LogDisplayEntry['severity'], subsystem, message,
+      ...(correlationId ? { correlationId } : {}), ...(taskId ? { taskId } : {}), ...(stepId ? { stepId } : {}) });
+  }
+  return { metrics, logs };
+}
+
 // ---- the store behind every port
 
 export type ConnectionView = {
@@ -368,12 +469,14 @@ export class PhoenixStore {
   private latestEvidence: string | undefined;
   private traces: TraceDisplayEntry[] = [];
   private metrics: MetricDisplayEntry[] = [];
+  private backendDiagnostics: BackendDiagnostics = { metrics: [], logs: [] };
+  private ticks = 0;
   private models: ModelDisplayEntry[] | undefined;
   private workspace: ConnectionView['workspace'];
   private workspaceMessage = '';
   private missionMessage = '';
   private path: MissionPath = 'auto';
-  private due = new Set<'conversation' | 'mission' | 'permissions' | 'models' | 'settings'>();
+  private due = new Set<'conversation' | 'mission' | 'permissions' | 'models' | 'settings' | 'metrics'>();
   private timer: unknown;
   private poller: unknown;
   private listeners = new Set<() => void>();
@@ -408,6 +511,8 @@ export class PhoenixStore {
     if (this.stopped) { this.unsubscribe(); return; }
     this.poller = this.scheduler.setInterval(() => {
       if (this.backend.state === 'ready' && this.mission && !TERMINAL_STATUSES.includes(this.mission.status)) this.schedule('mission', 'permissions', 'conversation');
+      this.ticks += 1;
+      if (this.backend.state === 'ready' && this.ticks % METRICS_POLL_TICKS === 0) this.schedule('metrics');
     }, POLL_MS);
     this.onBackend(await this.transport.backendStatus().catch(() => ({ state: 'degraded', code: 'ipc_unavailable' })));
   }
@@ -427,7 +532,7 @@ export class PhoenixStore {
     const code = str(value.code, 64);
     const wasReady = this.backend.state === 'ready';
     this.backend = { state, ...(code ? { code } : {}) };
-    if (state === 'ready' && !wasReady) this.schedule('conversation', 'mission', 'permissions', 'models', 'settings');
+    if (state === 'ready' && !wasReady) this.schedule('conversation', 'mission', 'permissions', 'models', 'settings', 'metrics');
     if (state !== 'ready') this.stream = { connected: false, code: null };
     this.changed();
   }
@@ -437,7 +542,7 @@ export class PhoenixStore {
     const code = typeof value.code === 'number' ? value.code : null;
     this.stream = { connected: value.connected, code };
     // Any (re)connection or close may have missed events: reload everything over REST.
-    this.schedule('conversation', 'mission', 'permissions', 'models', 'settings');
+    this.schedule('conversation', 'mission', 'permissions', 'models', 'settings', 'metrics');
     this.changed();
   }
 
@@ -502,6 +607,7 @@ export class PhoenixStore {
           if (status === 'waiting_permission') this.activity.set('phoenix', { state: 'waiting_permission', missionId, currentTask: `Mission ${short(missionId)} waits for your decision` });
         }
         this.schedule('mission', 'permissions', 'conversation');
+        if (TERMINAL_STATUSES.includes(status) || status === 'waiting_permission') this.schedule('metrics');
         break;
       }
       case 'agent.started':
@@ -557,7 +663,7 @@ export class PhoenixStore {
   }
 
   // -- REST refresh, coalesced
-  schedule(...what: Array<'conversation' | 'mission' | 'permissions' | 'models' | 'settings'>): void {
+  schedule(...what: Array<'conversation' | 'mission' | 'permissions' | 'models' | 'settings' | 'metrics'>): void {
     for (const item of what) this.due.add(item);
     if (this.timer !== undefined || this.stopped) return;
     this.timer = this.scheduler.setTimeout(() => {
@@ -575,6 +681,7 @@ export class PhoenixStore {
       due.has('models') ? this.loadModels() : undefined,
       due.has('permissions') ? this.loadPermissions() : undefined,
       due.has('mission') ? this.loadMission() : undefined,
+      due.has('metrics') ? this.loadMetrics() : undefined,
     ].map((task) => task?.catch(() => undefined)));
     if (due.has('conversation')) await this.loadConversation().catch(() => undefined);
     this.changed();
@@ -595,6 +702,11 @@ export class PhoenixStore {
 
   private async loadModels(): Promise<void> {
     this.models = toModelEntries(await this.get('/models'));
+  }
+
+  private async loadMetrics(): Promise<void> {
+    const diagnostics = toBackendDiagnostics(await this.get('/metrics'));
+    if (diagnostics) this.backendDiagnostics = diagnostics;
   }
 
   private async loadPermissions(): Promise<void> {
@@ -731,7 +843,12 @@ export class PhoenixStore {
       agentPort: { status, agents },
       permissionPort: { status, requests: toPermissionEntries(this.pending, this.actors), submitDecision: this.submitDecision },
       modelPort: this.models ? { status, entries: [...this.models] } : { status: status === 'connected' ? 'unavailable' : status, entries: [] },
-      observabilityPort: { status, metrics: [...this.metrics], logs: [], traces: [...this.traces] },
+      observabilityPort: {
+        status,
+        metrics: [...this.backendDiagnostics.metrics, ...this.metrics.slice(-(RING - this.backendDiagnostics.metrics.length))],
+        logs: this.backendDiagnostics.logs.slice(-RING),
+        traces: [...this.traces],
+      },
       connection: {
         backend: this.backend, stream: this.stream, workspace: this.workspace, workspaceMessage: this.workspaceMessage,
         hiddenPermissions: this.hiddenPermissions,

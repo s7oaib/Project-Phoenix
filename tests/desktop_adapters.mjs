@@ -455,4 +455,91 @@ test('M1 every PHOENIX answer in Chat carries a text badge from its own mission'
   assert.match(markup, /\[Verified by LEVI\]/);
 });
 
+// PHX-115 (ADR-148): the backend's GET /metrics snapshot feeds the unchanged Observability reader.
+function metricsBody(overrides = {}) {
+  return {
+    generated_at: '2026-10-21T10:00:00.123456+00:00', uptime_seconds: 42, ttft_basis: 'mission_first_answer',
+    missions: { completed: 2, queued: 2, running: 2 },
+    latency: [
+      { stage: 'mission.first_answer', count: 2, p50_ms: 2500, p95_ms: 4000, max_ms: 4000, mean_ms: 3250 },
+      { stage: 'agent.planner', count: 1, p50_ms: 900, p95_ms: 900, max_ms: 900, mean_ms: 900 },
+      { stage: 'tool', count: 0, p50_ms: null, p95_ms: null, max_ms: null, mean_ms: null },
+    ],
+    generation: { missions_ingested: 2, generations: 5, input_tokens: 70, output_tokens: 40, duration: { stage: 'generation', count: 5 },
+      output_tokens_per_second_mean: 21.5, models: [{ provider_id: 'ollama', model_id: 'qwen3.5:4b', generations: 5, input_tokens: 70, output_tokens: 40 }],
+      provider_health: [{ provider_id: 'ollama', status: 'healthy' }] },
+    tools: { calls: 4, succeeded: 3, failed: 1, success_rate: 0.75, by_status: { success: 3, denied: 1 } },
+    permissions: { requested: 2, approved: 1, denied: 1, policy_denied: 0, by_risk: { P2: 2 } },
+    verification: { passed: 2, failed: 1, by_verdict: { passed: 2, failed: 1 } },
+    recoveries: { started: 1, completed: 1, exhausted: 0, by_action: { retry_same: 1 }, by_outcome: { recovered: 1 } },
+    resources: { process_rss_bytes: 200 * 1024 * 1024, system_ram_total_bytes: 24 * 1024 ** 3, system_ram_available_bytes: 10 * 1024 ** 3, process_cpu_percent: 3.5,
+      vram: { status: 'ok', total_vram_bytes: 4000 * 1024 * 1024, models: [{ model_id: 'qwen3.5:4b', size_bytes: 5000 * 1024 * 1024, vram_bytes: 4000 * 1024 * 1024 }] } },
+    events: { observed: 30, rejected: 0, stream_dropped: 0, stream_rejected: 0 },
+    logs: [
+      { id: 'log-1', ts: '2026-10-21T09:59:59.5+00:00', level: 'info', subsystem: 'phoenix.events', message: 'task.state_changed scope=mission mission_status=queued', correlation_id: MISSION, mission_id: MISSION, event_type: 'task.state_changed' },
+      { id: 'log-2', ts: '2026-10-21T10:00:00+00:00', level: 'warning', subsystem: 'phoenix.events', message: 'tool.failed step_id=s1 code=tool_rejected', correlation_id: MISSION, task_id: TASK, step_id: 's1' },
+      { id: 'log-3', ts: 'not a time', level: 'info', subsystem: 'x', message: 'dropped' },
+      { id: 'log-4', ts: '2026-10-21T10:00:00Z', level: 'trace', subsystem: 'x', message: 'dropped' },
+    ],
+    ...overrides,
+  };
+}
+
+test('PHX-115 GET /metrics becomes admitted metric and log entries; event metrics fill the rest', async () => {
+  const { store, transport, scheduler } = await readyStore(backendRoutes({ 'GET /metrics': { status: 200, body: metricsBody() } }));
+  assert.ok(transport.calls.some((call) => call.method === 'GET' && call.path === '/metrics'));
+  let diagnostics = app.readObservabilityPort(store.getSnapshot().observabilityPort);
+  assert.equal(diagnostics.rejected, false);
+  assert.equal(diagnostics.status, 'connected');
+  const byId = new Map(diagnostics.metrics.map((metric) => [metric.id, plain(metric)]));
+  assert.deepEqual(byId.get('backend:latency:mission.first_answer:p50'), { id: 'backend:latency:mission.first_answer:p50', name: 'ttft', value: 2500, unit: 'ms p50 mission.first_answer', recordedAt: '2026-10-21T10:00:00.123456Z' });
+  assert.equal(byId.get('backend:latency:agent.planner:p95').name, 'task_step_latency');
+  assert.ok(!byId.has('backend:latency:tool:p50')); // no observation, no number
+  assert.deepEqual(plain(byId.get('backend:throughput')), { id: 'backend:throughput', name: 'tokens_per_sec', value: 21.5, unit: 'tok/s mean', recordedAt: '2026-10-21T10:00:00.123456Z' });
+  assert.equal(byId.get('backend:generations').value, '5 generations · 70 in / 40 out tok');
+  assert.equal(byId.get('backend:health:ollama').value, 'ollama healthy');
+  assert.equal(byId.get('backend:ram:process').value, 200);
+  assert.equal(byId.get('backend:vram:total').value, 4000);
+  assert.equal(byId.get('backend:vram:qwen3.5:4b').value, 'qwen3.5:4b: 4000 of 5000 MiB on GPU');
+  assert.equal(byId.get('backend:cpu:process').value, 3.5);
+  assert.equal(byId.get('backend:tools:rate').value, 75);
+  assert.equal(byId.get('backend:permissions').value, 'requested 2 · approved 1 · denied 1 · policy denied 0');
+  assert.match(byId.get('backend:verification').value, /^LEVI passed 2 · failed 1/);
+  assert.match(byId.get('backend:recoveries').value, /^started 1 · completed 1 · exhausted 0/);
+  assert.deepEqual(plain(diagnostics.logs.map((log) => [log.id, log.severity, log.correlationId ?? null, log.stepId ?? null])), [
+    ['backend:log-1', 'info', MISSION, null], ['backend:log-2', 'warning', MISSION, 's1']]);
+  assert.equal(diagnostics.logs[1].taskId, TASK);
+
+  // A terminal mission event refreshes the snapshot; live event metrics are kept within App's 64.
+  transport.calls.length = 0;
+  for (let index = 0; index < 70; index += 1) transport.handlers.event(envelope('step.completed', { step_id: 's1', duration_ms: index }));
+  transport.handlers.event(envelope('task.state_changed', { scope: 'mission', mission_status: 'completed' }));
+  await scheduler.flush();
+  assert.ok(transport.calls.some((call) => call.path === '/metrics'));
+  diagnostics = app.readObservabilityPort(store.getSnapshot().observabilityPort);
+  assert.equal(diagnostics.rejected, false);
+  assert.equal(diagnostics.metrics.length, 64);
+  assert.ok(diagnostics.metrics.some((metric) => metric.id.startsWith('backend:')));
+  assert.equal(diagnostics.metrics.at(-1).value, 69);
+
+  // VRAM unavailable is said, not hidden; malformed snapshots are ignored and keep the last good one.
+  const unavailable = core.toBackendDiagnostics(metricsBody({ resources: { vram: { status: 'unavailable' } } }));
+  assert.equal(unavailable.metrics.find((metric) => metric.id === 'backend:vram:total').value, 'unavailable');
+  assert.ok(!unavailable.metrics.some((metric) => metric.name === 'ram'));
+  assert.equal(core.toBackendDiagnostics({ ...metricsBody(), generated_at: 'yesterday' }), undefined);
+  assert.equal(core.toBackendDiagnostics([]), undefined);
+  const hostile = core.toBackendDiagnostics(metricsBody({ latency: Array.from({ length: 40 }, (_, index) => ({ stage: `s${index}`, p50_ms: 1, p95_ms: 2 })), logs: Array.from({ length: 90 }, (_, index) => ({ id: `log-${index}`, ts: AT, level: 'info', subsystem: 'phoenix.events', message: 'm' })) }));
+  assert.ok(hostile.metrics.length <= core.BACKEND_METRICS);
+  assert.equal(hostile.logs.length, 64);
+  assert.equal(app.readObservabilityPort({ status: 'connected', metrics: hostile.metrics, logs: hostile.logs, traces: [] }).rejected, false);
+});
+
+test('PHX-115 a backend without /metrics leaves the event metrics as they were', async () => {
+  const { store, transport } = await readyStore();
+  assert.ok(transport.calls.some((call) => call.path === '/metrics'));
+  const port = store.getSnapshot().observabilityPort;
+  assert.deepEqual(plain(port.metrics), []);
+  assert.deepEqual(plain(port.logs), []);
+});
+
 export { loader };

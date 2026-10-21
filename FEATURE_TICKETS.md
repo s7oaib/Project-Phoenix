@@ -117,6 +117,6 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-112 Computer control steps — TODO
 - PHX-113 Media and documents steps — TODO
 - PHX-114 Voice pipeline — TODO
-- PHX-115 Observability — TODO
+- PHX-115 Observability — DONE (structured JSON logs, `GET /metrics`, Observability view live; ADR-145–148; R1–R10 applied under the owner's "recommended options" instruction, pending review)
 - PHX-116 Colibri deep tier — TODO
 - PHX-117 Metric datasets — TODO

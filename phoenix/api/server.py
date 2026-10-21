@@ -18,7 +18,10 @@ clients with a bounded buffer each (a slow client is closed with 1013) and
 closes every connection when the backend stops. PHX-104 (ADR-089) adds the REST
 API v1 routes (``phoenix.api.routes``) and the document workspace: the stored
 root is re-validated at startup, and setting it builds a FilesystemTool and a
-runtime that missions starting afterwards use (``WorkspaceService``).
+runtime that missions starting afterwards use (``WorkspaceService``). PHX-115
+(ADR-145, ADR-146) puts a ``MetricsCollector`` between the publishers and the
+stream: it logs and aggregates each content-free event, then forwards it, and
+serves ``GET /metrics``.
 """
 
 import asyncio
@@ -54,6 +57,11 @@ from phoenix.api.event_stream import (
     EventStream,
 )
 from phoenix.api.missions import MissionService
+from phoenix.api.observability import (
+    MetricsCollector,
+    VramReport,
+    probe_ollama_vram,
+)
 from phoenix.api.security import (
     LocalApiSecurity,
     accept_websocket,
@@ -216,6 +224,7 @@ class BackendServices:
     missions: MissionService
     settings_store: SettingsStore
     workspace: WorkspaceService
+    observability: MetricsCollector | None = None  # PHX-115
 
 
 class ReadinessStatus(StrEnum):
@@ -416,6 +425,23 @@ async def open_services(
         )
         policy = PermissionPolicy()
         audit = AuditTrail(session_factory, tools)
+        # PHX-115: VRAM comes from Ollama's placement report, only when the
+        # configured providers include Ollama.
+        uses_ollama = any(
+            isinstance(provider, OllamaProvider) for provider in provider_set.providers
+        )
+
+        async def vram() -> VramReport:
+            if not uses_ollama:
+                return VramReport(status="unavailable")
+            return await probe_ollama_vram(
+                config.ollama_base_url, config.probe_timeout_seconds
+            )
+
+        observer = MetricsCollector(stream, vram_probe=vram)
+        observer.bind_stream_counters(
+            lambda: (stream.dropped_events, stream.rejected_events)
+        )
 
         def build_runtime(workspace_root: str | None = None) -> PhoenixRuntime:
             """PHX-104: one runtime per workspace root; None has no documents."""
@@ -429,7 +455,7 @@ async def open_services(
                 filesystem_tool=None
                 if workspace_root is None
                 else FilesystemTool(workspace_root, tools, policy, audit),
-                events=stream,
+                events=observer,
             )
 
         runtime = build_runtime()
@@ -437,8 +463,9 @@ async def open_services(
             runtime=runtime,
             store=MissionStore(session_factory),
             tool_registry=tools,
-            events=stream,
+            events=observer,
         )
+        observer.bind_traces(missions.get_trace)
         settings_store = SettingsStore(session_factory)
         services = BackendServices(
             settings=settings,
@@ -466,6 +493,7 @@ async def open_services(
                 build_runtime=build_runtime,
                 data_dir=settings.data_dir,
             ),
+            observability=observer,
         )
         try:
             await services.workspace.load()  # before the first mission runs
