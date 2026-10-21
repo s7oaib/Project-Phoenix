@@ -744,6 +744,30 @@ class MissionStore:
             self._queue_rerun(session, mission, new_mission_id, now)
             return grant_id
 
+    def approve_once(self, request_id: str, new_mission_id: str, now: datetime) -> None:
+        """PHX-112: record a one-time approval (no grant row) and queue the re-run.
+
+        For P4 requests, which have no grant form: the decision lives only in
+        the service's memory for that one re-run (ADR-151), so nothing durable
+        can authorize a later P4 action.
+        """
+        with self._transaction() as session:
+            request = session.get(PermissionRequestRow, request_id)
+            if request is None:
+                raise RecordNotFoundError("Unknown permission request")
+            mission = session.get(MissionRow, request.mission_id)
+            assert mission is not None
+            if (
+                request.status != RequestStatus.PENDING.value
+                or mission.status != MissionStatus.WAITING_PERMISSION.value
+            ):
+                raise InvalidStateError("Permission request is not pending")
+            request.status = RequestStatus.APPROVED.value
+            request.decided_at = now
+            mission.status = MissionStatus.SUPERSEDED.value
+            mission.finished_at = now
+            self._queue_rerun(session, mission, new_mission_id, now)
+
     def deny(self, request_id: str, now: datetime) -> None:
         with self._transaction() as session:
             request = session.get(PermissionRequestRow, request_id)

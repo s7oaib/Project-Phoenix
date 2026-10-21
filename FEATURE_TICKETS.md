@@ -114,7 +114,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-109 MAHORAGA/KAIDO in missions — DONE (MAHORAGA bounded recovery, ADR-093; KAIDO deferred)
 - PHX-110 Memory and RAG in missions — TODO
 - PHX-111 Web research — TODO
-- PHX-112 Computer control steps — TODO
+- PHX-112 Computer control steps — IN_PROGRESS (implemented and tested on a local branch; the draft control prompts await owner approval, then backend enablement, ADR-150–154)
 - PHX-113 Media and documents steps — TODO
 - PHX-114 Voice pipeline — TODO
 - PHX-115 Observability — TODO
