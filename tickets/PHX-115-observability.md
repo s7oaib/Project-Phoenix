@@ -54,7 +54,7 @@ New: `phoenix/api/structured_logging.py`, `phoenix/api/observability.py`, `phoen
 
 Changed: `phoenix/api/server.py`, `phoenix/api/launcher.py`, `phoenix/api/routes/__init__.py`, `apps/desktop/src-tauri/src/proxy.rs`, `apps/desktop/src/adapters/core.ts`, `tests/desktop_adapters.mjs`, `tests/test_rest_api.py` (route table gains `/metrics`), `tests/test_prompt_injection_defenses.py` (PHX-115 pin), `tests/test_screenshot_vision_loop.py` and `tests/test_windows_ui_automation.py` (the three new modules excluded from the `origin/main` diff guards, as earlier tickets did), `tests/matrix.toml`, `docs/13_API_CONTRACTS.md`, `docs/21_FRONTEND.md`, `docs/23_OBSERVABILITY.md`, `DECISIONS.md` (ADR-145–148), `FEATURE_TICKETS.md`.
 
-Hash pin: `server.py` (from the PHX-104 pin), `launcher.py`, `routes/__init__.py`, `proxy.rs` and `core.ts` are pinned at the PHX-115 implementation commit (`PHX_115_COMMIT` = `459c281d0244ee081d5e663f4daf6bccf2531b2c`), landed as an implementation commit then a pin commit; the PR must merge with a merge commit.
+Hash pin: `server.py` (from the PHX-104 pin), `launcher.py`, `routes/__init__.py`, `proxy.rs` and `core.ts` were first pinned at the PHX-115 implementation commit `459c281`. After PHX-108 was merged in (server.py, routes/__init__.py, proxy.rs and core.ts carry both tickets), all five moved to the merge-resolution commit (`PHX_115_COMMIT` = `253829afc1a97402519bc279ddce416daabddb95`), and PHX-108's pin no longer lists those four. Each landed as a commit followed by a pin commit; the PR must merge with a merge commit.
 
 ## Verification
 

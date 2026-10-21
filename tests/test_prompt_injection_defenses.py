@@ -1811,7 +1811,7 @@ PHX_108_PATHS = (
 # commit 459c281; server.py, routes/__init__.py, proxy.rs and core.ts carry
 # both tickets). The PR must merge with a merge commit so this commit stays
 # reachable.
-PHX_115_COMMIT = "459c281d0244ee081d5e663f4daf6bccf2531b2c"
+PHX_115_COMMIT = "253829afc1a97402519bc279ddce416daabddb95"
 PHX_115_PATHS = (
     "phoenix/api/server.py",
     "phoenix/api/launcher.py",
