@@ -25,6 +25,7 @@ from sqlalchemy.orm import sessionmaker
 
 from alembic import command
 from phoenix.agents import mission_events, research_steps
+from phoenix.agents.capability_steps import CapabilityTools
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
 from phoenix.agents.research_steps import (
     RESEARCH_TOOL_REASON,
@@ -67,8 +68,13 @@ from phoenix.models.registry import ModelCapabilityRegistry
 from phoenix.persistence.missions import MissionStatus, MissionStore
 from phoenix.security.permissions import (
     PermissionGrant,
+    PermissionPolicy,
     PermissionRequest,
     PermissionStatus,
+)
+from phoenix.tools.document_files import (
+    DocumentFileTool,
+    document_file_tool_definitions,
 )
 from phoenix.tools.registry import ToolRegistry, ToolResultStatus
 from phoenix.tools.web_research import (
@@ -1088,6 +1094,39 @@ def test_research_domain_is_offered_only_with_the_tool() -> None:
                 grants=(grant(reason="forged"),),
             )
         )
+
+
+def test_research_planner_wins_over_the_capability_planner(tmp_path: Path) -> None:
+    # PHX-120 (ADR-160): with both a research tool and PHX-113 capability tools,
+    # AIZEN plans with research_planner; the capability grants are accepted too.
+    mission = Mission()
+    store = ModelCapabilityRegistry()
+    for model in MODELS:
+        store.register(capabilities(model))
+    runtime = PhoenixRuntime(
+        providers=(mission.provider,),
+        capability_registry=store,
+        lifecycle=ModelLifecycleManager(),
+        research_tool=WebResearchTool(registry(), mission.search, mission.fetch),
+        capabilities=CapabilityTools(
+            documents=DocumentFileTool(
+                tmp_path.resolve(),
+                ToolRegistry(document_file_tool_definitions()),
+                PermissionPolicy(),
+            )
+        ),
+    )
+    result = run(
+        runtime.run(
+            PhoenixRequest(text="Research it."),
+            OrchestrationPath.COMPLEX,
+            grants=(grant(),),
+            session_id=SESSION,
+        )
+    )
+    assert result.kind == MissionKind.COMPLETED, result
+    assert mission.provider.roles()[0] == "research_planner"
+    assert "planner" not in mission.provider.roles()
 
 
 def test_event_allowlist_mirrors_research_values() -> None:

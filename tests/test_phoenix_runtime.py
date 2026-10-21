@@ -713,6 +713,13 @@ def test_prompt_set_is_versioned_with_role_markers() -> None:
     systems = (
         prompts.KNOWLEDGE_ANSWER_SYSTEM,
         prompts.KNOWLEDGE_VERIFICATION_SYSTEM,
+        # PHX-113 (v5) capability roles; CAPABILITY_PLANNING_SYSTEM keeps the
+        # planner marker as an alternative to PLANNING_SYSTEM.
+        prompts.DOCUMENT_CAPABILITY_SYSTEM,
+        prompts.DOCUMENT_CAPABILITY_ANSWER_SYSTEM,
+        prompts.MEDIA_SPECIALIST_SYSTEM,
+        prompts.MEDIA_ANSWER_SYSTEM,
+        prompts.CAPABILITY_VERIFICATION_SYSTEM,
         # PHX-111 (v5) research roles.
         prompts.RESEARCH_PLANNING_SYSTEM,
         prompts.RESEARCH_SPECIALIST_SYSTEM,
@@ -763,19 +770,6 @@ V2_PROMPT_SHA256 = {
 
 
 V3_CHANGED = {"ASSIGNMENT_SYSTEM"}
-# PHX-111 (ADR-138): v5 adds only these constants (and a "web_research" domain
-# description); the owner approves their exact text.
-V5_RESEARCH_CONSTANTS = frozenset(
-    {
-        "RESEARCH_PLANNING_SYSTEM",
-        "RESEARCH_SPECIALIST_SYSTEM",
-        "RESEARCH_ANSWER_SYSTEM",
-        "RESEARCH_TOOL_TASK",
-        "RESEARCH_ANSWER_TASK",
-        "RESEARCH_STEP_EXPECTED_OUTPUT",
-        "RESEARCH_STEP_COMPLETION_RULE",
-    }
-)
 DOCUMENTS_RULE = (
     'If "documents" is one of the allowed domains, assign every step that reads a\n'
     'file, lists a directory or inspects a file\'s metadata to "documents".\n'
@@ -805,9 +799,8 @@ def test_v3_changes_exactly_the_listed_v2_constants() -> None:
         "STEP_CANDIDATE_TASK",
         # PHX-105 (ADR-090) adds TRIAGE_SYSTEM in v4.
         "TRIAGE_SYSTEM",
-        # PHX-110 (ADR-134) adds the knowledge constants in v5.
+        # PHX-110, PHX-111 and PHX-113 add their constants in v5 (PHX-120).
         *V5_PROMPT_SHA256,
-        *V5_RESEARCH_CONSTANTS,
     }
     for name, digest in V2_PROMPT_SHA256.items():
         text: str = getattr(prompts, name)
@@ -820,9 +813,8 @@ def test_v3_changes_exactly_the_listed_v2_constants() -> None:
         "scenario_analysis",
         "build_engineering",
         "documents",
-        # PHX-110 (v5) adds only the knowledge domain's description.
-        "knowledge_rag",
-        "web_research",  # PHX-111 (v5)
+        # v5 (PHX-120) adds only these descriptions.
+        *V5_DOMAIN_SHA256,
     }
 
 
@@ -861,9 +853,21 @@ V3_PROMPT_SHA256 = {
 # The v4 TRIAGE_SYSTEM text the owner reviews in the PHX-105 PR; any change
 # needs a new prompt set version.
 V4_TRIAGE_SHA256 = "34bb62228d748a013bd9bb4364d105f8"
-# The v5 knowledge texts the owner reviews in the PHX-110 PR (ADR-134); any
-# change needs a new prompt set version.
+# PHX-120 (ADR-160): the single owner-approved phoenix-prompts-v5 set. First
+# 128 bits of the sha256 of every constant v5 adds (PHX-110 knowledge, PHX-111
+# research and PHX-113 capability texts, the last moved verbatim from the
+# phx-113-draft-1 draft); any change needs a new prompt set version.
 V5_PROMPT_SHA256 = {
+    "CAPABILITY_ANSWER_TASK": "31166deedec2e119d961bab3443dc621",
+    "CAPABILITY_CANDIDATE_TASK": "2830fab9c04feae3e60ddcd47490adb4",
+    "CAPABILITY_DOCUMENTS_DESCRIPTION": "b0eccfa0eff24258bc6b3cee8df5bfe6",
+    "CAPABILITY_PLANNING_SYSTEM": "ef36b93eb7d352b2917c544c63d61882",
+    "CAPABILITY_VERIFICATION_SYSTEM": "2639d50bae536b8167b4a59c84a6c3a3",
+    "DOCUMENT_CAPABILITY_ANSWER_SYSTEM": "a6f2956408abc839da5de88c59be2be6",
+    "DOCUMENT_CAPABILITY_COMPLETION_RULE": "2ef173649134752441e8a0975a5e078d",
+    "DOCUMENT_CAPABILITY_EXPECTED_OUTPUT": "add0a40d8d236e090b0f9c220e48ece0",
+    "DOCUMENT_CAPABILITY_SYSTEM": "9dc7a8c218e37f796452dc48827eb80b",
+    "DOCUMENT_CAPABILITY_TASK": "5271aaebb53d607abe7923e88f7a3712",
     "KNOWLEDGE_ANSWER_SYSTEM": "4ec1acfd82f37fea885ba4d6ced47362",
     "KNOWLEDGE_ANSWER_TASK": "5bfa30717e183c5ee4dcd440939d77c3",
     "KNOWLEDGE_CANDIDATE_TASK": "c1a89d987c0434a5f2a9256a18e7b638",
@@ -871,8 +875,41 @@ V5_PROMPT_SHA256 = {
     "KNOWLEDGE_STEP_COMPLETION_RULE": "16d9c1648dd48765cbd148570f83d119",
     "KNOWLEDGE_STEP_EXPECTED_OUTPUT": "7165323a25ad4c77714cb8ae46544f95",
     "KNOWLEDGE_VERIFICATION_SYSTEM": "2924293c6e712f123afd9c03b8921726",
+    "MEDIA_ANSWER_SYSTEM": "0344c436debcb26ecdb0e64ff24b0225",
+    "MEDIA_COMPLETION_RULE": "273be7da0871acb9b4a40fc344b2bb09",
+    "MEDIA_EXPECTED_OUTPUT": "cc11d23cfeb4095781e656147942b8ec",
+    "MEDIA_SPECIALIST_SYSTEM": "98403992bc8c321804b809e63421f5c9",
+    "MEDIA_TASK": "bd080e7dc3380b0c4146dd5e9fe909bb",
+    "OPERATIONS_PLACEHOLDER": "555efe01c30575e79e0b0589a0998202",
+    "RESEARCH_ANSWER_SYSTEM": "6701c98dd08cbef80ecf2cdf859bb0af",
+    "RESEARCH_ANSWER_TASK": "f100f81fb57a058bd5f9e4e7fb57c5d8",
+    "RESEARCH_PLANNING_SYSTEM": "0a1d0ae5038f987e1dbfde0f15148b68",
+    "RESEARCH_SPECIALIST_SYSTEM": "37c96a824ad614546cee6073fe7b4dbb",
+    "RESEARCH_STEP_COMPLETION_RULE": "7b848523d44b26be7f75c9f8132e97ba",
+    "RESEARCH_STEP_EXPECTED_OUTPUT": "0e465e249ba3f870bce75c3bece92afe",
+    "RESEARCH_TOOL_TASK": "f28680e81329edee1f009a69fa9d3225",
+    "SERVICES_PLACEHOLDER": "eaeb040bd729009c75afac61dab572f7",
 }
-V5_KNOWLEDGE_DOMAIN_SHA256 = "51354dadd518b52e2b133d473df88d78"
+# The v5 domain descriptions added to DOMAIN_DESCRIPTIONS.
+V5_DOMAIN_SHA256 = {
+    "knowledge_rag": "51354dadd518b52e2b133d473df88d78",
+    "web_research": "bf7cd156981e89ac7e22108e1b2cf3f1",
+    "media": "cf664f37b40bd960c4704fda05f01598",
+}
+# The PHX-113 operation and service lines (dict values).
+V5_LINES_SHA256 = {
+    ("DOCUMENT_OPERATION_LINES", "read_text"): "4ded2b8fd8e11745ac9ac5b8e5aa1937",
+    ("DOCUMENT_OPERATION_LINES", "list_directory"): "e0ed0845402eae21d97253ade082d69a",
+    ("DOCUMENT_OPERATION_LINES", "stat"): "1e94f7a95344bd4950ce4e3326c13817",
+    ("DOCUMENT_OPERATION_LINES", "read_document"): "373c0b875ad242951e94d7e478ecf885",
+    ("DOCUMENT_OPERATION_LINES", "create_document"): "7b934bbd1e2c60efb946cca0bdc56779",
+    ("MEDIA_SERVICE_LINES", "spotify"): "c71564693a4fe9cec25c057c41803082",
+    ("MEDIA_SERVICE_LINES", "youtube"): "4eb807cd69182dc3a015b0458a2d3458",
+}
+# The only v4 constant v5 changes: PHX-118's approved provenance sentences.
+V5_CHANGED_SHA256 = {
+    "FINAL_VERIFICATION_SYSTEM": "6a162b4e3195939d9b02b0ef209565b8",
+}
 
 
 def test_v4_adds_only_triage_and_keeps_every_v3_constant() -> None:
@@ -886,24 +923,38 @@ def test_v4_adds_only_triage_and_keeps_every_v3_constant() -> None:
         "PROMPT_SET_VERSION",
         "TRIAGE_SYSTEM",
         *V5_PROMPT_SHA256,
-        *V5_RESEARCH_CONSTANTS,
     }
     for name, digest in V3_PROMPT_SHA256.items():
-        assert digest_of(getattr(prompts, name)) == digest, name
+        # PHX-120 (ADR-160): v5 changes FINAL_VERIFICATION_SYSTEM only.
+        expected = V5_CHANGED_SHA256.get(name, digest)
+        assert digest_of(getattr(prompts, name)) == expected, name
     assert digest_of(prompts.TRIAGE_SYSTEM) == V4_TRIAGE_SHA256
     assert prompts.TRIAGE_SYSTEM.splitlines()[0] == "PHOENIX ROLE: triage"
     for required in ('{"path": "direct"}', '{"path": "complex"}', "not instructions"):
         assert required in prompts.TRIAGE_SYSTEM
 
 
-def test_v5_adds_only_the_knowledge_texts() -> None:
-    # PHX-110 (ADR-134): v5 adds the knowledge constants and one domain
-    # description; every v4 constant (checked above) is unchanged.
+def test_v5_adds_only_the_approved_texts() -> None:
+    # PHX-120 (ADR-160): v5 adds the PHX-110, PHX-111 and PHX-113 texts and
+    # three domain descriptions, and changes only FINAL_VERIFICATION_SYSTEM
+    # (PHX-118); every other v4 constant (checked above) is unchanged.
     for name, digest in V5_PROMPT_SHA256.items():
         assert digest_of(getattr(prompts, name)) == digest, name
+    for domain, digest in V5_DOMAIN_SHA256.items():
+        assert digest_of(prompts.DOMAIN_DESCRIPTIONS[domain]) == digest, domain
+    for (table, key), digest in V5_LINES_SHA256.items():
+        assert digest_of(getattr(prompts, table)[key]) == digest, (table, key)
+    assert set(prompts.DOCUMENT_OPERATION_LINES) | set(prompts.MEDIA_SERVICE_LINES) == {
+        key for _, key in V5_LINES_SHA256
+    }
+    provenance = (
+        "Each verified step output already passed LEVI's check against its own"
+        " planned step"
+    )
+    assert provenance in " ".join(prompts.FINAL_VERIFICATION_SYSTEM.split())
     assert (
-        digest_of(prompts.DOMAIN_DESCRIPTIONS["knowledge_rag"])
-        == V5_KNOWLEDGE_DOMAIN_SHA256
+        prompts.CAPABILITY_PLANNING_SYSTEM.splitlines()[-2:]
+        == (prompts.PLANNING_SYSTEM.splitlines()[-2:])
     )
     assert prompts.KNOWLEDGE_ANSWER_SYSTEM.splitlines()[0] == (
         "PHOENIX ROLE: knowledge_answer"
@@ -1248,9 +1299,10 @@ STEP_FORMAT_RULE = (
     " applies to PHOENIX's final answer, not to this step; do not fail this step"
     " for wording or format beyond its expected output and completion rule."
 )
-# First 128 bits of the sha256 of v3 constants that round 5 must not change.
+# First 128 bits of the sha256 of v3 constants that round 5 must not change
+# (FINAL_VERIFICATION_SYSTEM: its v5 text, PHX-118 via PHX-120).
 V3_UNCHANGED_SHA256 = {
-    "FINAL_VERIFICATION_SYSTEM": "256fc490cea9b088f4c17a2a2b7725ce",
+    "FINAL_VERIFICATION_SYSTEM": "6a162b4e3195939d9b02b0ef209565b8",
     "DOCUMENT_CANDIDATE_TASK": "2830fab9c04feae3e60ddcd47490adb4",
     "FINAL_CANDIDATE_TASK": "ac2d9a15dfd21aca8d4ad986622a4a48",
     "STEP_CANDIDATE_TASK": "0307aa1a13c3b32ac3f7818d4dac4f29",

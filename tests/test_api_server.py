@@ -29,6 +29,7 @@ from sqlalchemy import Engine, inspect
 
 from alembic import command
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
+from phoenix.agents.router import RoutingDomain
 from phoenix.agents.runtime import MissionKind, PhoenixRuntimeError
 from phoenix.api import launcher
 from phoenix.api.launcher import (
@@ -66,8 +67,10 @@ from phoenix.models.provider import (
     ProviderHealthStatus,
 )
 from phoenix.persistence.database import create_engine_for_settings
+from phoenix.tools.document_files import document_file_tool_definitions
 from phoenix.tools.filesystem import filesystem_tool_definitions
 from phoenix.tools.web_research import web_research_tool_definitions
+from phoenix.tools.youtube import youtube_tool_definitions
 
 HEAD = "0009_default_mission_path"
 ROOT = Path(__file__).resolve().parents[1]
@@ -249,11 +252,17 @@ def test_lifespan_builds_services_once_and_closes_them(settings: AppSettings) ->
         assert services.event_bus.subscriber_count == 0
         # PHX-111: the research declaration is registered; the tool is not
         # built because web research is disabled by default.
+        # PHX-120 (ADR-162): the PHX-113 document and YouTube declarations too.
         assert services.tool_registry.list_tools() == (
             *filesystem_tool_definitions(),
             *web_research_tool_definitions(),
+            *document_file_tool_definitions(),
+            *youtube_tool_definitions(),
         )
         assert services.runtime._research is None
+        # No workspace yet: capability steps offer media only, not documents.
+        assert services.runtime._capabilities is not None
+        assert services.runtime._capabilities.domains == (RoutingDomain.MEDIA,)
         assert services.permission_policy.rules == ()
         assert fakes.default.closed == fakes.structured.closed == 0
     assert get_services(app) is None

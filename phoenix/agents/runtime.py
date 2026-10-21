@@ -45,6 +45,12 @@ PHX-111 (ADR-135..139): with a WebResearchTool, web research steps search and
 read pages only under the user's grant for the search provider; LEVI checks
 their citations deterministically, and the final answer carries a Sources list.
 
+PHX-120 (ADR-160): one phoenix-prompts-v5 set. The planner is research_planner
+with a WebResearchTool, else the PHX-113 capability planner with capability
+tools (which also describe the documents domain with the capability text), else
+the v4 planner. Grants pass ``mission_grants`` (research, document and, with
+capability tools, PHX-113 scopes).
+
 Task state is task-level: intermediate step verification runs while RUNNING, and
 VERIFYING is the final-answer verification phase. Callers refresh capability
 records; provider health is probed once per mission. No resource monitor exists
@@ -122,6 +128,7 @@ from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.research_steps import (
     RESEARCH_ROLE,
     RESEARCH_TOOL_IDS,
+    CapabilityPlanningResponder,
     ResearchCallRecord,
     ResearchEvidence,
     ResearchPlanningResponder,
@@ -584,7 +591,7 @@ class PhoenixRuntime:
     research_steps), with the same caller-only grants.
 
     capabilities optionally enables PHX-113 media and document steps (see
-    capability_steps; their prompt text awaits the owner's approval). Their
+    capability_steps; their prompt text is part of phoenix-prompts-v5). Their
     grants also come only from run()'s caller.
 
     events optionally receives PHX-103 progress events (e.g. an EventBus). It
@@ -666,6 +673,16 @@ class PhoenixRuntime:
             self._domains = tuple(
                 dict.fromkeys((*self._domains, *self._capabilities.domains))
             )
+        # PHX-120 (ADR-160): capability documents steps get the v5 capability
+        # description; every other domain keeps its v5 description.
+        self._descriptions: Mapping[str, str] = prompts.DOMAIN_DESCRIPTIONS
+        if self._capabilities is not None and self._capabilities.handles(
+            RoutingDomain.DOCUMENTS
+        ):
+            self._descriptions = {
+                **prompts.DOMAIN_DESCRIPTIONS,
+                RoutingDomain.DOCUMENTS.value: prompts.CAPABILITY_DOCUMENTS_DESCRIPTION,
+            }
         try:
             self._recovery = MahoragaRecovery(self._agents)
         except MahoragaRecoveryError:
@@ -1204,11 +1221,15 @@ class PhoenixRuntime:
                         binding=self._control("strategist", health, evidence),
                         attempt=lambda binding: self._planner.plan(
                             planning,
-                            # PHX-111: research_planner only with the tool.
+                            # PHX-111: research_planner only with the tool;
+                            # PHX-120 (ADR-160): else the capability planner
+                            # with PHX-113 capability steps.
                             responder=(
-                                ModelPlanningResponder
-                                if self._research is None
-                                else ResearchPlanningResponder
+                                ResearchPlanningResponder
+                                if self._research is not None
+                                else CapabilityPlanningResponder
+                                if self._capabilities is not None
+                                else ModelPlanningResponder
                             )(binding, max_steps=limits.max_plan_steps),
                         ),
                     )
@@ -1223,7 +1244,10 @@ class PhoenixRuntime:
                             "phoenix", health, evidence, tier="assignment"
                         ),
                         attempt=lambda binding: ModelStepAssignmentResponder(
-                            binding, self._guard, allowed_domains=domains
+                            binding,
+                            self._guard,
+                            allowed_domains=domains,
+                            descriptions=self._descriptions,
                         ).assign(planned),
                     )
         except ResponderOutputError as error:

@@ -9,10 +9,14 @@ resource is outside the active workspace root cannot be approved (409
 ``workspace_changed``); deny it instead. PHX-111: a web research request names
 the search provider, not a workspace path, so the workspace check does not
 apply to it; MissionService.approve still admits only the research step scope.
+PHX-120 (ADR-162): the same holds for PHX-113 media requests (Spotify and
+YouTube resources are not paths); PHX-113 document requests are workspace
+paths and keep the check.
 """
 
 from fastapi import APIRouter, Request
 
+from phoenix.agents.capability_steps import CAPABILITY_TOOLS, MEDIA_ACTOR_ID
 from phoenix.agents.research_steps import RESEARCH_TOOL_IDS
 from phoenix.api.routes.common import (
     DEFAULT_PAGE,
@@ -40,6 +44,11 @@ from phoenix.security.permissions import GrantDuration
 router = APIRouter()
 
 _DURATIONS = {"session": GrantDuration.SESSION, "always": GrantDuration.PERSISTENT}
+MEDIA_TOOL_IDS = tuple(
+    tool_id
+    for tool_id, (actor, _, _) in CAPABILITY_TOOLS.items()
+    if actor == MEDIA_ACTOR_ID
+)
 
 
 def _grant(record: GrantRecord) -> GrantOut:
@@ -85,8 +94,9 @@ async def approve(
     record = await missions.get_permission_request(request_id)
     # A request made under another (or no longer valid) workspace would store a
     # grant outside the active root; it can only be denied.
-    research = record.request.tool_id in RESEARCH_TOOL_IDS
-    if not research and not services.workspace.covers(record.request.resource):
+    # PHX-111/PHX-120: research and media requests name no workspace path.
+    unbound = record.request.tool_id in (*RESEARCH_TOOL_IDS, *MEDIA_TOOL_IDS)
+    if not unbound and not services.workspace.covers(record.request.resource):
         raise ApiError(409, "workspace_changed")
     rerun = await missions.approve(request_id, _DURATIONS[body.duration])
     return ApproveResult(

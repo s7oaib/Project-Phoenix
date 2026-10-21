@@ -185,6 +185,11 @@ gate under `.test-matrix/logs/`.
   embeddings) and `tests/test_knowledge_api.py` (upload, memory, search and
   cited missions over REST); its live counterpart,
   `scripts/phoenix_knowledge_smoke.py`, is not a CI gate either.
+- PHX-120 (ADR-160 to ADR-164) integrates PHX-110, PHX-111 and PHX-113 on one
+  `phoenix-prompts-v5` set; `tests/test_phoenix_runtime.py` hash-pins every v5
+  addition, `tests/test_rest_api.py` covers PHX-113 approvals through the API
+  (P2 document.create session-only, YouTube without a workspace) and
+  `tests/test_settings_onboarding.py` the enabled capability flags.
 - `tests/test_web_research.py` (PHX-111) covers web research offline: the
   DuckDuckGo provider and page reader over `httpx.MockTransport` fixtures,
   the P1 research tool, LEVI's deterministic citation checks and full research

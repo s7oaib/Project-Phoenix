@@ -52,6 +52,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from alembic import command
+from phoenix.agents.capability_steps import CapabilityTools
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.runtime import ModelTierTable, PhoenixRuntime, default_tier_table
 from phoenix.api.app import create_app
@@ -96,9 +97,15 @@ from phoenix.persistence.missions import MissionStore
 from phoenix.persistence.settings import SettingsStore
 from phoenix.security.audit import AuditTrail
 from phoenix.security.permissions import PermissionPolicy
+from phoenix.security.secrets import WindowsCredentialStore
+from phoenix.tools.document_files import (
+    DocumentFileTool,
+    document_file_tool_definitions,
+)
 from phoenix.tools.filesystem import FilesystemTool, filesystem_tool_definitions
 from phoenix.tools.registry import ToolRegistry
 from phoenix.tools.web_research import WebResearchTool, web_research_tool_definitions
+from phoenix.tools.youtube import YouTubeTool, youtube_tool_definitions
 from phoenix.web.duckduckgo import DuckDuckGoSearchProvider
 from phoenix.web.page_fetch import HttpPageFetcher
 
@@ -514,8 +521,15 @@ async def open_services(
         # PHX-111: the research declaration is always registered (so a stored
         # research request can be shown and decided); the tool itself exists
         # only when web research is enabled.
+        # PHX-120 (ADR-162): the PHX-113 document and YouTube declarations are
+        # registered too, so their stored requests can be shown and decided.
         tools = ToolRegistry(
-            (*filesystem_tool_definitions(), *web_research_tool_definitions())
+            (
+                *filesystem_tool_definitions(),
+                *web_research_tool_definitions(),
+                *document_file_tool_definitions(),
+                *youtube_tool_definitions(),
+            )
         )
         research: WebResearchTool | None = None
         if settings.web_research_enabled:
@@ -532,6 +546,12 @@ async def open_services(
         )
         policy = PermissionPolicy()
         audit = AuditTrail(session_factory, tools)
+        # PHX-120 (ADR-162): PHX-113 media steps. YouTube reads its API key from
+        # the Windows credential store at call time (no key: tool_failed); no
+        # player adapter exists yet, so open/play/pause fail explicitly. Spotify
+        # needs an owner-registered client ID and is not wired.
+        youtube = YouTubeTool(tools, policy, WindowsCredentialStore())
+        stack.push_async_callback(youtube.aclose)
         knowledge = KnowledgeService(
             sessions=session_factory,
             embedding=provider_set.embedding,
@@ -554,6 +574,14 @@ async def open_services(
                 events=stream,
                 knowledge=knowledge,
                 research_tool=research,
+                # PHX-120 (ADR-162): PHX-113 document read/create under the
+                # same workspace root, and YouTube media steps.
+                capabilities=CapabilityTools(
+                    documents=None
+                    if workspace_root is None
+                    else DocumentFileTool(workspace_root, tools, policy),
+                    youtube=youtube,
+                ),
             )
 
         runtime = build_runtime()

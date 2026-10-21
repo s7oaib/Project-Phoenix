@@ -22,7 +22,7 @@ exactly one tool call between two generations, as in PHX-046:
    grounded in the same guarded item (INV-008).
 
 Filesystem operations keep PHX-046's evidence, records and LEVI responders.
-The prompt text lives in ``capability_prompts`` and awaits the owner's approval.
+The prompt text is part of ``phoenix-prompts-v5`` (``prompts``; PHX-120).
 Traces hold IDs, statuses, hashes and lengths only. No retries (PHX-109 R10).
 """
 
@@ -45,7 +45,7 @@ from pydantic import (
     field_validator,
 )
 
-from phoenix.agents import capability_prompts, prompts
+from phoenix.agents import prompts
 from phoenix.agents.handoff import HandoffEnvelope
 from phoenix.agents.mission_events import MissionEvents, elapsed_ms
 from phoenix.agents.responders import (
@@ -354,7 +354,7 @@ class CapabilityStepRunner:
 
     @property
     def domains(self) -> tuple[RoutingDomain, ...]:
-        """Documents with the document tool; media once its prompt is approved.
+        """Documents with the document tool; media with a media tool.
 
         The assignment prompt must describe every allowed domain, so MEDIA is
         offered only when ``prompts.DOMAIN_DESCRIPTIONS`` describes it.
@@ -401,34 +401,34 @@ class CapabilityStepRunner:
     @staticmethod
     def expected_output(domain: RoutingDomain) -> str:
         return (
-            capability_prompts.DOCUMENT_CAPABILITY_EXPECTED_OUTPUT
+            prompts.DOCUMENT_CAPABILITY_EXPECTED_OUTPUT
             if domain == RoutingDomain.DOCUMENTS
-            else capability_prompts.MEDIA_EXPECTED_OUTPUT
+            else prompts.MEDIA_EXPECTED_OUTPUT
         )
 
     @staticmethod
     def completion_rule(domain: RoutingDomain) -> str:
         return (
-            capability_prompts.DOCUMENT_CAPABILITY_COMPLETION_RULE
+            prompts.DOCUMENT_CAPABILITY_COMPLETION_RULE
             if domain == RoutingDomain.DOCUMENTS
-            else capability_prompts.MEDIA_COMPLETION_RULE
+            else prompts.MEDIA_COMPLETION_RULE
         )
 
     def _system(self, domain: RoutingDomain) -> tuple[str, str, str]:
         if domain == RoutingDomain.DOCUMENTS:
             lines = "\n".join(
-                capability_prompts.DOCUMENT_OPERATION_LINES[operation]
+                prompts.DOCUMENT_OPERATION_LINES[operation]
                 for operation in self._document_operations()
             )
             return (
                 "document_capability",
-                capability_prompts.DOCUMENT_CAPABILITY_SYSTEM.replace(
-                    capability_prompts.OPERATIONS_PLACEHOLDER, lines
+                prompts.DOCUMENT_CAPABILITY_SYSTEM.replace(
+                    prompts.OPERATIONS_PLACEHOLDER, lines
                 ),
-                capability_prompts.DOCUMENT_CAPABILITY_TASK,
+                prompts.DOCUMENT_CAPABILITY_TASK,
             )
         services = [
-            capability_prompts.MEDIA_SERVICE_LINES[name]
+            prompts.MEDIA_SERVICE_LINES[name]
             for name, tool in (
                 ("spotify", self._tools.spotify),
                 ("youtube", self._tools.youtube),
@@ -437,10 +437,10 @@ class CapabilityStepRunner:
         ]
         return (
             "media_specialist",
-            capability_prompts.MEDIA_SPECIALIST_SYSTEM.replace(
-                capability_prompts.SERVICES_PLACEHOLDER, "\n".join(services)
+            prompts.MEDIA_SPECIALIST_SYSTEM.replace(
+                prompts.SERVICES_PLACEHOLDER, "\n".join(services)
             ),
-            capability_prompts.MEDIA_TASK,
+            prompts.MEDIA_TASK,
         )
 
     # ---- PHOENIX builds the call; a proposal outside the allowlist runs nothing.
@@ -841,10 +841,10 @@ class CapabilityStepRunner:
         answer_role, answer_system = (
             (
                 "document_capability_answer",
-                capability_prompts.DOCUMENT_CAPABILITY_ANSWER_SYSTEM,
+                prompts.DOCUMENT_CAPABILITY_ANSWER_SYSTEM,
             )
             if domain == RoutingDomain.DOCUMENTS
-            else ("media_answer", capability_prompts.MEDIA_ANSWER_SYSTEM)
+            else ("media_answer", prompts.MEDIA_ANSWER_SYSTEM)
         )
         answer = await _generate(
             binding,
@@ -856,7 +856,7 @@ class CapabilityStepRunner:
                     _guarded(
                         self._guard,
                         boundary,
-                        capability_prompts.CAPABILITY_ANSWER_TASK,
+                        prompts.CAPABILITY_ANSWER_TASK,
                         (objective, item, *prior),
                     ),
                 )
@@ -1032,7 +1032,7 @@ class CapabilityVerificationResponder(ModelVerificationResponder):
                 verification_id=request.verification_id, checks=checks
             )
         model = UntrustedContentOrigin.MODEL_OUTPUT
-        system = capability_prompts.CAPABILITY_VERIFICATION_SYSTEM.format(
+        system = prompts.CAPABILITY_VERIFICATION_SYSTEM.format(
             max_checks=self._max_checks
         )
         user = "\n\n".join(
@@ -1043,7 +1043,7 @@ class CapabilityVerificationResponder(ModelVerificationResponder):
                 _guarded(
                     self._guard,
                     request.verification_id,
-                    capability_prompts.CAPABILITY_CANDIDATE_TASK,
+                    prompts.CAPABILITY_CANDIDATE_TASK,
                     (
                         (
                             prompts.OBJECTIVE_ITEM,

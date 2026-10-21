@@ -28,7 +28,7 @@ from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import sessionmaker
 
 from alembic import command
-from phoenix.agents import capability_prompts, capability_steps, mission_events, prompts
+from phoenix.agents import capability_steps, mission_events, prompts
 from phoenix.agents.capability_steps import (
     CAPABILITY_ACTIONS,
     CAPABILITY_DOCUMENT_REASON,
@@ -564,12 +564,8 @@ def stack(tmp_path: Path) -> Iterator[Stack]:
 
 @pytest.fixture
 def media_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Simulates the owner approving the draft "media" domain description."""
-    monkeypatch.setitem(
-        prompts.DOMAIN_DESCRIPTIONS,
-        "media",
-        capability_prompts.DRAFT_DOMAIN_DESCRIPTIONS["media"],
-    )
+    """PHX-120: the approved "media" description is part of phoenix-prompts-v5."""
+    assert "media" in prompts.DOMAIN_DESCRIPTIONS
 
 
 def run(coroutine: Coroutine[Any, Any, Any]) -> Any:
@@ -1225,6 +1221,19 @@ def test_filesystem_operations_keep_phx046_evidence(stack: Stack) -> None:
     assert "- read_text:" in system and "- create_document:" in system
 
 
+def test_capability_missions_use_the_v5_capability_planner(stack: Stack) -> None:
+    # PHX-120 (ADR-160): AIZEN plans with CAPABILITY_PLANNING_SYSTEM and the
+    # assignment describes documents with the v5 capability text.
+    result = mission(stack, (stack.document_grant(),))
+    assert result.kind is MissionKind.COMPLETED
+    assert stack.provider.system("planner") == (
+        prompts.CAPABILITY_PLANNING_SYSTEM.format(max_steps=4)
+    )
+    assignment = stack.provider.system("assignment")
+    assert f"- documents: {prompts.CAPABILITY_DOCUMENTS_DESCRIPTION}" in assignment
+    assert prompts.DOMAIN_DESCRIPTIONS["documents"] not in assignment
+
+
 def test_capability_steps_are_opt_in(stack: Stack) -> None:
     # Without capabilities the PHX-046 runtime is unchanged.
     store = ModelCapabilityRegistry()
@@ -1260,7 +1269,11 @@ def media_plan(stack: Stack, reply: str) -> None:
     )
 
 
-def test_media_domain_needs_the_approved_prompt(stack: Stack) -> None:
+def test_media_domain_needs_the_approved_prompt(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # PHX-120: v5 has the description; without it the domain stays unreachable.
+    monkeypatch.delitem(prompts.DOMAIN_DESCRIPTIONS, "media")
     media_plan(stack, proposal(service="spotify", operation="search", query="lofi"))
     result = mission(stack, media=True)
     assert result.responder_error is ResponderErrorCode.DISALLOWED_DOMAIN
@@ -1412,19 +1425,20 @@ def test_document_tool_requires_canonical_registry(stack: Stack) -> None:
     assert DocumentFileOperation.CREATE.value == "create"
 
 
-def test_draft_prompts_are_marked_and_separate() -> None:
-    assert capability_prompts.DRAFT_PROMPT_VERSION == "phx-113-draft-1"
+def test_capability_prompts_are_part_of_v5() -> None:
+    # PHX-120 (ADR-160): the approved draft moved verbatim into prompts.py.
+    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v5"
     for name in (
         "DOCUMENT_CAPABILITY_SYSTEM",
         "DOCUMENT_CAPABILITY_ANSWER_SYSTEM",
         "MEDIA_SPECIALIST_SYSTEM",
         "MEDIA_ANSWER_SYSTEM",
         "CAPABILITY_VERIFICATION_SYSTEM",
+        "CAPABILITY_PLANNING_SYSTEM",
     ):
-        assert getattr(capability_prompts, name).startswith("PHOENIX ROLE: ")
-    # Nothing was added to the approved prompt set.
-    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v4"
-    assert "media" not in prompts.DOMAIN_DESCRIPTIONS
+        assert getattr(prompts, name).startswith("PHOENIX ROLE: ")
+    assert "media" in prompts.DOMAIN_DESCRIPTIONS
+    assert not (ROOT / "phoenix/agents/capability_prompts.py").exists()
 
 
 def test_new_modules_stay_provider_neutral() -> None:
@@ -1436,7 +1450,6 @@ def test_new_modules_stay_provider_neutral() -> None:
             "phoenix.tools.spotify",
             "phoenix.tools.youtube",
         },
-        "capability_prompts": set(),
     }
     for name, tools in allowed.items():
         tree = ast.parse((ROOT / f"phoenix/agents/{name}.py").read_text("utf-8"))

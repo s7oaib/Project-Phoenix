@@ -11,7 +11,9 @@ PermissionRequest stored. Only ``approve``, a user decision, creates a grant
 (PERSISTENT, until revoked). Approval supersedes the waiting mission and queues
 a linked re-run of the same request; there is no mid-mission resume (ADR-082).
 Each run receives the stored, unrevoked grants that pass ``mission_grants``
-(document or, PHX-111, web research scope), plus this launch's session ID.
+(document or, PHX-111, web research scope, and since PHX-120 the PHX-113
+document and media scopes: P1 "session" or "always", P2 "session" only), plus
+this launch's session ID.
 
 Lifecycle: ``start`` marks missions left queued or running by an earlier process
 ``failed/interrupted`` (nothing re-runs; ``run_again`` is the explicit path),
@@ -456,12 +458,12 @@ class MissionService:
 
     @staticmethod
     def _usable(stored: tuple[PermissionGrant, ...]) -> tuple[PermissionGrant, ...]:
-        """Stored grants that pass the document or research step rules, one per
-        scope."""
+        """Stored grants that pass the document, research or (PHX-120) PHX-113
+        capability step rules, one per scope."""
         accepted: list[PermissionGrant] = []
         for grant in stored:
             try:
-                mission_grants([*accepted, grant])
+                mission_grants([*accepted, grant], capabilities=True)
             except ValueError:
                 continue  # outside the step scopes, or a duplicate scope
             accepted.append(grant)
@@ -663,7 +665,8 @@ class MissionService:
                 else None,
                 user_decision="approved",
             )
-            mission_grants([grant])  # document or (PHX-111) research scope
+            # document, (PHX-111) research or (PHX-113, PHX-120) capability scope
+            mission_grants([grant], capabilities=True)
         except (ValueError, ValidationError):
             raise InvalidRequestError(
                 "Request is outside the document grant scope"

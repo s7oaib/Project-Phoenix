@@ -168,7 +168,9 @@ FilesystemTool's path, link/junction and per-call root checks.
   (`already_exists`), then reads the file back and compares bytes before
   reporting `verified: true` — the saved-file check PHX-073 deferred.
 
-Missions reach both through the opt-in PHX-113 capability steps with caller
+Missions reach both through the PHX-113 capability steps (wired into the
+backend by PHX-120, ADR-162: a documents step under the active workspace root
+offers PHX-046's read-only operations plus read and create) with caller
 grants only (P2 SESSION only); see
 [the PHX-113 contract](../tickets/PHX-113-media-documents.md) and ADR-140–144.
 

@@ -263,15 +263,16 @@ class ResearchPlanningResponder:
     unchanged PLANNING_SYSTEM.
     """
 
+    ROLE = "research_planner"
+    SYSTEM = prompts.RESEARCH_PLANNING_SYSTEM
+
     def __init__(self, binding: ModelBinding, *, max_steps: int) -> None:
         self._binding = binding
         self._max_steps = max_steps
 
     async def propose(self, request: PlanningRequest) -> PlanDraft:
-        system = prompts.RESEARCH_PLANNING_SYSTEM.format(max_steps=self._max_steps)
-        text = await _generate(
-            self._binding, "research_planner", system, request.objective
-        )
+        system = self.SYSTEM.format(max_steps=self._max_steps)
+        text = await _generate(self._binding, self.ROLE, system, request.objective)
         wire = parse_json_object(text, _PlanWire)
         if len(wire.steps) > self._max_steps:
             raise ResponderOutputError(ResponderErrorCode.SCHEMA)
@@ -282,6 +283,15 @@ class ResearchPlanningResponder:
                 for index, step in enumerate(wire.steps, start=1)
             ),
         )
+
+
+class CapabilityPlanningResponder(ResearchPlanningResponder):
+    """PHX-120 (ADR-160): AIZEN's planner when PHX-113 capability steps are
+    offered and web research is not (v5 CAPABILITY_PLANNING_SYSTEM, role
+    marker ``planner``); the same reply contract as ModelPlanningResponder."""
+
+    ROLE = "planner"
+    SYSTEM = prompts.CAPABILITY_PLANNING_SYSTEM
 
 
 def _source_items(result: WebResearchResult) -> tuple[_Item, ...]:

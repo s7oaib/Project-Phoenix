@@ -5225,7 +5225,7 @@ command acceptance never proves audible or visible playback. Tests use only
 
 ## ADR-144 — PHX-113 prompt text stays a draft outside the approved set
 
-Status: Accepted (owner approval of the text pending)
+Status: Superseded by ADR-160 (the owner approved the text; PHX-120 moved it)
 Date: 2026-10-21
 Ticket: PHX-113
 
@@ -5239,3 +5239,120 @@ capability steps are opt-in and unwired, so no production mission uses
 unapproved text. On approval the text moves into `prompts.py` as
 `phoenix-prompts-v5` and the composition root is wired. Until then the planner
 does not plan writes or media and `media` cannot be assigned.
+
+## ADR-160 — One owner-approved `phoenix-prompts-v5` set
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Context: PHX-110 and PHX-111 each introduced a `phoenix-prompts-v5` with
+different additions, PHX-113 kept its text as a draft (`phx-113-draft-1`,
+ADR-144) and PHX-118 proposed provenance sentences for
+`FINAL_VERIFICATION_SYSTEM`. The owner approved the whole batch.
+
+Decision: `phoenix/agents/prompts.py` holds one `phoenix-prompts-v5`:
+
+- every v4 constant byte-identical, except `FINAL_VERIFICATION_SYSTEM`, which
+  gains PHX-118's five provenance sentences exactly as written in its ticket;
+- PHX-110's knowledge texts and `DOMAIN_DESCRIPTIONS["knowledge_rag"]`;
+- PHX-111's research texts and `DOMAIN_DESCRIPTIONS["web_research"]`;
+- PHX-113's draft texts moved verbatim (role prompts, operation and service
+  lines, placeholders, tasks, expected outputs, completion rules) and
+  `DOMAIN_DESCRIPTIONS["media"]`. Its two proposed *replacements* of v4 text
+  become new constants instead, so v4 stays byte-identical:
+  `CAPABILITY_PLANNING_SYSTEM` (the draft planner) and
+  `CAPABILITY_DOCUMENTS_DESCRIPTION` (the draft documents description).
+  `capability_prompts.py` is deleted.
+
+Selection: AIZEN plans with `research_planner` when the runtime holds a web
+research tool, else with `CAPABILITY_PLANNING_SYSTEM` (`CapabilityPlanningResponder`,
+role marker `planner`) when it holds PHX-113 capability tools, else with the v4
+`PLANNING_SYSTEM`. With capability documents the assignment prompt describes
+`documents` with `CAPABILITY_DOCUMENTS_DESCRIPTION`
+(`ModelStepAssignmentResponder(descriptions=...)`).
+
+Evidence: `tests/test_phoenix_runtime.py` pins the first 128 bits of the
+sha256 of every v5 addition (`V5_PROMPT_SHA256`, `V5_DOMAIN_SHA256`,
+`V5_LINES_SHA256`) and of the changed `FINAL_VERIFICATION_SYSTEM`
+(`6a162b4e3195939d9b02b0ef209565b8`); every other v3/v4 hash is unchanged. The
+exact texts and hashes are listed in `tickets/PHX-120-capability-integration.md`.
+
+Consequences: research and capability planning are exclusive. With
+`PHOENIX_WEB_RESEARCH_ENABLED=true` AIZEN does not plan document writes or media
+steps; a combined planner needs new prompt text and a new owner approval
+(open issue). No new dependency, event type or migration.
+
+## ADR-161 — Capability flags enabled; web research keeps its launch opt-in
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Decision: `phoenix/api/capabilities.py` (ADR-112) enables `memory` (PHX-110),
+`web_research` (PHX-111), `media` and `document_generation` (PHX-113).
+`computer_control` and `voice` stay off. Web research also keeps
+`PHOENIX_WEB_RESEARCH_ENABLED` (default false): its queries leave the machine,
+so a launch must opt in. `GET /capabilities` reports `web_research` enabled
+only when the flag is on and the launch opted in, so the Research view never
+claims a tool the backend did not build. Every other flag is reported as is.
+
+Consequences: a flag still grants nothing (INV-004); every call needs the
+user's grant. The desktop needs no change.
+
+## ADR-162 — PHX-113 capabilities wired into the backend
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Decision: `phoenix/api/server.py` registers the PHX-113 `document.*` and
+`youtube.*` declarations and passes `capabilities=CapabilityTools(...)` to
+every runtime: a `DocumentFileTool` under the active workspace root (none
+without a root) and one `YouTubeTool` whose API key is read from the Windows
+credential store at call time (no player adapter exists, so open, play and
+pause fail `tool_failed`). Spotify is not wired: it needs an owner-registered
+client ID and redirect URI, which have no setting yet. With capability tools a
+documents step runs through the PHX-113 runner (`document_capability` roles),
+which keeps PHX-046's filesystem operations, grants, evidence and LEVI checks.
+
+The API grant store is widened as the PHX-113 ticket required:
+`research_steps.mission_grants(..., capabilities=True)` accepts research,
+PHX-046 document and PHX-113 grants (`capability_grants`: exact tool, action,
+actor, fixed reason and risk; P1 SESSION or PERSISTENT, P2 SESSION only).
+`MissionService` uses it for stored grants and approvals, so "always" for a P2
+request is refused (422). Media requests name no workspace path, so
+`POST /permissions/{id}/approve` skips the workspace check for them, as for
+research; document requests keep it.
+
+Consequences: no new dependency, route, event type or migration; the tool
+event allowlist is the union of PHX-046, PHX-111 and PHX-113 values.
+
+## ADR-163 — Merge resolution for PHX-110, PHX-111 and PHX-113
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Decision: the three branches merge in order (110, 111, 113) onto main with
+PHX-118 and PHX-108, with merge commits. In `runtime.py` a step is dispatched
+by the first match: PHX-113 capability, PHX-046 documents, PHX-110 knowledge,
+PHX-111 research, then text. LEVI's responder is the capability responder
+when the capability runner supplies one, else `_levi_responder` with PHX-118's
+final grounding and PHX-111's research evidence; PHX-110's knowledge wrapper
+applies on top. `MissionTrace` keeps every additive field (`retrievals`,
+`citations`, `research_calls`, `capability_calls`). `mission_events` allows the
+union of tool IDs, operations and agent roles. Docs and ADR lists are unions.
+
+## ADR-164 — One PHX-120 pin for files several tickets changed
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Decision: in `tests/test_prompt_injection_defenses.py`, every protected path
+changed by more than one of PHX-108, PHX-109, PHX-110, PHX-111, PHX-113,
+PHX-118 and PHX-120 moves to `PHX_120_COMMIT`/`PHX_120_PATHS` at the PHX-120
+implementation commit (two commits: implementation, then pin), and leaves its
+older block, so each path has exactly one baseline. Paths only one ticket
+changed keep that ticket's pin. The PR must merge with a merge commit.

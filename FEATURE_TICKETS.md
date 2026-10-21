@@ -112,12 +112,13 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-107 Frontend port adapters — DONE (R1–R11 confirmed by the owner 2026-10-18)
 - PHX-108 Settings and onboarding — DONE (ADR-110–114; late Ollama start fixed; owner review in the PR)
 - PHX-109 MAHORAGA/KAIDO in missions — DONE (MAHORAGA bounded recovery, ADR-093; KAIDO deferred)
-- PHX-110 Memory and RAG in missions — DONE (knowledge steps with cited, LEVI-checked answers, ADR-130–134; `phoenix-prompts-v5` text awaits owner approval; live smoke pending)
-- PHX-111 Web research — DONE (offline acceptance, ADR-135 to ADR-139; the v5 prompt text and the live smoke await the owner)
+- PHX-110 Memory and RAG in missions — DONE (knowledge steps with cited, LEVI-checked answers, ADR-130–134; v5 text approved and integrated by PHX-120; live smoke pending)
+- PHX-111 Web research — DONE (offline acceptance, ADR-135 to ADR-139; v5 text approved and integrated by PHX-120; live smoke awaits the owner)
 - PHX-112 Computer control steps — TODO
-- PHX-113 Media and documents steps — DONE (opt-in; ADR-140–144; draft prompt text awaits owner approval, then wiring)
+- PHX-113 Media and documents steps — DONE (ADR-140–144; prompts approved into v5 and backend wired by PHX-120; Spotify wiring and live smoke await owner setup)
 - PHX-114 Voice pipeline — TODO
 - PHX-115 Observability — TODO
 - PHX-116 Colibri deep tier — TODO
 - PHX-117 Metric datasets — TODO
-- PHX-118 LEVI final-verifier reliability — DONE (deterministic grounding pre-check, ADR-100; proposed v5 prompt text awaits owner approval)
+- PHX-118 LEVI final-verifier reliability — DONE (deterministic grounding pre-check, ADR-100; provenance sentences approved and applied in v5 by PHX-120)
+- PHX-120 Capability integration — DONE (PHX-110/111/113 on one `phoenix-prompts-v5`, backend wiring, capability flags; ADR-160–164; live acceptance pending)

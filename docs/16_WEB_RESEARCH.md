@@ -33,6 +33,12 @@ Expose claims, sources, uncertainty, and source dates when relevant.
 
 ## Mission integration (PHX-111, ADR-135..139)
 
+PHX-120 (ADR-161): the `web_research` capability flag is on, but the tool is
+still built only when `PHOENIX_WEB_RESEARCH_ENABLED=true` for the launch, and
+`GET /capabilities` reports research enabled only then. With research on,
+AIZEN plans with `research_planner` (it wins over the PHX-113 capability
+planner, ADR-160).
+
 - **Enable.** `PHOENIX_WEB_RESEARCH_ENABLED=true` (off by default until the
   PHX-108 capability settings own it). Without it, missions never offer the
   `web_research` domain and use the unchanged planner prompt.

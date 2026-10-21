@@ -120,6 +120,20 @@ class ScriptedProvider(ModelProvider):
                 }
             ),
             "document_answer": "The notes give the codename PELICAN-7 STEP-SENTINEL.",
+            # PHX-120 (ADR-162): the backend wires PHX-113 capability steps, so
+            # a documents step speaks the v5 document_capability roles.
+            "document_capability": json.dumps(
+                {
+                    "tool_request": {
+                        "operation": "read_text",
+                        "relative_path": "notes.txt",
+                    }
+                }
+            ),
+            "document_capability_answer": (
+                "The notes give the codename PELICAN-7 STEP-SENTINEL."
+            ),
+            "capability_verifier": PASS,
             "specialist": "The codename is PELICAN-7 SPECIALIST-SENTINEL.",
             "final_answer": "PELICAN-7",
             "verifier": PASS,
@@ -1241,6 +1255,90 @@ def test_web_research_request_is_approved_without_a_workspace(
             "web.research",
             "search:duckduckgo",
         )
+
+
+def test_document_create_request_is_p2_and_session_only(
+    backend: Backend, client: TestClient
+) -> None:
+    """PHX-120 (ADR-162): the API grant store admits PHX-113 grants; a P2
+    document.create may be approved for this session only, never "always"."""
+    set_workspace(client, backend.workspace)
+    backend.provider.replies |= {
+        "planner": json.dumps({"steps": [{"objective": "Save a summary."}]}),
+        "assignment": json.dumps(
+            {"assignments": [{"step_id": "s1", "domain": "documents"}]}
+        ),
+        "document_capability": json.dumps(
+            {
+                "tool_request": {
+                    "operation": "create_document",
+                    "relative_path": "summary.md",
+                    "title": "Summary",
+                    "sections": [{"heading": "Codename", "paragraphs": ["PELICAN"]}],
+                }
+            }
+        ),
+        "document_capability_answer": "Saved summary.md.",
+    }
+    accepted = chat(client, QUESTION, path="complex")
+    waiting = wait_for(client, accepted["mission_id"])
+    assert waiting["status"] == "waiting_permission", waiting
+    request_id = waiting["permission_request"]["request_id"]
+    pending = client.get(f"/permissions/{request_id}").json()
+    assert (pending["tool_id"], pending["risk_level"]) == ("document.create", "P2")
+    assert pending["resource"] == str(backend.workspace / "summary.md")
+    assert not (backend.workspace / "summary.md").exists()
+    refused = client.post(
+        f"/permissions/{request_id}/approve", json={"duration": "always"}
+    )
+    assert refused.status_code == 422, refused.text
+    assert client.get("/grants").json()["items"] == []
+    response = client.post(
+        f"/permissions/{request_id}/approve", json={"duration": "session"}
+    )
+    assert response.status_code == 202, response.text
+    rerun = wait_for(client, response.json()["mission_id"])
+    assert rerun["status"] == "completed", rerun
+    assert "PELICAN" in (backend.workspace / "summary.md").read_text("utf-8")
+    (grant,) = client.get("/grants").json()["items"]
+    assert (grant["tool_id"], grant["duration"]) == ("document.create", "session")
+
+
+def test_media_request_is_approved_without_a_workspace(
+    backend: Backend, client: TestClient
+) -> None:
+    """PHX-120 (ADR-162): a YouTube request names no workspace path, so it is
+    approvable without one. The re-run has no stored API key or reaches the
+    autouse network guard, so it fails explicitly as tool_failed."""
+    backend.provider.replies |= {
+        "planner": json.dumps({"steps": [{"objective": "Find a lofi video."}]}),
+        "assignment": json.dumps(
+            {"assignments": [{"step_id": "s1", "domain": "media"}]}
+        ),
+        "media_specialist": json.dumps(
+            {
+                "tool_request": {
+                    "service": "youtube",
+                    "operation": "search",
+                    "query": "lofi",
+                }
+            }
+        ),
+    }
+    accepted = chat(client, QUESTION, path="complex")
+    waiting = wait_for(client, accepted["mission_id"])
+    assert waiting["status"] == "waiting_permission", waiting
+    request_id = waiting["permission_request"]["request_id"]
+    pending = client.get(f"/permissions/{request_id}").json()
+    assert (pending["tool_id"], pending["risk_level"]) == ("youtube.search", "P1")
+    response = client.post(
+        f"/permissions/{request_id}/approve", json={"duration": "session"}
+    )
+    assert response.status_code == 202, response.text
+    rerun = wait_for(client, response.json()["mission_id"])
+    assert (rerun["status"], rerun["failure_code"]) == ("failed", "tool_failed")
+    (grant,) = client.get("/grants").json()["items"]
+    assert grant["tool_id"] == "youtube.search"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="junctions are Windows-only")
