@@ -69,8 +69,34 @@ Errors: 404 `not_found` (unknown ID or route), 409 `invalid_state` or
 `workspace_changed`, 413 `payload_too_large` (a request body over 64 KiB, after
 authentication), 422 `invalid_request` (or a `workspace_*` code), 503
 `service_unavailable` (the backend is starting or stopping). Responses never contain raw model output,
-tool output or file content. `/files/upload` and `/memory/search` are deferred
-to PHX-110 and do not exist (404).
+tool output or file content.
+
+Knowledge (PHX-110, ADR-131 to ADR-133):
+
+- `POST /files/upload?filename=<name>` with the raw file as the body (up to
+  8 MiB; this path's own cap) -> 201 `{document_id, filename, media_type,
+  chunk_count, indexed_at}`. The file is parsed (PHX-072 formats except images),
+  ingested, embedded with EmbeddingGemma and indexed, or nothing is kept.
+  `GET /files` (paginated) lists uploads; `DELETE /files/{document_id}` -> 204
+  removes one with its chunks and vectors.
+- `POST /memory` `{content, memory_type?}` (`user` default, `project` or
+  `semantic`; at most 2,000 characters) -> 201 `{memory_id, memory_type, scope,
+  content, created_at}`. Only the user writes memory; missions never do.
+  `GET /memory` (paginated) lists every memory with its text;
+  `DELETE /memory/{memory_id}` -> 204 removes one with its vector.
+- `GET /memory/search?q=<text>&limit=<1..20>` -> `{items: [{kind, source_id,
+  document_id, title, text, score}]}` over memories and uploads; `text` is the
+  user's own matching text (at most 500 characters).
+- `GET /missions/{id}` adds `sources`: the sources a completed answer cites,
+  each `{marker, kind, source_id, document_id, title, page, section,
+  chunk_index, memory_type, label}`, where `marker` is the "[n]" used in
+  `answer_text`. Sources never carry source text.
+
+Knowledge errors: 413 `payload_too_large`, 415 `unsupported_format` or
+`media_type_mismatch`, 422 `invalid_upload` (unparseable, empty, bad name) or
+`secret_rejected` (credential-shaped content in a note or upload), 409
+`knowledge_full`, 503 `knowledge_unavailable` (no embedding backend, or
+embedding failed).
 
 ## WebSocket
 

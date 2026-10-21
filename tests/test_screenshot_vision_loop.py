@@ -1910,6 +1910,11 @@ def test_no_action_persistence_or_dependency_change() -> None:
             ":(exclude)phoenix/api/routes/setup.py",
             ":(exclude)alembic/versions/0009_default_mission_path.py",
             ":(exclude)apps/desktop/src/adapters/SetupViews.tsx",
+            # PHX-110 (ADR-130 to ADR-134) adds the knowledge service and routes
+            # (the changed server.py, routes and body cap are excluded above and
+            # hash-pinned in test_prompt_injection_defenses.py).
+            ":(exclude)phoenix/api/knowledge.py",
+            ":(exclude)phoenix/api/routes/knowledge.py",
         ],
         cwd=ROOT,
     )

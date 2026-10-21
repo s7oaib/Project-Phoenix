@@ -344,6 +344,16 @@ API_ROUTES = {
     ("GET", "/onboarding"),
     ("GET", "/capabilities"),
 }
+# PHX-110 (ADR-132, ADR-133) adds the knowledge routes (tests/test_knowledge_api.py).
+KNOWLEDGE_ROUTES = {
+    ("POST", "/files/upload"),
+    ("GET", "/files"),
+    ("DELETE", "/files/{document_id}"),
+    ("POST", "/memory"),
+    ("GET", "/memory"),
+    ("GET", "/memory/search"),
+    ("DELETE", "/memory/{memory_id}"),
+}
 
 
 def routes_of(app: FastAPI) -> set[tuple[str, str]]:
@@ -371,21 +381,14 @@ def test_route_table_is_exact_and_deferred_routes_do_not_exist(
         for method in route.methods or ()
     }
     assert declared == API_ROUTES
-    assert routes_of(backend.app()) == API_ROUTES | {
+    assert routes_of(backend.app()) == API_ROUTES | KNOWLEDGE_ROUTES | {
         ("GET", "/health"),
         ("GET", "/ready"),
     }
-    # PHX-110 owns these; they are not even stubs.
-    for method, path in (
-        ("POST", "/files/upload"),
-        ("GET", "/files/upload"),
-        ("GET", "/memory/search"),
-        ("POST", "/memory/search"),
-        ("GET", "/tasks"),
-    ):
-        response = client.request(method, path)
-        assert response.status_code == 404
-        assert error_code(response) == "not_found"
+    # PHX-110 added /files/upload and /memory/search; /tasks is not even a stub.
+    response = client.request("GET", "/tasks")
+    assert response.status_code == 404
+    assert error_code(response) == "not_found"
 
 
 def concrete(path: str, mission_id: str = UNKNOWN) -> str:

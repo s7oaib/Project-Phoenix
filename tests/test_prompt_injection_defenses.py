@@ -1751,14 +1751,10 @@ PHX_104_PATHS = ("alembic/env.py",)
 # api/missions.py (optional path, decisions, re-runs), persistence/missions.py
 # (nullable path, triage_outcome) and the REST routes and schemas; all stay
 # pinned, at the PHX-105 implementation commit. PHX-109 moved runtime.py and
-# mission_events.py, and PHX-108 api/missions.py and schemas.py, to their own
-# pins (below).
+# mission_events.py, PHX-108 api/missions.py and schemas.py, and PHX-110
+# prompts.py and routes/missions.py, to their own pins (below).
 PHX_105_COMMIT = "e34142ca0062dc14c05a5a1d18720b64446cdaa7"
-PHX_105_PATHS = (
-    "phoenix/agents/prompts.py",
-    "phoenix/api/routes/missions.py",
-    "phoenix/persistence/missions.py",
-)
+PHX_105_PATHS = ("phoenix/persistence/missions.py",)
 # PHX-106/107 (ADR-091, ADR-092) intentionally changed the desktop manifest,
 # entry point, Tauri config (capability and CSP) and native host (backend
 # sidecar, proxy and event bridge); they stay pinned, at the PHX-106/107
@@ -1807,6 +1803,21 @@ PHX_108_PATHS = (
     "apps/desktop/src/adapters/ConnectedApp.tsx",
     "apps/desktop/src/adapters/connected.css",
 )
+# PHX-110 (ADR-130 to ADR-134) intentionally changed prompts.py (v5 knowledge
+# texts), runtime.py (knowledge steps, trace citations), server.py (knowledge
+# wiring), body_limit.py (upload cap) and the REST routes package, mission
+# routes and schemas (sources); all stay pinned, at the PHX-110 implementation
+# commit. The PR must merge with a merge commit.
+PHX_110_COMMIT = "da95fb4b9015ca3bf528ebc1df01c55594bf09d4"
+PHX_110_PATHS = (
+    "phoenix/agents/prompts.py",
+    "phoenix/agents/runtime.py",
+    "phoenix/api/server.py",
+    "phoenix/api/body_limit.py",
+    "phoenix/api/routes/__init__.py",
+    "phoenix/api/routes/missions.py",
+    "phoenix/api/routes/schemas.py",
+)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -1830,6 +1841,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_109_PATHS
         and path not in PHX_108_PATHS
         and path not in PHX_118_PATHS
+        and path not in PHX_110_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1843,6 +1855,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_109_COMMIT, path) for path in PHX_109_PATHS]
     baselines += [(PHX_118_COMMIT, path) for path in PHX_118_PATHS]
     baselines += [(PHX_108_COMMIT, path) for path in PHX_108_PATHS]
+    baselines += [(PHX_110_COMMIT, path) for path in PHX_110_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

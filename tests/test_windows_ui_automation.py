@@ -1538,6 +1538,11 @@ def test_source_architecture_and_immutability() -> None:
         ":(exclude)phoenix/api/routes/setup.py",
         ":(exclude)alembic/versions/0009_default_mission_path.py",
         ":(exclude)apps/desktop/src/adapters/SetupViews.tsx",
+        # PHX-110 (ADR-130 to ADR-134) adds the knowledge service and routes (the
+        # changed server.py, routes and body cap are excluded above and
+        # hash-pinned in test_prompt_injection_defenses.py).
+        ":(exclude)phoenix/api/knowledge.py",
+        ":(exclude)phoenix/api/routes/knowledge.py",
     ]
     assert not subprocess.check_output(
         ["git", "diff", "origin/main", "--", *paths], cwd=ROOT

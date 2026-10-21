@@ -217,20 +217,16 @@ def test_construction_is_lazy(settings: AppSettings) -> None:
     # PHX-103 (ADR-087) adds WS /events.
     assert {"/health", "/ready", "/events"} <= paths
     # PHX-104 (ADR-089) includes the REST routers (tests/test_rest_api.py owns
-    # the exact table); docs and the deferred PHX-110 routes stay absent.
+    # the exact table); docs stay absent. PHX-110 (ADR-133) adds the
+    # knowledge routes.
     included = {
         getattr(route, "path", None)
         for router in app.routes
         for route in getattr(getattr(router, "original_router", None), "routes", ())
     }
     assert {"/chat", "/missions", "/agents", "/models", "/settings"} <= included
-    assert not (paths | included) & {
-        "/tasks",
-        "/files/upload",
-        "/memory/search",
-        "/docs",
-        "/openapi.json",
-    }
+    assert {"/files/upload", "/memory", "/memory/search"} <= included
+    assert not (paths | included) & {"/tasks", "/docs", "/openapi.json"}
 
 
 def test_lifespan_builds_services_once_and_closes_them(settings: AppSettings) -> None:
