@@ -304,4 +304,51 @@ uv run python scripts/phoenix_control_smoke.py --mission
 Reports land in `.phoenix-smoke/` and hold statuses, codes, tool IDs, timings
 and hashes/lengths only.
 
-<<EVIDENCE>>
+## Completion evidence
+
+- **Branch / commits** (local only; no push, no PR): `feature/PHX-112-computer-control`
+  on `origin/main` `ac86366`: `e25e91a` implementation; `6fdd2f3` pin
+  (`PHX_112_COMMIT` / `PHX_112_PATHS` pin `runtime.py`, moved from PHX-118's
+  pin, and `api/missions.py` and `persistence/missions.py`, moved from PHX-105's
+  pin, to `e25e91a`; merge with a merge commit); then a review-fix and evidence
+  commit that touches only the new `control_steps.py`, tests and docs (no pinned
+  file changed, so no re-pin).
+- **Unchanged:** `prompts.py`, `responders.py`, `tool_steps.py`, every tool,
+  the API routes and schemas, migrations (head `0008_mission_triage`), the 32
+  event types, dependencies (`pyproject.toml`, `uv.lock`).
+- **Matrix** (`uv run python scripts/test_matrix.py`, clean tree at `6fdd2f3`):
+  all 13 gates PASS; pytest 16,429 passed, 0 failed, 30 skipped (1,111 s); npm
+  195/195. After the review fixes: `tests/test_computer_control_steps.py` and
+  `tests/test_prompt_injection_defenses.py` 661 passed; ruff and strict mypy
+  clean. No test needed a rerun for load.
+- **Independent review** (read-only subagent): no blockers. Fixed:
+  cancel during the normal-path browser close now still queues the teardown;
+  the runner refuses a browser without PHOENIX's teardown rule; one control step
+  at a time (fixed session ID and worker); a P3 action before a deferred P4 page
+  action is rejected (a re-run would repeat it); a post-execution audit failure
+  on a P4 action counts toward the one-P4 budget. Recorded, not fixed: see
+  limitations 1, 6 and 7.
+- **No live runs.** No model, GPU, Ollama, real browser or real window was used.
+  `scripts/phoenix_control_smoke.py --dry-run` and
+  `scripts/install_control_browser.py` (check mode: not installed) were run; the
+  Chromium download and the live smokes wait for the owner.
+
+## Limitations
+
+1. **P4 approvals show raw resources.** The stored request's resource names a
+   window by handle/process/class and fill/set_text text by its sha256; the
+   window was chosen by an exact (spoofable) title. The user cannot see the
+   window title or the text before approving. A display-only summary next to the
+   pending request (resolved title, text preview, URL) needs an API/UI change and
+   should land before control steps are enabled in the backend.
+2. Control steps publish no `tool.*`/`permission.requested` events (PHX-115).
+3. The backend composition root does not enable control steps until the draft
+   prompts are approved (ADR-152).
+4. An in-flight synchronous call cannot be pre-empted; it ends on its tool's
+   own timeout after a cancel (ADR-153).
+5. A step cannot observe a page before choosing its next action; multi-page
+   tasks need several steps, and each re-run repeats earlier P1/P2 actions.
+6. Window titles are resolved from at most 100 listed windows.
+7. `approve` ignores the chosen duration for a P4 request (one-time, never
+   broader); `api/missions.py` keeps one unreachable `return new_id` line
+   (left to avoid another re-pin).

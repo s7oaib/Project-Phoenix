@@ -1210,6 +1210,35 @@ def test_cancel_while_the_browser_opens_still_tears_it_down(rig: Rig) -> None:
     runner.close()
 
 
+def test_review_guards_teardown_rule_order_and_one_step_at_a_time(
+    rig: Rig,
+) -> None:
+    runner = rig.runner()
+    # The browser cannot run without PHOENIX's teardown rule.
+    with pytest.raises(ValueError):
+        ControlStepRunner(
+            registry=rig.registry,
+            policy=PermissionPolicy(),
+            browser=rig.tools["browser"],
+        )
+    # A P3 effect before a deferred P4 page action would repeat on the re-run.
+    both = rig.runner(browser=True, terminal=True)
+    rig.provider.replies["control_specialist"] = actions(
+        {"tool": "terminal", "operation": "run", "profile_id": "check"},
+        navigate(),
+        CLICK,
+    )
+    result = mission(rig, rig.browser_grants(read=False), runtime=rig.runtime(both))
+    assert result.failure_code == MissionFailureCode.TOOL_REJECTED
+    assert rig.playwright.started == 0 and rig.audit_rows() == 0
+    # A second concurrent control step is refused, never interleaved.
+    rig.provider.replies["control_specialist"] = actions(navigate(), READ)
+    runner._busy = True
+    busy = mission(rig, rig.browser_grants(), runtime=rig.runtime(runner))
+    assert busy.failure_code == MissionFailureCode.TOOL_REJECTED
+    assert rig.playwright.started == 0
+
+
 def test_a_tripped_kill_switch_never_starts_a_queued_call(rig: Rig) -> None:
     runner = rig.runner()
     kill = ControlKillSwitch()

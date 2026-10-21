@@ -4735,6 +4735,11 @@ Decision:
 - **At most one P4 action per mission.** A re-run repeats earlier actions, so
   a second P4 would either loop forever or repeat the first effect; it is
   rejected (`tool_rejected`) instead.
+- **Known gap:** the stored request shows a window by handle/process/class and
+  fill/set_text text by hash only; a display-only summary for the approval UI
+  must land before the backend enables control steps.
+- One control step runs at a time, and a P3 action may not precede a deferred
+  P4 page action in one proposal (a re-run would repeat the P3 effect).
 - Stored grants pass to a run through `control_grants` only when the run's
   runtime has control steps; grants, approvals and decisions never come from
   model text (INV-003).

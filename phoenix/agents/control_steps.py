@@ -546,6 +546,12 @@ class ControlStepRunner:
                 raise ValueError("Registry lacks a canonical control definition")
         self._engine = PermissionEngine(snapshot, policy)
         self._policy_ids = frozenset(rule.rule_id for rule in policy.rules)
+        if "browser" in tools and (
+            control_permission_policy().rules[0] not in policy.rules
+        ):
+            # Without the teardown rule a cancelled step could leak its session.
+            raise ValueError("The browser needs PHOENIX's teardown policy rule")
+        self._busy = False
         self._tools = MappingProxyType(tools)
         self._vision = vision
         self._vision_provider = vision_provider_id
@@ -641,23 +647,33 @@ class ControlStepRunner:
                 raise ToolStepRejected("Control tool is not enabled")
         if mission.kill.tripped:
             raise asyncio.CancelledError()
+        if self._busy:
+            # One fixed browser session and one worker: one control step at a time.
+            raise ToolStepRejected("Another control step is running")
+        self._busy = True
         step = _Step(handoff, grants, session_id, mission, record)
         try:
             await self._act(step, tuple(wire.actions), binding)
+            if step.session_open:
+                await self._close(step)
         except asyncio.CancelledError:
             mission.kill.trip()
             if step.session_open or step.browser_started:
                 self._teardown_later()
             raise
-        except BaseException:
+        except Exception:
             if step.session_open:
                 try:
                     await self._close(step)
+                except asyncio.CancelledError:
+                    mission.kill.trip()
+                    self._teardown_later()
+                    raise
                 except Exception:
                     pass  # the original failure is the step's outcome
             raise
-        if step.session_open:
-            await self._close(step)
+        finally:
+            self._busy = False
         text = json.dumps(step.observations, ensure_ascii=False, sort_keys=True)
         if len(text) > binding.max_output_chars:
             raise ToolStepFailed("Control output exceeds the configured limit")
@@ -727,6 +743,17 @@ class ControlStepRunner:
         p4 = [item for item in planned if item.risk == ToolRiskLevel.P4]
         if len(p4) > 1 or (p4 and step.mission.p4_executed):
             raise ToolStepRejected("A mission runs at most one P4 action")
+        if (
+            p4
+            and p4[0].call is None
+            and any(
+                item.risk in (ToolRiskLevel.P3, ToolRiskLevel.P4)
+                for item in planned[: planned.index(p4[0])]
+            )
+        ):
+            # A deferred P4 page action may still need approval; a re-run would
+            # then repeat the earlier P3 effect (ADR-151).
+            raise ToolStepRejected("A P3 action cannot precede a deferred P4 action")
         for item in planned:
             if item.call is not None:
                 self._precheck(step, item)
@@ -987,7 +1014,9 @@ class ControlStepRunner:
             TerminalInputError,
         ):
             raise ToolStepRejected("Invalid control action") from None
-        except (BrowserAuditError, WindowsUIAuditError, TerminalAuditError):
+        except (BrowserAuditError, WindowsUIAuditError, TerminalAuditError) as error:
+            if risk == ToolRiskLevel.P4 and error.effect_may_have_occurred:
+                step.mission.p4_executed = True  # conservative: count the attempt
             raise ToolStepFailed("Required control audit failed") from None
         if risk == ToolRiskLevel.P4 and result.attempted:
             step.mission.p4_executed = True
