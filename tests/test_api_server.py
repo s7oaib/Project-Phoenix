@@ -86,6 +86,9 @@ SECURITY = LocalApiSecurity(TOKEN, host="127.0.0.1", port=PORT)
 SECRET_DETAIL = "internal-detail-http://10.9.8.7:4321/private"
 INSTALLED = ("qwen3.5:4b", "qwen3.5:2b")
 FAST = ServerConfig(probe_timeout_seconds=0.2, startup_timeout_seconds=2)
+# For tests whose unhealthy outcome is scripted (not a timeout): the healthy
+# database probe must not lose a 0.2 s race under a loaded test matrix.
+PATIENT = ServerConfig(probe_timeout_seconds=10, startup_timeout_seconds=10)
 
 
 class FakeProvider(ModelProvider):
@@ -419,7 +422,7 @@ def test_unhealthy_provider_is_degraded_not_a_crash(
 ) -> None:
     fakes = factory(**kwargs)
     app = build_server_app(
-        settings, security=SECURITY, config=FAST, provider_factory=fakes
+        settings, security=SECURITY, config=PATIENT, provider_factory=fakes
     )
     with client_for(app) as client:
         response = client.get("/ready")
