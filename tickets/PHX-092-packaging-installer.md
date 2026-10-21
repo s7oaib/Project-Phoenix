@@ -72,8 +72,9 @@ picked up from `uv.lock` automatically. ADR numbers 125–129.
 
 - `backend.rs` (previously guarded at `origin/main`) and `phoenix/api/server.py`
   (previously pinned at PHX-104) move to `PHX_092_PATHS` in
-  `tests/test_prompt_injection_defenses.py`, pinned at the implementation commit in a
-  separate pin commit (PHX-088/106 precedent). The PR must be merged with a merge
+  `tests/test_prompt_injection_defenses.py`, pinned at the implementation commit
+  `43c9c398c5c0cbc5cae2bcd6ced92df977027fc9` in a separate pin commit (PHX-088/106
+  precedent). The PR must be merged with a merge
   commit so the pinned SHA stays reachable. The two `git diff origin/main` guards
   already exclude both files by name; no exclusion was added or removed.
 - `tests/workspace.test.mjs`: the installer config only bundles (exact object), the
