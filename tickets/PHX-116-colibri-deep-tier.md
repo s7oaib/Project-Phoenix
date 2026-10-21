@@ -188,4 +188,12 @@ Run these in order on AC power, with no other GPU or Ollama work running.
 
 ## Completion evidence
 
-Filled in below as work lands.
+- **Commits:** `bd73faf` (implementation and docs) and `5a9261b` (strict-mypy typing of the gate test fake). `phoenix/` is unchanged, so no re-pin commit is needed.
+- **Matrix:** `uv run --locked python scripts/test_matrix.py --allow-dirty` reports **PASS** on every gate: uv-sync, ruff check and format, mypy, mypy-scripts, pytest, npm-test, typecheck, frontend-build, tauri-info, cargo-check, cargo-test and uv-build.
+  - pytest: 16,410 tests, 0 failures, 0 errors, 30 skipped. It took 3,167 s because other agents' suites were running at the same time.
+  - `--allow-dirty` was needed only because of the foreign untracked `.swarm/` file.
+  - The first matrix run failed only its mypy gate, on 4 typing errors in the gate test fake. `5a9261b` fixed them.
+- **Disk-only gate phases** (no GPU, no model load): `colibri_gate.py --io-bench --verify-manifest` reported manifest OK (42/42) and a sequential read of 823 MB/s; `--io-bench` alone read 662 MB/s.
+- **Acceptance status:**
+  - Done: install, provenance, gate, configuration (3) runner and offline tests.
+  - Waiting for the GPU: the live gate verdict, then configuration (3) or its measured rejection.
