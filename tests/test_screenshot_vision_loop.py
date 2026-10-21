@@ -1845,7 +1845,8 @@ def test_no_action_persistence_or_dependency_change() -> None:
             "phoenix/models/colibri.py",
             "phoenix/models/registry.py",
             "phoenix/tools/windows_ui.py",
-            "phoenix/tools/browser.py",
+            # PHX-124 (ADR-190) changes browser.py; it is hash-pinned
+            # (PHX_124_PATHS in test_prompt_injection_defenses.py).
             # PHX-048 (ADR-094) changes filesystem.py; it is hash-pinned
             # (PHX_048_PATHS in test_prompt_injection_defenses.py).
             "phoenix/tools/terminal.py",
