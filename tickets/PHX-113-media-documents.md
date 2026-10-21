@@ -94,10 +94,15 @@ Overwrite/replace, delete, mkdir, PDF output (not requested), OCR, browser exter
 
 - [x] Document read/create and media steps implemented behind permission; opt-in
 - [x] Targeted tests, impacted subsystem tests, ruff, ruff format and strict mypy pass
-- [x] Full matrix (see Completion evidence)
+- [x] Full matrix PASS (see Completion evidence)
 - [ ] Owner approves the draft prompt text (then `prompts.py` v5 and wiring)
 - [ ] Owner completes Spotify/YouTube setup and runs the live smoke
 
 ## Completion evidence
 
-See the final section, filled after the matrix run.
+- **Commits** (branch `feature/PHX-113-media-documents`): implementation `6c27714839e28ba5e494680bf36e607d70d4407a`; pin `31f38bdc70534138d0f2948dc31872fde5e60330` (`PHX_113_COMMIT`/`PHX_113_PATHS` for `runtime.py` and `mission_events.py`; `PHX_109_PATHS` emptied); this evidence commit (docs only). The PR must merge with a merge commit.
+- **Changed files:** new `phoenix/tools/document_files.py`, `phoenix/agents/capability_steps.py`, `phoenix/agents/capability_prompts.py`, `tests/test_media_document_steps.py`, this ticket; edited `phoenix/agents/runtime.py` (opt-in hook), `phoenix/agents/mission_events.py` (allowlist), `tests/test_prompt_injection_defenses.py` (pin), `tests/matrix.toml`, `DECISIONS.md` (ADR-140–144), `FEATURE_TICKETS.md`, `docs/18`, `docs/19`. `prompts.py`, `tool_steps.py`, `responders.py` and every existing tool module are byte-identical to `origin/main`.
+- **Targeted tests:** `tests/test_media_document_steps.py` 79 passed, 1 skipped (POSIX symlink variant on Windows); with runtime, e2e, events and guard suites, 870 passed. ruff, ruff format and strict mypy clean.
+- **Full matrix:** `uv run python scripts/test_matrix.py --allow-dirty` on `31f38bd` (the only untracked file was a hook artefact, `.swarm/ewc-fisher.json`, not part of the change): all 13 gates PASS; pytest 16,424 passed, 0 failed, 31 skipped; npm 195/195; every docs/24 category PASS.
+- **Live smoke:** command 2 above run on a temporary folder: denied without grant, created and verified with grant, `already_exists` on the repeat. No model, Ollama, GPU, Spotify or YouTube was used.
+- **Invariants:** INV-003 (grants from caller only), INV-004 (tools via ToolRegistry/PermissionEngine), INV-005/006 (no P4/P5 reachable), INV-007 (P1/P2 only, no audit required), INV-008 (LEVI evidence first), INV-017 (guarded tool output), INV-018 (secrets stay in SecretStore), INV-021/022 (explicit codes, events, trace) checked.
