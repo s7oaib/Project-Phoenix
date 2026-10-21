@@ -2,3 +2,6 @@
 * text=auto eol=lf
 *.png binary
 *.ico binary
+# PHX-093: demo fixtures are exact reviewed bytes (pinned in scripts/demo_rehearsal.py).
+*.pdf binary
+*.docx binary
