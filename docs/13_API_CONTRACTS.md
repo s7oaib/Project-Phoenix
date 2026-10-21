@@ -14,10 +14,10 @@ default 50) and `offset` (0-1,000,000) and return
 | Route | Success | Body / query | Notes |
 | --- | --- | --- | --- |
 | `GET /health` | 200 | | PHX-002, unchanged |
-| `GET /ready` | 200 / 503 | | PHX-100, unchanged |
+| `GET /ready` | 200 / 503 | | PHX-100. PHX-119 adds `kaido`: `engaged`, `failsafe_id`, `trigger`, `capabilities`, `clear_observations`, `release_after` (`null` before the backend runs); an engaged KAIDO makes `status` `degraded`. Each call is one KAIDO observation. |
 | `POST /chat` | 202 | `{"text", "conversation_id"?, "path"?}` | Queues a mission and returns `{"mission_id", "conversation_id", "status": "queued", "rerun_of": null}` at once. A missing `conversation_id` starts a conversation. `path` is optional (PHX-105, ADR-090): omitted (or `null`), PHOENIX triages the request when it runs (falling back to `complex` if triage fails); `direct` or `complex` is the client's choice and is used as is. Text: 1-16,000 characters, not blank. |
 | `GET /missions` | 200 | `conversation_id`?, `limit`, `offset` | Mission summaries: IDs, status, `path` (`null` until triage decides), `triage_outcome` (`decided`, `fallback`, `client`, or `null` before a decision), failure code, responder error, `rerun_of`, timestamps. No text. |
-| `GET /missions/{mission_id}` | 200 | | Summary plus `request_text` (the user's message), `answer_text` (only when completed), `rerun_id`, `task_id`, `task_states` and the `permission_request` if any. |
+| `GET /missions/{mission_id}` | 200 | | Summary plus `request_text` (the user's message), `answer_text` (only when completed), `rerun_id`, `task_id`, `task_states` and the `permission_request` if any. PHX-119: `kaido` (`failsafe_id`, `trigger`, `scope`, `outcome`, `verified` (always false), `recovery_id`) when the mission ran in KAIDO degraded mode, else `null`. |
 | `POST /missions/{mission_id}/cancel` | 202 | | `{"outcome": "cancelled"}` (was queued) or `"cancelling"` (running; the final state follows). 409 if already settled. A `waiting_permission` mission is not cancelled here: deny its request (INV-019). |
 | `POST /missions/{mission_id}/run-again` | 202 | | Linked re-run of a `failed/interrupted` mission; 409 otherwise or if it already ran again. The re-run reuses the original's path and `triage_outcome`; one interrupted before triage decided is triaged again. |
 | `GET /permissions` | 200 | `limit`, `offset` | Pending requests: `request_id`, `mission_id`, `status`, `tool_id`, `action`, `resource` (absolute path), `risk_level`, timestamps. |

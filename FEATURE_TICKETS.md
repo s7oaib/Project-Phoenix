@@ -120,3 +120,4 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-115 Observability — TODO
 - PHX-116 Colibri deep tier — TODO
 - PHX-117 Metric datasets — TODO
+- PHX-119 KAIDO fail-safe in missions — DONE (ADR-155–ADR-158; owner reviews R1–R14 and the KAIDO prompt text)

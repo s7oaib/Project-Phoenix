@@ -4596,3 +4596,129 @@ linked spelling. A swap between the root check and a later operation within one
 call stays outside the V1 threat model: the residual window shrinks from a
 whole mission to the inside of one call. No new dependencies and no new event
 types.
+
+## ADR-155 — KAIDO engages process-wide from the shared provider-health signal
+
+Status: Accepted (recommended defaults applied under the coordinator's PHX-119
+brief; the owner reviews R1–R14 in `tickets/PHX-119-kaido-failsafe-missions.md`
+and approves the KAIDO prompt text)
+Date: 2026-10-21
+Ticket: PHX-119
+
+This replaces ADR-093's "KAIDO stays deferred".
+
+Context: a provider that stays down, or a machine short of memory, fails every
+mission explicitly. PHX-028's `KaidoFailSafe` existed as a pure policy with no
+caller. PHX-108 keys tier-model re-registration off the same `/ready` probe.
+
+Decision:
+
+- **One monitor.** `phoenix.agents.kaido.KaidoMonitor`, one per backend, shared
+  by readiness and every runtime (including workspace runtimes). Its input is
+  the provider statuses a caller just probed (`/ready`'s `probe_provider`, and a
+  mission's once-per-mission probe), so KAIDO keys off the same signal as
+  readiness and PHX-108, plus a memory sample (ADR-158).
+- **Engage, release.** Engage on the first observation with no `HEALTHY`
+  provider (`primary_model_provider_unavailable`) or with memory pressure
+  (`resource_pressure`); provider loss takes precedence. Release after
+  `release_after` (default 2) consecutive clear observations. Each engagement
+  is a PHX-028 decision with fixed reason text and the capabilities basic
+  conversation, diagnostics and recovery guidance; never tool routing.
+- **The KAIDO mission.** With a monitor, a mission's health probe runs first.
+  Engaged, the mission is one generation on T0 (new tier row `failsafe` =
+  `qwen3.5:2b`) through the structured think:false provider, at most 1,024
+  output tokens, inside an 8K-token budget (a request whose characters exceed
+  `(8192 − 1024) × 3` with the system prompt is declined; every 16,000-character
+  API request fits). T0 may run on a `DEGRADED` provider. No triage, plan,
+  tools, PermissionEngine call, MAHORAGA retry or LEVI check.
+- **Labelled and unverified.** The answer starts with the fixed
+  `KAIDO_ANSWER_LABEL` line; `MissionTrace.kaido.verified` is literal false.
+  The mission is `completed` (as a DIRECT answer is, ADR-081), and the UI reads
+  `kaido` to show degraded mode.
+- **No KAIDO without a monitor.** `PhoenixRuntime(kaido=None)` behaves exactly
+  as before, so offline runtimes, the FYP runners and older tests are unchanged.
+- **Prompt text.** `KAIDO_SYSTEM` (role marker `PHOENIX ROLE: kaido`) and the
+  label live in `kaido.py` under `KAIDO_PROMPT_VERSION = "kaido-prompts-v1"`,
+  so `PROMPT_SET_VERSION` (v4) is unchanged. Both await the owner's approval.
+- **Frozen files.** `failsafe.py`, `recovery.py`, `responders.py` and
+  `prompts.py` are byte-identical. `runtime.py` and `mission_events.py` move
+  from the PHX-109 pin, and `server.py`, `routes/missions.py` and
+  `routes/schemas.py` from the PHX-104/PHX-105 pins, to the PHX-119
+  implementation commit (`PHX_119_COMMIT` / `PHX_119_PATHS`), as an
+  implementation commit followed by a pin commit.
+
+Limitations: when the only provider is unavailable, T0 is unavailable too, so
+KAIDO records the engagement and the mission still fails `provider_unavailable`
+(it helps when the provider is degraded or memory is short). Ollama's own
+context window is not set per request (the provider contract has no field and
+`ollama.py` is frozen); the 8K budget is enforced on the request side. T0 must
+be registered (startup, or PHX-108's re-registration).
+
+## ADR-156 — KAIDO's observability reuses phoenix.degraded and phoenix.ready
+
+Status: Accepted (as ADR-155)
+Date: 2026-10-21
+Ticket: PHX-119
+
+Decision:
+
+- **Events.** No new event types (still 32). The PHX-103 allowlist gains
+  `phoenix.degraded` (`failsafe_id`, `kaido_scope`, `trigger`; severity
+  warning) and `phoenix.ready` (`failsafe_id`, `kaido_scope`), with closed
+  values only. Process engagement and release are correlated by the failsafe ID
+  (a UUID); a KAIDO mission publishes `phoenix.degraded` correlated by its
+  mission ID, then `agent.started` / `agent.completed` or `agent.failed` with
+  agent `failsafe` and the new closed role `kaido`.
+- **Trace.** `MissionTrace.kaido: KaidoRecord | None` with the failsafe ID,
+  trigger, scope (`process` or `mission`), capabilities, recovery ID, outcome
+  (`answered`, `failed`, `unavailable`, `declined`) and `verified=false`; no
+  text. Validators reject a KAIDO answer whose task `COMPLETED` or does not end
+  `DEGRADED`, and exhaustion evidence missing from `recoveries`. Traces stored
+  before PHX-119 load (`kaido` defaults to null); no migration.
+- **API.** `GET /ready` gains `kaido` (a `KaidoStatus`), and an engaged KAIDO
+  makes `status` `degraded` (HTTP 200). `GET /missions/{id}` gains `kaido`
+  (`KaidoOut`). Mission status stays `completed`/`failed`; no new status.
+
+## ADR-157 — KAIDO answers after MAHORAGA's mission budget is exhausted
+
+Status: Accepted (as ADR-155)
+Date: 2026-10-21
+Ticket: PHX-119
+
+Decision:
+
+- **When.** Only when MAHORAGA itself reported `exhausted` for the mission
+  (a positive budget fully spent); that `RecoveryResult` is the PHX-028
+  `recovery_exhausted` evidence. A zero budget (recovery off), a retry that
+  failed again, a LEVI rejection, and an exhausted LEVI generation never reach
+  KAIDO: nothing replaces a verification that could not run (INV-008).
+- **Task state.** The COMPLEX task first ends `FAILED` with the original codes
+  (as the PHX-109 direct fallback does). If KAIDO answers, the task moves
+  `FAILED → DEGRADED` (an existing edge) and the mission completes with the
+  labelled, unverified answer; if KAIDO cannot answer, the original failure
+  code stands and the task stays `FAILED`.
+- **Bound.** At most one KAIDO reply per mission, never retried, so recovery
+  stays finite (INV-009).
+
+## ADR-158 — Memory pressure evidence for KAIDO
+
+Status: Accepted (as ADR-155)
+Date: 2026-10-21
+Ticket: PHX-119
+
+Context: the docs name resource pressure as a KAIDO trigger without
+thresholds, and no resource monitor existed.
+
+Decision:
+
+- **Sample.** The backend samples available system RAM with psutil (already a
+  dependency; no subprocess) on each KAIDO observation. A caller-supplied probe
+  may also report free VRAM; the backend does not run `nvidia-smi` per probe,
+  and while Ollama holds a model, free VRAM is not a pressure signal.
+- **Thresholds.** Engage below 2,048 MiB free RAM (or 512 MiB free VRAM);
+  count as clear only at or above 3,072 MiB RAM (and 1,024 MiB VRAM).
+  `ServerConfig.kaido_policy` holds them and `kaido_ram_probe=False` turns the
+  sample off. A failing probe is no evidence: it neither engages nor clears.
+
+Limitations: the thresholds are judgement for BLAZE-6 (24 GiB RAM, 6 GiB VRAM),
+not benchmarked; a live low-memory run is in the ticket's smoke steps.
