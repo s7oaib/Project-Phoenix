@@ -24,7 +24,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from alembic import command
-from phoenix.agents import mission_events, research_steps
+from phoenix.agents import mission_events, prompts, research_steps
 from phoenix.agents.capability_steps import CapabilityTools
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
 from phoenix.agents.research_steps import (
@@ -1096,9 +1096,10 @@ def test_research_domain_is_offered_only_with_the_tool() -> None:
         )
 
 
-def test_research_planner_wins_over_the_capability_planner(tmp_path: Path) -> None:
-    # PHX-120 (ADR-160): with both a research tool and PHX-113 capability tools,
-    # AIZEN plans with research_planner; the capability grants are accepted too.
+def test_research_with_capabilities_uses_the_combined_planner(tmp_path: Path) -> None:
+    # PHX-120 (ADR-160) planned with research_planner here; PHX-121 (ADR-166):
+    # with both a research tool and PHX-113 capability tools AIZEN now plans
+    # with the v6 combined planner; the capability grants are accepted too.
     mission = Mission()
     store = ModelCapabilityRegistry()
     for model in MODELS:
@@ -1125,8 +1126,13 @@ def test_research_planner_wins_over_the_capability_planner(tmp_path: Path) -> No
         )
     )
     assert result.kind == MissionKind.COMPLETED, result
-    assert mission.provider.roles()[0] == "research_planner"
-    assert "planner" not in mission.provider.roles()
+    assert mission.provider.roles()[0] == "planner"
+    assert "research_planner" not in mission.provider.roles()
+    system = mission.provider.requests[0].messages[0].text
+    for key in ("read_document", "create_document", "web_research"):
+        assert prompts.COMBINED_PLANNING_LINES[key] in system
+    for key in ("documents", "knowledge_rag", "youtube", "browser"):
+        assert prompts.COMBINED_PLANNING_LINES[key] not in system
 
 
 def test_event_allowlist_mirrors_research_values() -> None:

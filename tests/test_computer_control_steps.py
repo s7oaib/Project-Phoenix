@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from alembic import command
 from phoenix.agents import control_prompts, control_steps, prompts
+from phoenix.agents.capability_steps import CapabilityTools
 from phoenix.agents.control_steps import (
     BROWSER_SESSION_ID,
     CLOSE_POLICY_RULE_ID,
@@ -108,6 +109,10 @@ from phoenix.tools.browser import (
     BrowserOperation,
     BrowserTool,
     BrowserToolResult,
+)
+from phoenix.tools.document_files import (
+    DocumentFileTool,
+    document_file_tool_definitions,
 )
 from phoenix.tools.filesystem import filesystem_tool_definitions
 from phoenix.tools.registry import (
@@ -1105,6 +1110,57 @@ def test_runtime_without_a_runner_never_assigns_control_steps(rig: Rig) -> None:
     assert planner.text == prompts.PLANNING_SYSTEM.format(max_steps=4)
 
 
+def test_control_steps_are_planned_alongside_capabilities(rig: Rig) -> None:
+    # PHX-121 (ADR-166): with control and PHX-113 capability tools both on,
+    # AIZEN plans with the v6 combined planner, which lists the browser (the
+    # only control tool here) next to the document capabilities, so a control
+    # step is planned, assigned and run. Before PHX-121 the capability planner
+    # won and never offered computer control.
+    lines = prompts.COMBINED_PLANNING_LINES
+    offered = rig.provider.replies["planner"]
+
+    def planner(request: GenerationRequest) -> str:
+        # The scripted model plans a browser step only when one is offered.
+        system = request.messages[0].text
+        assert isinstance(offered, str)
+        return offered if lines["browser"] in system else '{"steps": []}'
+
+    rig.provider.replies["planner"] = planner
+    capabilities = CapabilityTools(
+        documents=DocumentFileTool(
+            rig.tmp.resolve(),
+            ToolRegistry(document_file_tool_definitions()),
+            PermissionPolicy(),
+        )
+    )
+    runtime = rig.runtime(rig.runner(browser=True), capabilities=capabilities)
+    result = mission(rig, rig.browser_grants(), runtime=runtime)
+    assert result.kind == MissionKind.COMPLETED, result
+    assert result.text == CODENAME
+    assert [call.tool_id for call in result.trace.control_calls][1:3] == [
+        "browser.navigate",
+        "browser.read_page",
+    ]
+    system = (
+        next(r for r in rig.provider.requests if role_of(r) == "planner")
+        .messages[0]
+        .text
+    )
+    for key in ("browser", "read_document", "create_document"):
+        assert lines[key] in system, key
+    for key in ("documents", "windows", "screen", "terminal", "youtube"):
+        assert lines[key] not in system, key
+    # One family alone keeps the approved control planner.
+    rig.provider.requests.clear()
+    assert mission(rig, rig.browser_grants()).kind == MissionKind.COMPLETED
+    control_only = (
+        next(r for r in rig.provider.requests if role_of(r) == "planner")
+        .messages[0]
+        .text
+    )
+    assert control_only == control_prompts.CONTROL_PLANNING_SYSTEM.format(max_steps=4)
+
+
 def test_forged_tool_evidence_fails_levi_before_its_model(
     rig: Rig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1828,8 +1884,9 @@ def test_approved_control_prompts_are_separate_and_role_marked() -> None:
         max_actions=4
     )
     # The approved prompt set is untouched by PHX-112 (since the 2026-10-21
-    # release train it is PHX-120's v5, hash-pinned in test_phoenix_runtime.py).
-    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v5"
+    # release train it is PHX-120's v5, and since PHX-121 v6 (v5 plus the
+    # combined planner), hash-pinned in test_phoenix_runtime.py).
+    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v6"
     assert "computer_control" not in prompts.DOMAIN_DESCRIPTIONS
     current = {
         name: sha256(value.encode("utf-8")).hexdigest()[:32]
