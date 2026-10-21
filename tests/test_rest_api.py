@@ -35,6 +35,7 @@ from sqlalchemy import create_engine, inspect, text
 from phoenix.api.missions import InvalidRequestError
 from phoenix.api.routes import missions as mission_routes
 from phoenix.api.routes import permissions as permission_routes
+from phoenix.api.routes import setup as setup_routes
 from phoenix.api.routes import system as system_routes
 from phoenix.api.security import LocalApiSecurity
 from phoenix.api.server import (
@@ -339,6 +340,9 @@ API_ROUTES = {
     ("GET", "/models"),
     ("GET", "/settings"),
     ("PATCH", "/settings"),
+    # PHX-108 (ADR-110, ADR-112).
+    ("GET", "/onboarding"),
+    ("GET", "/capabilities"),
 }
 
 
@@ -358,7 +362,7 @@ def routes_of(app: FastAPI) -> set[tuple[str, str]]:
 def test_route_table_is_exact_and_deferred_routes_do_not_exist(
     backend: Backend, client: TestClient
 ) -> None:
-    modules = (mission_routes, permission_routes, system_routes)
+    modules = (mission_routes, permission_routes, system_routes, setup_routes)
     declared = {
         (method, route.path)
         for module in modules
@@ -821,6 +825,7 @@ def test_settings_read_only_values_and_patch_scope(
 ) -> None:
     body = client.get("/settings").json()
     assert body["workspace"] == {"root": None, "status": "unset", "updated_at": None}
+    assert body["default_mission_path"] == "auto"  # PHX-108 (ADR-111)
     assert body["retention_days"] == 30
     assert body["api"] == {"host": "127.0.0.1", "port": PORT}
     assert body["model_tiers"]["assignment"][0] == {

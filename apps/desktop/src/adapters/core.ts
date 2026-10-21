@@ -6,6 +6,9 @@
 // schedule refetches and add live IDs/states/timings for the Task Graph, Agent Network and
 // Observability views. Every port object is a fresh plain data snapshot shaped exactly as
 // App.tsx's readers admit it. Memory, Files and Voice stay unavailable (no backend API yet).
+// PHX-108 (ADR-110 to ADR-114) adds the setup state: GET /onboarding (first-run checks),
+// GET /capabilities (which mission capabilities this build enables) and the saved default
+// mission path (PATCH /settings).
 
 import { agentRoster, diagnosticMetricNames, taskStates } from '../App';
 import type {
@@ -228,6 +231,105 @@ export function toModelEntries(body: unknown): ModelDisplayEntry[] | undefined {
   return entries;
 }
 
+// ---- PHX-108 setup state (ADR-110 to ADR-113)
+
+export type RuntimeState = 'running' | 'degraded' | 'not_running' | 'not_detected';
+export type RuntimeCheckView = { providerId: string; displayName: string; state: RuntimeState };
+export type ModelCheckView = { providerId: string; modelId: string; required: boolean; registered: boolean; installCommand: string | null };
+export type OnboardingView = {
+  complete: boolean; runtimes: RuntimeCheckView[]; models: ModelCheckView[];
+  storage: { dataDir: string; freeBytes: number | null; databaseReady: boolean };
+  workspace: { root: string | null; status: string };
+};
+export type CapabilityView = { capabilityId: string; enabled: boolean; ticket: string; agentId: string };
+export type SettingsView = {
+  defaultMissionPath: MissionPath;
+  modelTiers: Array<{ role: string; models: string[] }>;
+  defaultTier: string[];
+  retentionDays: number | null;
+};
+const runtimeStates: readonly string[] = ['running', 'degraded', 'not_running', 'not_detected'];
+function flag(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+function count(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+function missionPath(value: unknown): MissionPath | undefined {
+  return value === 'auto' || value === 'direct' || value === 'complex' ? value : undefined;
+}
+function refs(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 16).map((ref) => (isObject(ref) ? str(ref.model_id, 128) : undefined)).filter((model): model is string => model !== undefined);
+}
+
+/** GET /onboarding; undefined if the shape is not the documented one (nothing is guessed). */
+export function readOnboarding(body: unknown): OnboardingView | undefined {
+  if (!isObject(body) || !Array.isArray(body.runtimes) || !Array.isArray(body.models) || !isObject(body.storage) || !isObject(body.workspace)) return undefined;
+  const complete = flag(body.complete);
+  const runtimes: RuntimeCheckView[] = [];
+  for (const entry of body.runtimes.slice(0, 8)) {
+    if (!isObject(entry)) return undefined;
+    const providerId = str(entry.provider_id, 64);
+    const displayName = str(entry.display_name, 64);
+    const state = typeof entry.state === 'string' && runtimeStates.includes(entry.state) ? entry.state as RuntimeState : undefined;
+    if (!providerId || !displayName || !state) return undefined;
+    runtimes.push({ providerId, displayName, state });
+  }
+  const models: ModelCheckView[] = [];
+  for (const entry of body.models.slice(0, 32)) {
+    if (!isObject(entry)) return undefined;
+    const providerId = str(entry.provider_id, 64);
+    const modelId = str(entry.model_id, 128);
+    const required = flag(entry.required);
+    const registered = flag(entry.registered);
+    const installCommand = entry.install_command === null ? null : str(entry.install_command, 256);
+    if (!providerId || !modelId || required === undefined || registered === undefined || installCommand === undefined) return undefined;
+    models.push({ providerId, modelId, required, registered, installCommand });
+  }
+  const dataDir = str(body.storage.data_dir);
+  const databaseReady = flag(body.storage.database_ready);
+  const status = str(body.workspace.status, 32);
+  if (complete === undefined || !dataDir || databaseReady === undefined || !status) return undefined;
+  return {
+    complete, runtimes, models,
+    storage: { dataDir, freeBytes: count(body.storage.free_bytes), databaseReady },
+    workspace: { root: str(body.workspace.root) ?? null, status },
+  };
+}
+
+/** GET /capabilities; unknown or malformed entries are dropped (a missing flag reads "unavailable"). */
+export function readCapabilities(body: unknown): CapabilityView[] | undefined {
+  if (!isObject(body) || !Array.isArray(body.capabilities)) return undefined;
+  const found: CapabilityView[] = [];
+  for (const entry of body.capabilities.slice(0, 32)) {
+    if (!isObject(entry)) continue;
+    const capabilityId = str(entry.capability_id, 64);
+    const enabled = flag(entry.enabled);
+    const ticket = str(entry.ticket, 16);
+    const agentId = str(entry.agent_id, 64);
+    if (capabilityId && enabled !== undefined && ticket && agentId) found.push({ capabilityId, enabled, ticket, agentId });
+  }
+  return found;
+}
+
+export function readSettings(body: unknown): SettingsView | undefined {
+  if (!isObject(body)) return undefined;
+  const defaultMissionPath = missionPath(body.default_mission_path);
+  if (!defaultMissionPath) return undefined;
+  const tiers = isObject(body.model_tiers) ? Object.entries(body.model_tiers).slice(0, 16) : [];
+  return {
+    defaultMissionPath,
+    modelTiers: tiers.map(([role, value]) => ({ role: role.slice(0, 64), models: refs(value) })),
+    defaultTier: refs(body.default_tier),
+    retentionDays: count(body.retention_days),
+  };
+}
+
+export const missionPathText: Readonly<Record<MissionPath, string>> = {
+  auto: 'Automatic (PHOENIX decides)', direct: 'Direct answer', complex: 'Planned steps (AIZEN plan, workspace documents)',
+};
+
 // ---- live evidence from content-free events
 
 export type EventEnvelope = {
@@ -344,7 +446,7 @@ export type BackendDiagnostics = { readonly metrics: MetricDisplayEntry[]; reado
 const THROUGHPUT = diagnosticMetricNames[3];
 const severities: ReadonlySet<string> = new Set(['debug', 'info', 'warning', 'error', 'critical']);
 const MIB = 1024 * 1024;
-function count(value: unknown): number | undefined {
+function amount(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 function finite(value: unknown): number | undefined {
@@ -356,7 +458,7 @@ function plainId(value: unknown): string | undefined {
 }
 function counts(value: unknown): string {
   if (!isObject(value)) return '';
-  return Object.entries(value).filter(([key, item]) => plainId(key) && count(item) !== undefined)
+  return Object.entries(value).filter(([key, item]) => plainId(key) && amount(item) !== undefined)
     .slice(0, 8).map(([key, item]) => `${key} ${item as number}`).join(' · ');
 }
 export function toBackendDiagnostics(body: unknown): BackendDiagnostics | undefined {
@@ -374,24 +476,24 @@ export function toBackendDiagnostics(body: unknown): BackendDiagnostics | undefi
     const stage = plainId(entry.stage);
     if (!stage) continue;
     const name = stage === 'mission.first_answer' ? 'ttft' : 'task_step_latency';
-    add(`latency:${stage}:p50`, name, count(entry.p50_ms), `ms p50 ${stage}`.slice(0, 32));
-    add(`latency:${stage}:p95`, name, count(entry.p95_ms), `ms p95 ${stage}`.slice(0, 32));
+    add(`latency:${stage}:p50`, name, amount(entry.p50_ms), `ms p50 ${stage}`.slice(0, 32));
+    add(`latency:${stage}:p95`, name, amount(entry.p95_ms), `ms p95 ${stage}`.slice(0, 32));
   }
   const generation = isObject(body.generation) ? body.generation : {};
   add('throughput', THROUGHPUT, finite(generation.output_tokens_per_second_mean), 'tok/s mean');
-  const generations = count(generation.generations);
+  const generations = amount(generation.generations);
   add('generations', 'provider_model', generations === undefined ? undefined
-    : `${generations} generations · ${count(generation.input_tokens) ?? 0} in / ${count(generation.output_tokens) ?? 0} out tok`);
+    : `${generations} generations · ${amount(generation.input_tokens) ?? 0} in / ${amount(generation.output_tokens) ?? 0} out tok`);
   for (const model of (Array.isArray(generation.models) ? generation.models : []).slice(0, 4)) {
     if (!isObject(model) || !plainId(model.provider_id) || !plainId(model.model_id)) continue;
     add(`model:${model.provider_id}/${model.model_id}`, 'provider_model',
-      `${model.provider_id}/${model.model_id}: ${count(model.generations) ?? 0} gen · ${count(model.input_tokens) ?? 0} in / ${count(model.output_tokens) ?? 0} out`);
+      `${model.provider_id}/${model.model_id}: ${amount(model.generations) ?? 0} gen · ${amount(model.input_tokens) ?? 0} in / ${amount(model.output_tokens) ?? 0} out`);
   }
   for (const health of (Array.isArray(generation.provider_health) ? generation.provider_health : []).slice(0, 4)) {
     if (isObject(health) && plainId(health.provider_id) && plainId(health.status)) add(`health:${health.provider_id}`, 'provider_model', `${health.provider_id} ${health.status}`);
   }
   const resources = isObject(body.resources) ? body.resources : {};
-  const mib = (value: unknown) => { const bytes = count(value); return bytes === undefined ? undefined : Math.round(bytes / MIB); };
+  const mib = (value: unknown) => { const bytes = amount(value); return bytes === undefined ? undefined : Math.round(bytes / MIB); };
   add('ram:process', 'ram', mib(resources.process_rss_bytes), 'MiB process');
   add('ram:available', 'ram', mib(resources.system_ram_available_bytes), 'MiB available');
   add('ram:total', 'ram', mib(resources.system_ram_total_bytes), 'MiB total');
@@ -407,19 +509,19 @@ export function toBackendDiagnostics(body: unknown): BackendDiagnostics | undefi
   const tools = isObject(body.tools) ? body.tools : {};
   const rate = finite(tools.success_rate);
   add('tools:rate', 'tool_success_failure', rate === undefined ? undefined : Math.round(rate * 1000) / 10, '% success');
-  const calls = count(tools.calls);
+  const calls = amount(tools.calls);
   add('tools:calls', 'tool_success_failure', calls === undefined ? undefined : `${calls} calls${counts(tools.by_status) ? ` · ${counts(tools.by_status)}` : ''}`);
   const permissions = isObject(body.permissions) ? body.permissions : {};
-  if (count(permissions.requested) !== undefined) {
-    add('permissions', 'permission_decisions', `requested ${count(permissions.requested)} · approved ${count(permissions.approved) ?? 0} · denied ${count(permissions.denied) ?? 0} · policy denied ${count(permissions.policy_denied) ?? 0}`);
+  if (amount(permissions.requested) !== undefined) {
+    add('permissions', 'permission_decisions', `requested ${amount(permissions.requested)} · approved ${amount(permissions.approved) ?? 0} · denied ${amount(permissions.denied) ?? 0} · policy denied ${amount(permissions.policy_denied) ?? 0}`);
   }
   const verification = isObject(body.verification) ? body.verification : {};
-  if (count(verification.passed) !== undefined) {
-    add('verification', 'verification_result', `LEVI passed ${count(verification.passed)} · failed ${count(verification.failed) ?? 0}${counts(verification.by_verdict) ? ` · ${counts(verification.by_verdict)}` : ''}`);
+  if (amount(verification.passed) !== undefined) {
+    add('verification', 'verification_result', `LEVI passed ${amount(verification.passed)} · failed ${amount(verification.failed) ?? 0}${counts(verification.by_verdict) ? ` · ${counts(verification.by_verdict)}` : ''}`);
   }
   const recoveries = isObject(body.recoveries) ? body.recoveries : {};
-  if (count(recoveries.started) !== undefined) {
-    add('recoveries', 'recovery_attempts', `started ${count(recoveries.started)} · completed ${count(recoveries.completed) ?? 0} · exhausted ${count(recoveries.exhausted) ?? 0}${counts(recoveries.by_outcome) ? ` · ${counts(recoveries.by_outcome)}` : ''}`);
+  if (amount(recoveries.started) !== undefined) {
+    add('recoveries', 'recovery_attempts', `started ${amount(recoveries.started)} · completed ${amount(recoveries.completed) ?? 0} · exhausted ${amount(recoveries.exhausted) ?? 0}${counts(recoveries.by_outcome) ? ` · ${counts(recoveries.by_outcome)}` : ''}`);
   }
   const logs: LogDisplayEntry[] = [];
   for (const entry of (Array.isArray(body.logs) ? body.logs : []).slice(-RING)) {
@@ -445,6 +547,13 @@ export type ConnectionView = {
   path: MissionPath;
   mission: MissionView | undefined;
   missionMessage: string;
+  // PHX-108
+  onboarding: OnboardingView | undefined;
+  onboardingDismissed: boolean;
+  checking: boolean;
+  capabilities: CapabilityView[] | undefined;
+  settings: SettingsView | undefined;
+  settingsMessage: string;
 };
 export type PortsView = {
   chatPort: ChatPort; taskPort: TaskGraphPort; agentPort: AgentPort; permissionPort: PermissionPort;
@@ -452,6 +561,8 @@ export type PortsView = {
 };
 
 type Activity = { state: AgentStatus['state']; missionId: string; currentTask?: string };
+type Refresh = 'conversation' | 'mission' | 'permissions' | 'models' | 'settings' | 'onboarding' | 'capabilities' | 'metrics';
+const EVERYTHING: readonly Refresh[] = ['conversation', 'mission', 'permissions', 'models', 'settings', 'onboarding', 'capabilities', 'metrics'];
 
 export class PhoenixStore {
   private backend: BackendState = { state: 'starting' };
@@ -476,7 +587,13 @@ export class PhoenixStore {
   private workspaceMessage = '';
   private missionMessage = '';
   private path: MissionPath = 'auto';
-  private due = new Set<'conversation' | 'mission' | 'permissions' | 'models' | 'settings' | 'metrics'>();
+  private onboarding: OnboardingView | undefined;
+  private onboardingDismissed = false;
+  private checking = false;
+  private capabilities: CapabilityView[] | undefined;
+  private settings: SettingsView | undefined;
+  private settingsMessage = '';
+  private due = new Set<Refresh>();
   private timer: unknown;
   private poller: unknown;
   private listeners = new Set<() => void>();
@@ -513,6 +630,9 @@ export class PhoenixStore {
       if (this.backend.state === 'ready' && this.mission && !TERMINAL_STATUSES.includes(this.mission.status)) this.schedule('mission', 'permissions', 'conversation');
       this.ticks += 1;
       if (this.backend.state === 'ready' && this.ticks % METRICS_POLL_TICKS === 0) this.schedule('metrics');
+      // PHX-108: while the first-run screen shows, keep re-checking so it updates as the user
+      // starts the runtime or pulls a model.
+      if (this.firstRunVisible()) this.schedule('onboarding');
     }, POLL_MS);
     this.onBackend(await this.transport.backendStatus().catch(() => ({ state: 'degraded', code: 'ipc_unavailable' })));
   }
@@ -532,7 +652,7 @@ export class PhoenixStore {
     const code = str(value.code, 64);
     const wasReady = this.backend.state === 'ready';
     this.backend = { state, ...(code ? { code } : {}) };
-    if (state === 'ready' && !wasReady) this.schedule('conversation', 'mission', 'permissions', 'models', 'settings', 'metrics');
+    if (state === 'ready' && !wasReady) this.schedule(...EVERYTHING);
     if (state !== 'ready') this.stream = { connected: false, code: null };
     this.changed();
   }
@@ -542,7 +662,7 @@ export class PhoenixStore {
     const code = typeof value.code === 'number' ? value.code : null;
     this.stream = { connected: value.connected, code };
     // Any (re)connection or close may have missed events: reload everything over REST.
-    this.schedule('conversation', 'mission', 'permissions', 'models', 'settings', 'metrics');
+    this.schedule(...EVERYTHING);
     this.changed();
   }
 
@@ -663,7 +783,7 @@ export class PhoenixStore {
   }
 
   // -- REST refresh, coalesced
-  schedule(...what: Array<'conversation' | 'mission' | 'permissions' | 'models' | 'settings' | 'metrics'>): void {
+  schedule(...what: Refresh[]): void {
     for (const item of what) this.due.add(item);
     if (this.timer !== undefined || this.stopped) return;
     this.timer = this.scheduler.setTimeout(() => {
@@ -678,6 +798,8 @@ export class PhoenixStore {
     this.due.clear();
     await Promise.all([
       due.has('settings') ? this.loadSettings() : undefined,
+      due.has('onboarding') ? this.loadOnboarding() : undefined,
+      due.has('capabilities') ? this.loadCapabilities() : undefined,
       due.has('models') ? this.loadModels() : undefined,
       due.has('permissions') ? this.loadPermissions() : undefined,
       due.has('mission') ? this.loadMission() : undefined,
@@ -698,6 +820,58 @@ export class PhoenixStore {
     const workspace = isObject(body) && isObject(body.workspace) ? body.workspace : undefined;
     const status = workspace ? str(workspace.status, 32) : undefined;
     if (workspace && status) this.workspace = { root: str(workspace.root) ?? null, status };
+    const settings = readSettings(body);
+    // The saved default becomes this launch's mission path once, when it is first read.
+    if (settings && !this.settings) this.path = settings.defaultMissionPath;
+    if (settings) this.settings = settings;
+  }
+
+  private async loadOnboarding(): Promise<void> {
+    const onboarding = readOnboarding(await this.get('/onboarding'));
+    if (onboarding) {
+      this.onboarding = onboarding;
+      this.workspace = onboarding.workspace;
+    }
+  }
+
+  private async loadCapabilities(): Promise<void> {
+    this.capabilities = readCapabilities(await this.get('/capabilities'));
+  }
+
+  firstRunVisible(): boolean {
+    return this.backend.state === 'ready' && this.onboarding !== undefined && !this.onboarding.complete && !this.onboardingDismissed;
+  }
+
+  /** The user's "Re-check": the backend registers any model whose runtime started since. */
+  async recheck(): Promise<void> {
+    if (this.checking || this.backend.state !== 'ready') return;
+    this.checking = true;
+    this.changed();
+    try {
+      await Promise.all([this.loadOnboarding(), this.loadModels(), this.loadSettings()].map((task) => task.catch(() => undefined)));
+    } finally {
+      this.checking = false;
+      this.changed();
+    }
+  }
+
+  dismissOnboarding(): void {
+    this.onboardingDismissed = true;
+    this.changed();
+  }
+
+  async setDefaultPath(path: MissionPath): Promise<void> {
+    if (!missionPath(path)) return;
+    const result = await this.transport.request('PATCH', '/settings', { default_mission_path: path }).catch(() => ({ status: 0, body: undefined }));
+    if (result.status === 200) {
+      const settings = readSettings(result.body);
+      if (settings) this.settings = settings;
+      this.path = path;
+      this.settingsMessage = `Saved. New missions use: ${missionPathText[path]}.`;
+    } else {
+      this.settingsMessage = `The default was not saved (${errorCode(result.body)}).`;
+    }
+    this.changed();
   }
 
   private async loadModels(): Promise<void> {
@@ -800,7 +974,7 @@ export class PhoenixStore {
     const result = await this.transport.request('PATCH', '/settings', { workspace_root: value }).catch(() => ({ status: 0, body: undefined }));
     if (result.status === 200) {
       this.workspaceMessage = 'Workspace saved. Missions that start from now on may read documents in it, with your permission.';
-      this.schedule('settings');
+      this.schedule('settings', 'onboarding');
     } else {
       this.workspaceMessage = workspaceErrors[errorCode(result.body)] ?? 'The workspace was not saved. Check the backend connection and try again.';
     }
@@ -853,6 +1027,8 @@ export class PhoenixStore {
         backend: this.backend, stream: this.stream, workspace: this.workspace, workspaceMessage: this.workspaceMessage,
         hiddenPermissions: this.hiddenPermissions,
         path: this.path, mission: this.mission, missionMessage: this.missionMessage,
+        onboarding: this.onboarding, onboardingDismissed: this.onboardingDismissed, checking: this.checking,
+        capabilities: this.capabilities, settings: this.settings, settingsMessage: this.settingsMessage,
       },
     };
   }

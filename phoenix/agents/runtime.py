@@ -29,6 +29,12 @@ falls back to the DIRECT path. LEVI's rejection is never retried (INV-008).
 MissionTrace records every recovery decision and recovery.* events publish them,
 with closed values only (INV-022); exhaustion keeps the original failure code.
 
+PHX-118 (ADR-100): LEVI passes a final answer deterministically, without the
+final_verifier model, only when it repeats the verified output of a last
+document step verbatim and that value is a bounded, clean span of the file read
+(see final_grounding); every other final answer is verified as before. The
+trace marks such a verification ``grounded``.
+
 Task state is task-level: intermediate step verification runs while RUNNING, and
 VERIFYING is the final-answer verification phase. Callers refresh capability
 records; provider health is probed once per mission. No resource monitor exists
@@ -55,6 +61,11 @@ from pydantic import (
 )
 
 from phoenix.agents import prompts
+from phoenix.agents.final_grounding import (
+    GROUNDED_CHECK_ID,
+    FinalGrounding,
+    GroundedFinalVerificationResponder,
+)
 from phoenix.agents.handoff import HandoffBuilder, HandoffEnvelope
 from phoenix.agents.mission_events import (
     EventPublisher,
@@ -307,10 +318,21 @@ class MissionFailureCode(StrEnum):
 
 
 class StepVerification(_Value):
+    """PHX-118: ``grounded`` marks a final answer LEVI passed by its
+    deterministic grounding check, without a model call (False before PHX-118).
+    """
+
     step_id: Identifier
     agent_id: Identifier
     verification_id: Identifier
     verdict: VerificationVerdict
+    grounded: bool = Field(default=False, strict=True)
+
+    @model_validator(mode="after")
+    def grounded_passes(self) -> Self:
+        if self.grounded and self.verdict != VerificationVerdict.PASSED:
+            raise ValueError("A grounded verification always passes")
+        return self
 
 
 class MissionTrace(_Value):
@@ -1143,6 +1165,8 @@ class PhoenixRuntime:
         await _transition(events, machine, TaskState.RUNNING)
 
         outputs: dict[str, str] = {}
+        # PHX-118: the verified tool evidence of each passed document step.
+        verified_tools: dict[str, ToolEvidence] = {}
         for step_id in graph.topological_step_ids:
             step = graph.step(step_id)
             assert step is not None
@@ -1221,7 +1245,18 @@ class PhoenixRuntime:
             ) as check:
                 verifier = self._control("verifier", health, evidence, avoid=producer)
                 levi = _levi_responder(
-                    self._guard, request.text, prior, final, tool_evidence, grants
+                    self._guard,
+                    request.text,
+                    prior,
+                    final,
+                    tool_evidence,
+                    grants,
+                    FinalGrounding(
+                        step_output=outputs[plan_ids[-1]],
+                        evidence=verified_tools.get(plan_ids[-1]),
+                    )
+                    if final
+                    else None,
                 )
                 async with asyncio.timeout(limits.verification_timeout_seconds):
                     # PHX-109: only LEVI's failed generation is retried, never
@@ -1251,11 +1286,17 @@ class PhoenixRuntime:
                     agent_id=decision.agent_id,
                     verification_id=verification.verification_id,
                     verdict=verification.verdict,
+                    grounded=any(
+                        check.check_id == GROUNDED_CHECK_ID
+                        for check in verification.checks
+                    ),
                 )
             )
             if not satisfied:
                 raise _VerificationFailed
             outputs[step_id] = candidate
+            if tool_evidence is not None:
+                verified_tools[step_id] = tool_evidence
             await events.emit(
                 EventType.STEP_COMPLETED,
                 agent_id=decision.agent_id,
@@ -1290,14 +1331,20 @@ def _levi_responder(
     final: bool,
     tool_evidence: ToolEvidence | None,
     grants: tuple[PermissionGrant, ...],
+    grounding: FinalGrounding | None = None,
 ) -> Callable[[ModelBinding], VerificationResponder]:
     """LEVI's responder for a step on a given binding."""
 
     def responder(verifier: ModelBinding) -> VerificationResponder:
         if final:
             # PHX-047: LEVI's model sees the verified step outputs it judges.
-            return FinalVerificationResponder(
-                verifier, guard, original_request=user_request, evidence=prior
+            # PHX-118: a grounded final answer passes deterministically first.
+            return GroundedFinalVerificationResponder(
+                FinalVerificationResponder(
+                    verifier, guard, original_request=user_request, evidence=prior
+                ),
+                guard,
+                grounding,
             )
         if tool_evidence is None:
             # PHX-047: grounded in the earlier outputs this step saw, if any.

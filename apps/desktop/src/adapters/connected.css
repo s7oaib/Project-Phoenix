@@ -32,3 +32,37 @@
 .connection-row button:hover { background: var(--surface-hover); }
 .connection-row button:disabled { cursor: not-allowed; opacity: 0.6; }
 @media (prefers-reduced-motion: reduce) { .connection-bar * { transition: none; } }
+
+/* PHX-108 setup views: first-run screen, onboarding steps, settings and capability views. */
+.connection-label { font-weight: 650; }
+.first-run { padding: 16px; overflow-y: auto; }
+.setup-panel { display: grid; gap: 10px; max-width: 920px; min-width: 0; }
+.setup-panel h3 { margin: 0; }
+.setup-panel h4 { margin: 0 0 4px; }
+.setup-panel p, .setup-panel li { overflow-wrap: anywhere; }
+.setup-steps { display: grid; gap: 12px; margin: 0; padding-left: 0; list-style: none; }
+.setup-step { padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.setup-step-number { color: var(--accent); }
+.setup-done { color: var(--muted); font-weight: 400; }
+.setup-todo { color: var(--accent); font-weight: 400; }
+.setup-list { margin: 4px 0; padding-left: 20px; }
+.setup-list code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.setup-form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.setup-form p { flex: 1 1 100%; margin: 0; }
+.setup-form input { flex: 1 1 220px; min-width: 0; }
+.setup-form input, .setup-form select, .setup-form button, .setup-actions button {
+  min-height: 32px;
+  padding: 4px 10px;
+  color: var(--text);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.setup-form button, .setup-actions button { cursor: pointer; }
+.setup-form button:hover, .setup-actions button:hover { background: var(--surface-hover); }
+.setup-form button:disabled, .setup-actions button:disabled { cursor: not-allowed; opacity: 0.6; }
+.setup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.setup-feedback { color: var(--muted); }
+.settings-sections { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.settings-sections > section { padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+@media (max-width: 1000px) { .settings-sections { grid-template-columns: minmax(0, 1fr); } }

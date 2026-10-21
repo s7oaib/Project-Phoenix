@@ -496,7 +496,7 @@ def test_static_import_and_runtime_separation_schema_events_unchanged() -> None:
     assert ScriptDirectory.from_config(
         Config(str(root / "alembic.ini"))
     ).get_heads() == [
-        "0008_mission_triage",
+        "0009_default_mission_path",
     ]
     allowed = {
         "collections.abc",

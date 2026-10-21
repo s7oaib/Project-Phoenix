@@ -1824,7 +1824,7 @@ def test_no_action_persistence_or_dependency_change() -> None:
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0008_mission_triage"]
+    ).get_heads() == ["0009_default_mission_path"]
     # PHX-072 separately owns the exact parser manifest/lock promotion.
     # PHX-080 owns only App.tsx/styles.css; every other apps path stays protected.
     assert not subprocess.check_output(
@@ -1901,6 +1901,15 @@ def test_no_action_persistence_or_dependency_change() -> None:
             ":(exclude)apps/desktop/src-tauri/src/backend.rs",
             ":(exclude)apps/desktop/src-tauri/src/proxy.rs",
             ":(exclude)apps/desktop/src-tauri/src/events.rs",
+            # PHX-108 (ADR-110 to ADR-114) adds the setup routes, capability flags,
+            # onboarding checks, the default-mission-path migration and the setup
+            # views (the changed files above are hash-pinned in
+            # test_prompt_injection_defenses.py).
+            ":(exclude)phoenix/api/capabilities.py",
+            ":(exclude)phoenix/api/onboarding.py",
+            ":(exclude)phoenix/api/routes/setup.py",
+            ":(exclude)alembic/versions/0009_default_mission_path.py",
+            ":(exclude)apps/desktop/src/adapters/SetupViews.tsx",
             # PHX-115 (ADR-145, ADR-146) adds the observability modules and route
             # (server.py, launcher.py, routes/__init__.py, proxy.rs and core.ts are
             # hash-pinned in test_prompt_injection_defenses.py).

@@ -704,7 +704,7 @@ def test_stored_corruption_fails_closed(
 
 def test_schema_unchanged(database: Engine) -> None:
     scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
-    assert scripts.get_heads() == ["0008_mission_triage"]
+    assert scripts.get_heads() == ["0009_default_mission_path"]
     assert inspect(database).get_table_names() == [
         "alembic_version",
         # PHX-104 (ADR-089) adds app_settings in 0007_app_settings.
@@ -725,7 +725,7 @@ def test_schema_unchanged(database: Engine) -> None:
     with database.connect() as connection:
         assert (
             MigrationContext.configure(connection).get_current_revision()
-            == "0008_mission_triage"
+            == "0009_default_mission_path"
         )
     for path in (
         "alembic/versions/0001_baseline.py",

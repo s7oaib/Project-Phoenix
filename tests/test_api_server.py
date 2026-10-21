@@ -68,7 +68,7 @@ from phoenix.models.provider import (
 from phoenix.persistence.database import create_engine_for_settings
 from phoenix.tools.filesystem import filesystem_tool_definitions
 
-HEAD = "0008_mission_triage"
+HEAD = "0009_default_mission_path"
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = secrets.token_urlsafe(32)
 PORT = 48765  # Host-header identity for in-process clients; nothing binds it
