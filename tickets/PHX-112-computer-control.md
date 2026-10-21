@@ -308,6 +308,24 @@ and hashes/lengths only.
 
 ## Completion evidence
 
+- **Follow-up (2026-10-21, after review and the owner's prompt approval):**
+  merged `origin/main` `07da218` (PHX-118 + PHX-108; conflicts in
+  `DECISIONS.md` and the pin table resolved keeping both sides) as `ab7f403`;
+  `b71e716` approval summaries, approved prompts (`phoenix-control-prompts-v1`),
+  backend enablement (browser + Windows UI), `computer_control` flag enabled,
+  approve route without the workspace check for control requests, duplicate
+  `return new_id` removed; `43bc57a` pin (`PHX_112_COMMIT` = `b71e716`; adds
+  `capabilities.py`, `routes/missions.py`, `routes/permissions.py`, and moves
+  `server.py`/`schemas.py` from PHX-108's pin and `routes/missions.py` from
+  PHX-105's); `8240791` test fixture fix (a token-shaped literal tripped the
+  repository credential scan; now built at run time). Matrix
+  (`uv run python scripts/test_matrix.py`, clean tree at `8240791`): all 13
+  gates PASS; pytest 16,490 collected, 0 failed, 30 skipped; no reruns. New
+  tests: spoofed title shows the real process/executable, secret-looking text
+  masked with a note (ordinary text shown in full), a forged summary never
+  changes what an approval authorizes, summaries cover every control tool and
+  are bounded, and a REST control approval with its summary and no workspace.
+
 - **Branch / commits** (local only; no push, no PR): `feature/PHX-112-computer-control`
   on `origin/main` `ac86366`: `e25e91a` implementation; `6fdd2f3` pin
   (`PHX_112_COMMIT` / `PHX_112_PATHS` pin `runtime.py`, moved from PHX-118's
