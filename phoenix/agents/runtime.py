@@ -5,7 +5,7 @@ composes PhoenixOrchestrator, AIZEN, the router, task graph, handoffs and LEVI
 without changing them. Steps are text-only unless the caller supplies a
 FilesystemTool: then PHX-046 document steps may make one read-only P1 call through
 ToolRegistry and PermissionEngine, with caller grants only (see tool_steps). No
-persistence or fail-safe (KAIDO) behavior exists here. Every failure is
+persistence exists here (KAIDO: PHX-119, below). Every failure is
 explicit (INV-021); COMPLETED requires every required LEVI verification to pass
 (INV-008). WAITING_PERMISSION is a non-terminal outcome: the task stays there,
 and a rerun with a grant is a new mission.
@@ -28,6 +28,16 @@ retried once, only with MAHORAGA's approval within its finite mission budget
 falls back to the DIRECT path. LEVI's rejection is never retried (INV-008).
 MissionTrace records every recovery decision and recovery.* events publish them,
 with closed values only (INV-022); exhaustion keeps the original failure code.
+
+PHX-119 (ADR-155..158): with a KaidoMonitor the mission's one health probe
+runs first and feeds KAIDO's hysteresis. While KAIDO is engaged (no provider
+HEALTHY, or memory pressure), the mission is one T0 reply on the structured
+provider within an 8K budget: no triage, plan, tools or LEVI, labelled
+degraded and never verified. When MAHORAGA reports the mission's budget
+exhausted (except for LEVI's own generation), the task ends FAILED with the
+original codes and KAIDO may still answer, labelled the same way (the task
+then ends DEGRADED); if KAIDO cannot, the mission keeps its original failure.
+MissionTrace.kaido records it.
 
 PHX-118 (ADR-100): LEVI passes a final answer deterministically, without the
 final_verifier model, only when it repeats the verified output of a last
@@ -61,12 +71,26 @@ from pydantic import (
 )
 
 from phoenix.agents import prompts
+from phoenix.agents.failsafe import FailSafeDecision, FailSafeTrigger
 from phoenix.agents.final_grounding import (
     GROUNDED_CHECK_ID,
     FinalGrounding,
     GroundedFinalVerificationResponder,
 )
 from phoenix.agents.handoff import HandoffBuilder, HandoffEnvelope
+from phoenix.agents.kaido import (
+    KAIDO_AGENT_ID,
+    KAIDO_MAX_OUTPUT_TOKENS,
+    KAIDO_ROLE,
+    KAIDO_TIER,
+    KAIDO_USABLE,
+    KaidoMonitor,
+    KaidoRecord,
+    KaidoScope,
+    activate,
+    kaido_answer,
+    within_budget,
+)
 from phoenix.agents.mission_events import (
     EventPublisher,
     EventSink,
@@ -101,6 +125,7 @@ from phoenix.agents.recovery import (
     MahoragaRecovery,
     MahoragaRecoveryError,
     RecoveryAction,
+    RecoveryResult,
     RecoveryStatus,
 )
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
@@ -236,6 +261,8 @@ def default_tier_table() -> ModelTierTable:
                 "strategist": refs(t2, t1, t0),
                 "verifier": refs(t2, t1, t0),
                 "build_engineer": refs(code, t2, t1, t0),
+                # PHX-119 (ADR-155): KAIDO's degraded reply runs on T0 only.
+                KAIDO_TIER: refs(t0),
             }
         ),
         default=refs(t1, t0),
@@ -361,6 +388,8 @@ class MissionTrace(_Value):
     triage_outcome: TriageOutcome | None = None
     triage_reason: TriageFallbackReason | None = None
     recoveries: tuple[RecoveryRecord, ...] = ()
+    # PHX-119: KAIDO's engagement for this mission, if any (never verified).
+    kaido: KaidoRecord | None = None
 
     @model_validator(mode="after")
     def consistent_triage(self) -> Self:
@@ -379,6 +408,18 @@ class MissionTrace(_Value):
             self.path != OrchestrationPath.COMPLEX or TaskState.COMPLETED in self.states
         ):
             raise ValueError("A direct fallback never completes the complex task")
+        kaido = self.kaido
+        if kaido is not None:
+            if kaido.answered and TaskState.COMPLETED in self.states:
+                raise ValueError("A KAIDO answer never completes the task")
+            if kaido.answered and self.states and self.states[-1] != TaskState.DEGRADED:
+                raise ValueError("A task KAIDO answered for ends DEGRADED")
+            if kaido.recovery_id is not None and not any(
+                record.recovery_id == kaido.recovery_id
+                and record.outcome == RecoveryOutcome.EXHAUSTED
+                for record in self.recoveries
+            ):
+                raise ValueError("KAIDO's exhaustion evidence is not in the trace")
         return self
 
 
@@ -446,6 +487,9 @@ class _Evidence:
     recoveries: list[RecoveryRecord] = field(default_factory=list)
     # PHX-109: a direct fallback already settled the failed task as FAILED.
     task_failed: bool = False
+    # PHX-119: MAHORAGA's latest exhaustion evidence and the role it stopped.
+    exhausted: tuple[RecoveryResult, RecoveryRole] | None = None
+    kaido: KaidoRecord | None = None
 
     @property
     def recovery_actions(self) -> int:
@@ -494,6 +538,7 @@ class _Evidence:
                 triage_outcome=self.triage_outcome,
                 triage_reason=self.triage_reason,
                 recoveries=tuple(self.recoveries),
+                kaido=self.kaido,
             ),
         )
 
@@ -519,6 +564,9 @@ class PhoenixRuntime:
     events optionally receives PHX-103 progress events (e.g. an EventBus). It
     must not block; anything it raises is swallowed and counted in
     dropped_events, so a mission never fails or waits because of it.
+
+    kaido optionally enables PHX-119 KAIDO: the backend's one KaidoMonitor,
+    shared with readiness. Without it no mission ever runs in KAIDO mode.
     """
 
     def __init__(
@@ -533,6 +581,7 @@ class PhoenixRuntime:
         limits: RuntimeLimits | None = None,
         filesystem_tool: FilesystemTool | None = None,
         events: EventSink | None = None,
+        kaido: KaidoMonitor | None = None,
     ) -> None:
         registry = (
             build_default_agent_registry() if agent_registry is None else agent_registry
@@ -552,6 +601,10 @@ class PhoenixRuntime:
         self._planner = AizenPlanner(self._agents)
         self._router = AgentModelRouter(self._agents, capability_registry)
         self._selector = ControlRoleModelSelector(capability_registry)
+        self._capabilities = capability_registry
+        if kaido is not None and type(kaido) is not KaidoMonitor:
+            raise PhoenixRuntimeError("Expected a KaidoMonitor")
+        self._kaido = kaido
         self._handoffs = HandoffBuilder(self._agents)
         self._verifier = LeviVerifier(self._agents)
         self._guard = PromptInjectionGuard(self._agents)
@@ -581,6 +634,10 @@ class PhoenixRuntime:
     @property
     def active_request_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._active))
+
+    @property
+    def kaido(self) -> KaidoMonitor | None:
+        return self._kaido
 
     @property
     def dropped_events(self) -> int:
@@ -644,14 +701,25 @@ class PhoenixRuntime:
         events = MissionEvents(self._events, request.request_id)
         try:
             async with asyncio.timeout(self._limits.mission_timeout_seconds):
-                if directive is None:
-                    directive = await self._triage(request, evidence, events)
-                if directive == OrchestrationPath.DIRECT:
-                    text = await self._direct(request, evidence, events)
-                else:
-                    text = await self._complex(
-                        request, evidence, events, accepted, session
+                engaged = await self._kaido_engaged(evidence)
+                if engaged is not None:
+                    text = await self._kaido_reply(
+                        request, evidence, events, engaged, scope="process"
                     )
+                else:
+                    try:
+                        if directive is None:
+                            directive = await self._triage(request, evidence, events)
+                        if directive == OrchestrationPath.DIRECT:
+                            text = await self._direct(request, evidence, events)
+                        else:
+                            text = await self._complex(
+                                request, evidence, events, accepted, session
+                            )
+                    except (ResponderOutputError, ModelProviderError) as error:
+                        text = await self._after_exhaustion(
+                            request, evidence, events, error
+                        )
             return evidence.result(request, MissionKind.COMPLETED, text=text)
         except asyncio.CancelledError:
             await _state_changed(events, evidence.settle(TaskState.CANCELLED))
@@ -713,9 +781,12 @@ class PhoenixRuntime:
         )
 
     async def _health(self, evidence: _Evidence) -> dict[str, ProviderHealthStatus]:
+        return _healthy(await self._probe(evidence))
+
+    async def _probe(self, evidence: _Evidence) -> dict[str, ProviderHealthStatus]:
         if evidence.health:
             # Probed once per mission: triage's probe also serves its path.
-            return _healthy({item.provider_id: item.status for item in evidence.health})
+            return {item.provider_id: item.status for item in evidence.health}
         statuses: dict[str, ProviderHealthStatus] = {}
         for identity, provider in self._providers.items():
             try:
@@ -732,7 +803,125 @@ class PhoenixRuntime:
             ProviderRouteHealth(provider_id=identity, status=status)
             for identity, status in statuses.items()
         )
-        return _healthy(statuses)
+        return statuses
+
+    async def _kaido_engaged(self, evidence: _Evidence) -> FailSafeDecision | None:
+        """PHX-119: this mission's one probe is also one KAIDO observation."""
+        monitor = self._kaido
+        if monitor is None:
+            return None
+        await monitor.observe(await self._probe(evidence))
+        return monitor.decision
+
+    def _kaido_binding(self, evidence: _Evidence) -> ModelBinding:
+        """T0 on a HEALTHY or DEGRADED provider, structured, KAIDO's output cap."""
+        statuses = {item.provider_id: item.status for item in evidence.health}
+        candidates = self._tiers.roles.get(KAIDO_TIER, self._tiers.default[-1:])
+        usable = [
+            ref for ref in candidates if statuses.get(ref.provider_id) in KAIDO_USABLE
+        ]
+        if not usable:
+            raise ProviderUnavailableError("No usable provider for KAIDO")
+        for ref in usable:
+            if self._capabilities.get(ref.provider_id, ref.model_id) is not None:
+                binding = self._binding(KAIDO_AGENT_ID, ref, evidence, structured=True)
+                return replace(
+                    binding,
+                    max_output_tokens=min(
+                        KAIDO_MAX_OUTPUT_TOKENS, self._limits.max_output_tokens
+                    ),
+                )
+        raise NoEligibleModelError("No registered KAIDO model")
+
+    async def _kaido_reply(
+        self,
+        request: PhoenixRequest,
+        evidence: _Evidence,
+        events: MissionEvents,
+        decision: FailSafeDecision,
+        *,
+        scope: KaidoScope,
+    ) -> str:
+        """KAIDO's one degraded reply; the record says how it ended."""
+        record: dict[str, object] = {
+            "failsafe_id": decision.failsafe_id,
+            "trigger": decision.trigger,
+            "scope": scope,
+            "capabilities": decision.enabled_capabilities,
+            "recovery_id": decision.recovery_id,
+        }
+        evidence.kaido = KaidoRecord.model_validate({**record, "outcome": "failed"})
+        await events.emit(
+            EventType.PHOENIX_DEGRADED,
+            agent_id=KAIDO_AGENT_ID,
+            failsafe_id=decision.failsafe_id,
+            kaido_scope=scope,
+            trigger=decision.trigger.value,
+        )
+        if not within_budget(request.text):
+            evidence.kaido = KaidoRecord.model_validate(
+                {**record, "outcome": "declined"}
+            )
+            raise NoEligibleModelError("Request exceeds KAIDO's context budget")
+        try:
+            binding = self._kaido_binding(evidence)
+        except (ProviderUnavailableError, NoEligibleModelError):
+            evidence.kaido = KaidoRecord.model_validate(
+                {**record, "outcome": "unavailable"}
+            )
+            raise
+        async with _agent_phase(events, KAIDO_AGENT_ID, KAIDO_ROLE):
+            text = await kaido_answer(binding, request.text)
+        evidence.kaido = KaidoRecord.model_validate({**record, "outcome": "answered"})
+        return text
+
+    async def _after_exhaustion(
+        self,
+        request: PhoenixRequest,
+        evidence: _Evidence,
+        events: MissionEvents,
+        error: ResponderOutputError | ModelProviderError,
+    ) -> str:
+        """PHX-119: KAIDO answers once MAHORAGA's mission budget is spent.
+
+        Not after LEVI's own generation was exhausted: nothing replaces a
+        verification that could not run. The task first ends FAILED with the
+        original codes; if KAIDO cannot answer, the original failure stands.
+        """
+        exhausted = evidence.exhausted
+        if (
+            self._kaido is None
+            or exhausted is None
+            or evidence.kaido is not None
+            or not retryable(error)
+            or exhausted[1] == RecoveryRole.VERIFICATION
+        ):
+            raise error
+        machine = evidence.machine
+        if machine is not None and not evidence.task_failed:
+            codes: dict[str, JsonValue] = {}
+            if isinstance(error, ResponderOutputError):
+                codes["failure_code"] = MissionFailureCode.RESPONDER_OUTPUT.value
+                codes["responder_error"] = error.code.value
+            else:
+                code = _failure_code(error)
+                assert code is not None  # provider failures always map
+                codes["failure_code"] = code.value
+            await _state_changed(events, machine.transition(TaskState.FAILED), **codes)
+            evidence.task_failed = True
+        decision = activate(
+            self._kaido.failsafe, FailSafeTrigger.RECOVERY_EXHAUSTED, exhausted[0]
+        )
+        try:
+            text = await self._kaido_reply(
+                request, evidence, events, decision, scope="mission"
+            )
+        except Exception:
+            raise error from None
+        if machine is not None:
+            # FAILED -> DEGRADED: the task failed; KAIDO's answer is degraded.
+            await _transition(events, machine, TaskState.DEGRADED)
+        return text
 
     def _binding(
         self,
@@ -948,6 +1137,7 @@ class PhoenixRuntime:
             "responder_error": responder_error,
         }
         if decision.status == RecoveryStatus.EXHAUSTED:
+            evidence.exhausted = (decision, role)
             evidence.recoveries.append(
                 RecoveryRecord.model_validate(
                     {**record, "outcome": RecoveryOutcome.EXHAUSTED}

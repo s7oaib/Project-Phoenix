@@ -219,6 +219,16 @@ categories = ["unit", "recovery"]
 # recovery: test_decision_is_degraded_only
 
 [[file]]
+path = "tests/test_kaido_missions.py"
+categories = ["unit", "integration", "recovery", "api_contract", "secret_leakage"]
+# PHX-119 KAIDO fail-safe in missions; integration: test_exhausted_budget_ends_degraded_with_a_kaido_answer
+# (real PhoenixRuntime + MahoragaRecovery + KaidoFailSafe + AIZEN/router/task graph/LEVI/lifecycle, scripted model)
+# recovery: test_hysteresis_releases_only_after_consecutive_clear_observations,
+# test_engaged_mission_is_one_labelled_t0_reply, test_exhausted_levi_generation_never_gets_a_kaido_answer
+# api_contract: test_ready_reports_kaido_and_releases_with_hysteresis, test_mission_api_shows_a_kaido_answer
+# secret_leakage: test_engaged_mission_is_one_labelled_t0_reply (sentinel absent from trace and events)
+
+[[file]]
 path = "tests/test_levi_verification.py"
 categories = ["unit", "forged_tool_results"]
 # forged_tool_results: test_contradictory_results_and_forged_gate_evidence_rejected

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -362,9 +363,15 @@ def test_output_schema_privacy_and_metric_coverage(tmp_path: Path) -> None:
     # Privacy (ADR-029): no answers or prompts verbatim, anywhere.
     dumped = (out / multi.RESULTS_NAME).read_text("utf-8")
     dumped += (out / multi.SUMMARY_NAME).read_text("utf-8")
+    # Random ids and digests can contain a short numeric answer by chance
+    # ("...-2397-..."); drop them, then look for the answer as a whole token.
+    uuid = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
+    scrubbed = re.sub(r"[0-9a-fA-F]{16,}", "", re.sub(uuid, "", dumped))
     for prompt, answer in _cases():
         assert prompt not in dumped
-        assert len(answer) < 4 or answer not in dumped
+        assert len(answer) < 4 or not re.search(
+            rf"(?<![0-9A-Za-z]){re.escape(answer)}(?![0-9A-Za-z])", scrubbed
+        )
     # Every docs/24 metric: measured or NOT_RUNNABLE with a reason.
     doc = (ROOT / "docs" / "24_TEST_EVALUATION.md").read_text(encoding="utf-8")
     section = doc.split("## Metrics")[1].split("##")[0]

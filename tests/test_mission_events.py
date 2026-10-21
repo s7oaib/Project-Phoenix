@@ -762,6 +762,9 @@ def test_vocabulary_stays_32_and_mapping_uses_existing_types() -> None:
         "recovery.started",
         "recovery.completed",
         "recovery.exhausted",
+        # PHX-119 (ADR-156): KAIDO engaging and releasing.
+        "phoenix.degraded",
+        "phoenix.ready",
     }
 
 

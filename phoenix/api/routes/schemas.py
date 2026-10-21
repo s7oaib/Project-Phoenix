@@ -88,6 +88,19 @@ class MissionSummary(Contract):
     finished_at: datetime | None
 
 
+class KaidoOut(Contract):
+    """PHX-119: the mission ran in KAIDO degraded mode; never verified."""
+
+    failsafe_id: str
+    trigger: Literal[
+        "primary_model_provider_unavailable", "resource_pressure", "recovery_exhausted"
+    ]
+    scope: Literal["process", "mission"]
+    outcome: Literal["answered", "failed", "unavailable", "declined"]
+    verified: Literal[False] = False
+    recovery_id: str | None
+
+
 class MissionDetail(MissionSummary):
     request_text: str | None
     answer_text: str | None
@@ -95,6 +108,8 @@ class MissionDetail(MissionSummary):
     task_id: str | None
     task_states: tuple[TaskState, ...]
     permission_request: PermissionRequestOut | None
+    # PHX-119: set when KAIDO engaged for this mission (degraded mode).
+    kaido: KaidoOut | None
 
 
 class CancelResult(Contract):

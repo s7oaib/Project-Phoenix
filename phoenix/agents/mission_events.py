@@ -23,6 +23,7 @@ from typing import Final, Protocol
 
 from pydantic import JsonValue
 
+from phoenix.agents.failsafe import FailSafeTrigger
 from phoenix.agents.mission_recovery import (
     RETRYABLE_OUTPUT,
     RecoveryClass,
@@ -131,6 +132,7 @@ AGENT_ROLES: Final = frozenset(
         "document",
         "final_answer",
         TRIAGE_ROLE,  # PHX-105
+        "kaido",  # PHX-119: KAIDO's one degraded reply
     }
 )
 AGENT_OUTCOMES: Final = frozenset({"completed", "waiting_permission"})
@@ -163,6 +165,18 @@ RECOVERY_ACTIONS: Final = frozenset(
     )
 )
 RECOVERY_OUTCOMES: Final = _values(RecoveryOutcome) - {RecoveryOutcome.EXHAUSTED}
+# PHX-119 (ADR-156): KAIDO engaging (phoenix.degraded) and the process-wide
+# release (phoenix.ready), correlated by the failsafe ID or the mission ID.
+KAIDO_TRIGGERS: Final = frozenset(
+    trigger.value
+    for trigger in (
+        FailSafeTrigger.PRIMARY_MODEL_PROVIDER_UNAVAILABLE,
+        FailSafeTrigger.RESOURCE_PRESSURE,
+        FailSafeTrigger.RECOVERY_EXHAUSTED,
+    )
+)
+KAIDO_SCOPES: Final = frozenset({"process", "mission"})
+_KAIDO: dict[str, _Kind] = {"failsafe_id": UUID, "kaido_scope": KAIDO_SCOPES}
 
 # Every event type PHX-103 publishes, with its complete payload allowlist.
 PAYLOAD_FIELDS: Final[Mapping[EventType, Mapping[str, _Kind]]] = MappingProxyType(
@@ -242,10 +256,17 @@ PAYLOAD_FIELDS: Final[Mapping[EventType, Mapping[str, _Kind]]] = MappingProxyTyp
             "duration_ms": MILLISECONDS,
         },
         EventType.RECOVERY_EXHAUSTED: _RECOVERY,
+        EventType.PHOENIX_DEGRADED: {**_KAIDO, "trigger": KAIDO_TRIGGERS},
+        EventType.PHOENIX_READY: _KAIDO,
     }
 )
 _WARNING_TYPES: Final = frozenset(
-    {EventType.AGENT_FAILED, EventType.TOOL_FAILED, EventType.VERIFICATION_FAILED}
+    {
+        EventType.AGENT_FAILED,
+        EventType.TOOL_FAILED,
+        EventType.VERIFICATION_FAILED,
+        EventType.PHOENIX_DEGRADED,
+    }
 )
 
 
