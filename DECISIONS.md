@@ -4596,3 +4596,206 @@ linked spelling. A swap between the root check and a later operation within one
 call stays outside the V1 threat model: the residual window shrinks from a
 whole mission to the inside of one call. No new dependencies and no new event
 types.
+
+## ADR-115 — Fixed, versioned, sha-pinned metric datasets
+
+Status: Accepted (owner instruction 2026-10-21: recommended options throughout)
+Date: 2026-10-21
+Ticket: PHX-117
+
+docs/24 requires a fixed, versioned task set. Six metrics had no data:
+verification catch rate, memory retrieval accuracy, research evidence quality,
+computer-control completion, user intervention count, and recovery success
+(which had data but no single place). ADR numbers 095–114 are reserved for
+other in-flight work.
+
+Decision:
+
+- Five sets live under `benchmarks/metrics/`: `verification-v1.toml`,
+  `interventions-v1.toml`, `memory-v1.toml`, `research-v1.toml` and
+  `computer-control-v1.toml`. They follow the PHX-105 routing-set rule. Each
+  file's name carries its major version, and its sha256 and version are pinned
+  together in `tests/test_metric_datasets.py`. Any change to a case needs a new
+  version and file.
+- The computer-control fixture pages (`computer-control-v1/*.html`) are pinned
+  transitively. The set lists each page's sha256, and the loader checks it. The
+  directory must hold exactly the listed pages.
+- Text fixtures (memory documents, research sources and workspace files) are
+  inline in the TOML, so the one sha256 pin covers them.
+- All content is harmless and fictional, with no private data and nothing
+  fetched:
+  - research URLs use the reserved `.test` domain;
+  - fixture pages are refused if they reference anything remote or loadable;
+  - workspace missions read temporary fixture files only.
+- Loaders and deterministic scorers live in `scripts/metric_datasets.py`, which
+  is pure: no models, network or runtime. The runner is
+  `scripts/metric_benchmark.py`. Both are under the strict `mypy-scripts`
+  matrix gate.
+- Results hold IDs, closed codes and counts only (ADR-029).
+
+No new dependencies, event types, migrations or API changes; nothing under
+`phoenix/` changes.
+
+## ADR-116 — Verification catch rate by producer-side fault injection
+
+Status: Accepted (owner instruction 2026-10-21: recommended options throughout)
+Date: 2026-10-21
+Ticket: PHX-117
+
+PHX-091 reported the catch rate as NOT RUNNABLE: the v1 set has no known-bad
+candidates, and a LEVI rejection hides the rejected answer.
+
+Decision:
+
+- **Missions.** Each `verification-v1` case is one forced-COMPLEX
+  `PhoenixRuntime` mission. A `FaultInjectionProvider` routes turns by their
+  PHOENIX role:
+  - producer turns (planner, assignment, specialist, document specialist and
+    answer, final answer, direct) get the case's scripted replies, which carry
+    the fault;
+  - LEVI's verifier turns (`verifier`, `step_verifier`, `document_verifier`,
+    `final_verifier`) are the model under test.
+
+  This isolates LEVI from producer quality. Document steps run through the
+  real FilesystemTool, PermissionEngine and grants.
+- **Forged tool evidence.** The harness wraps `FilesystemTool.execute` for one
+  case and one tool instance, then restores it. The tool is slotted and the
+  runtime accepts only that exact type. The wrapper changes the call ID, the
+  permission request ID or the matched grant.
+  - An `effect_applied` forgery was dropped: the `FilesystemToolResult`
+    contract rejects it before LEVI ever sees it.
+- **Faults, 20 in all:**
+  - wrong answers: 7, at the step or the final answer;
+  - ungrounded claims: 5, in text or documents;
+  - injected tool evidence: 3, a file instruction that the answer obeys;
+  - forged tool evidence: 3;
+  - forged verdicts: 2, a JSON verdict as a step output.
+
+  There are also 5 correct controls. Each fault declares its expected
+  detector: `deterministic` (LEVI's code checks) or `model`.
+- **Scoring.**
+  - CAUGHT: the mission fails `verification_failed` with a FAILED verdict.
+  - ESCAPED: it completes with every verdict PASSED.
+  - Anything else (a provider or schema failure before LEVI decided) is
+    inconclusive and leaves the rate.
+  - The catch rate is caught ÷ (caught + escaped). Rejected controls are
+    reported as the false-rejection rate.
+- **Two modes.**
+  - `--scripted` (CI) answers LEVI's model turns with an always-pass verifier,
+    so it measures the deterministic floor (5/20). It is labelled harness
+    validation, not a FYP number.
+  - The live run uses Ollama's default and think=False providers with the
+    runtime tier table. Like the other runners, it refuses a CPU-only placement
+    of LEVI's first-choice model unless `--allow-cpu` is passed.
+
+Limitations: the producer turns are fixed text, so the live number measures
+LEVI against these 20 faults, not the system's whole error rate. Faults
+outside the set (for example, subtle reasoning errors in long answers) are not
+represented. The live run awaits a BLAZE-6 GPU session.
+
+## ADR-117 — Capability-gated metrics: datasets first, NOT RUNNABLE until the capability lands
+
+Status: Accepted (owner instruction 2026-10-21: recommended options throughout)
+Date: 2026-10-21
+Ticket: PHX-117
+
+Memory (PHX-110), research (PHX-111) and computer control (PHX-112) are not
+built. Their metrics still need fixed data ahead of the FYP.
+
+Decision:
+
+- Their datasets and scorers ship now:
+  - memory: hit@1, hit@3, MRR and answer containment over a 10-document
+    corpus;
+  - research: a three-check citation rubric (citation present, cited source
+    supports the claim, no fabricated URL), with fact coverage reported
+    separately;
+  - computer control: expected element texts, a step budget and fixture-only
+    scope.
+- Each set carries fixed **calibration vectors**: sample outputs with their
+  expected scores. `--dry-run` validates every set and replays the vectors, and
+  any mismatch fails it.
+- The live metric is NOT RUNNABLE until two conditions hold, and the runner
+  checks both and says which one is missing:
+  - the owning ticket is `DONE` in `FEATURE_TICKETS.md`;
+  - an adapter is registered in `ADAPTERS` in `scripts/metric_benchmark.py`.
+
+  The owning ticket adds the adapter. It maps the capability's output to the
+  scorer input; it does not change the set.
+
+Limitations: the research rubric checks evidence, not correctness. An answer
+that faithfully cites a wrong source passes the rubric, and the separate fact
+coverage shows the gap (one calibration vector pins this). The observation
+format for computer control (`final_state`, `steps`, `visited`) is a contract
+PHX-112 must produce.
+
+## ADR-118 — User intervention count and recovery success, defined once
+
+Status: Accepted (owner instruction 2026-10-21: recommended options throughout)
+Date: 2026-10-21
+Ticket: PHX-117
+
+Decision:
+
+- **One intervention is one permission prompt**: a mission result of
+  `waiting_permission`. PHOENIX v1 has no clarification turn, so
+  clarifications are reported as 0 by definition, not measured.
+- **Interventions set.** `interventions-v1` missions start with no grants.
+  After each prompt, the runner approves exactly the pending request for the
+  session and runs the mission again (the PHX-102 linked re-run), up to
+  `max_rounds`.
+  - The report gives total prompts, prompts per mission, completion, and the
+    excess over each case's minimum (one prompt per distinct file read).
+  - Scripted producers give the minimum (8 prompts over 8 missions). A live
+    run lets the models choose their reads.
+- **Configuration (2)** reports `user_intervention_count` as MEASURED from its
+  own outcomes (`summary.interventions`). The text-only v1 set gives 0.
+  Configuration (1) reports it as NOT RUNNABLE because it has no permission
+  prompts.
+- **Recovery success** stays defined by PHX-109: recovered MAHORAGA actions
+  over actions taken, from `MissionTrace.recoveries`.
+  - The metric runner reads it from a configuration (2) results file
+    (`--config2-results`). It is MEASURED when the traces carry recoveries,
+    with a `null` rate and an explicit note when no action was taken.
+  - Configuration (1) states that it has no MAHORAGA and points to
+    configuration (2).
+
+## ADR-119 — Model routing freeze criteria (docs/05 benchmark gate)
+
+Status: Accepted (owner instruction 2026-10-21: recommended options throughout)
+Date: 2026-10-21
+Ticket: PHX-117
+
+docs/05 said routing is not frozen until benchmarks cover the listed
+dimensions, but gave no pass criteria.
+
+Decision:
+
+- **Scope and evidence.**
+  - The tier table stays provisional and freezes one role at a time.
+  - Evidence must come from the pinned sets only, on BLAZE-6 with the model on
+    the GPU (no CPU-only runs), with at least 3 measured runs per candidate.
+  - Prompt set, Ollama version and thinking setting are recorded, and every
+    metric is MEASURED or NOT RUNNABLE.
+- **Thresholds.** The per-role thresholds are in docs/05 "Model routing freeze
+  criteria":
+  - triage: ≥ 90% accuracy, ≥ 80% per category, ≤ 5% fallbacks;
+  - structured roles: ≥ 95% schema-valid;
+  - LEVI: ≥ 80% live catch rate, ≤ 20% false rejections, and every
+    deterministic fault caught;
+  - configuration (2): no wrong answer reported as LEVI-verified, and
+    accuracy within 10 points of the best configuration (1) model;
+  - latency: DIRECT median ≤ 5 s, COMPLEX median ≤ 180 s;
+  - VRAM: within 6 GB with one heavy generation at a time.
+- **Provisional roles.** Vision, memory and research roles stay provisional
+  until their metrics are MEASURED. The deep tier is never default-routed until
+  it beats T2 on quality at an accepted latency.
+- **Tie-break.** A larger model needs a lead of at least 5 points to replace a
+  smaller one.
+- **Re-opening.** A model, prompt set, major Ollama or benchmark set change
+  re-opens the role. Each freeze or re-open is recorded here with its results
+  files.
+
+Limitations: the thresholds are recommended starting values, not derived from
+data. The first live runs may justify an owner-approved amendment. Nothing is
+frozen by this ADR itself.

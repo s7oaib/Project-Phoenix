@@ -1,0 +1,163 @@
+# PHOENIX computer-control task set (PHX-117 for PHX-112, ADR-115/ADR-117).
+# FIXED: any change, including to a fixture page, requires a version bump and
+# a new file; tests pin this file's sha256, and each fixture's sha256 is
+# listed and checked here, so the pages are pinned too.
+#
+# Fixture pages live in computer-control-v1/ and are local only: no network
+# references, no external scripts, styles or images, no forms that submit
+# anywhere. A PHX-112 run loads one page, gives PHOENIX the instruction and
+# records an observation:
+#   {final_state = {<element id> = <text content>}, steps = <actions taken>,
+#    visited = [<fixture page names>]}
+# A task is COMPLETED when every `expect` element's text equals the observed
+# text (whitespace-trimmed), steps <= max_steps, and every visited page is a
+# fixture page of this set. Instructions are harmless and change nothing
+# outside the page. `calibration` entries are fixed scorer test vectors.
+suite_id = "phoenix-computer-control"
+version = "1.0.0"
+
+[[fixture]]
+name = "save-button.html"
+sha256 = "e1ea4165ad41161b5636c30a53918b8bb3222b1fa358d2ba49be719844fe0d30"
+
+[[fixture]]
+name = "greeting-form.html"
+sha256 = "9e5595b5962b1f45c553da38fa9197baaf67bda8b741761de75403c1aef40276"
+
+[[fixture]]
+name = "settings-panel.html"
+sha256 = "f0cf9cd58cb852937c454b2d05d08558031a28d888f14f1d18855df09afc9397"
+
+[[fixture]]
+name = "counter.html"
+sha256 = "2761759f32fb186b729dedc74f9f9f88fe4dc7cf316ef4918deaac1311da899a"
+
+[[fixture]]
+name = "search-box.html"
+sha256 = "3b86824521a72c6ab3666774dbacbc846d91166dd6106dac82cc510354db8d47"
+
+[[fixture]]
+name = "todo-list.html"
+sha256 = "0ab3db29f3c6eabb8cac836eb1c608245cbc9ed285bb0dc3f950c6ec722a7c2c"
+
+# ---- click
+
+[[case]]
+id = "click-save"
+category = "click"
+fixture = "save-button.html"
+instruction = "Save the draft note."
+expect = { status = "Saved" }
+max_steps = 2
+
+[[case]]
+id = "click-reset-counter"
+category = "click"
+fixture = "counter.html"
+instruction = "Increase the tally once, then reset it to zero."
+expect = { count = "0" }
+max_steps = 4
+
+# ---- form filling
+
+[[case]]
+id = "form-name"
+category = "form"
+fixture = "greeting-form.html"
+instruction = "Enter the name Ada in the greeting form and submit it."
+expect = { greeting = "Hello, Ada" }
+max_steps = 4
+
+[[case]]
+id = "form-name-city"
+category = "form"
+fixture = "greeting-form.html"
+instruction = "Fill in the name Grace and the city Lisbon, then submit the form."
+expect = { greeting = "Hello, Grace from Lisbon" }
+max_steps = 5
+
+# ---- selection controls
+
+[[case]]
+id = "select-accent"
+category = "selection"
+fixture = "settings-panel.html"
+instruction = "Choose Blue as the accent colour and apply it."
+expect = { status = "Accent Blue, dark mode off" }
+max_steps = 4
+
+[[case]]
+id = "checklist-two-done"
+category = "selection"
+fixture = "todo-list.html"
+instruction = "Mark Laundry and Dishes as done."
+expect = { status = "2 done" }
+max_steps = 4
+
+# ---- keyboard
+
+[[case]]
+id = "keyboard-search"
+category = "keyboard"
+fixture = "search-box.html"
+instruction = "Search the catalogue for lantern and press Enter."
+expect = { result = "Found: lantern kit" }
+max_steps = 4
+
+# ---- multi-step: a control is only usable after an earlier action
+
+[[case]]
+id = "multi-step-dark-mode"
+category = "multi_step"
+fixture = "settings-panel.html"
+instruction = "Open the Display tab, turn dark mode on, pick Green as the accent and apply."
+expect = { panel = "Display settings", status = "Accent Green, dark mode on" }
+max_steps = 6
+
+[[case]]
+id = "multi-step-count-three"
+category = "multi_step"
+fixture = "counter.html"
+instruction = "Set the tally to exactly 3."
+expect = { count = "3" }
+max_steps = 6
+
+[[case]]
+id = "multi-step-all-chores"
+category = "multi_step"
+fixture = "todo-list.html"
+instruction = "Mark every chore as done."
+expect = { status = "3 done" }
+max_steps = 5
+
+# ---- scorer calibration vectors (fixed expected outcomes)
+
+[[calibration]]
+case = "click-save"
+observation = { final_state = { status = " Saved " }, steps = 1, visited = ["save-button.html"] }
+completed = true
+
+[[calibration]]
+case = "click-save"
+observation = { final_state = { status = "Discarded" }, steps = 1, visited = ["save-button.html"] }
+completed = false
+
+[[calibration]]
+case = "multi-step-dark-mode"
+observation = { final_state = { panel = "Display settings", status = "Accent Green, dark mode on" }, steps = 7, visited = ["settings-panel.html"] }
+completed = false
+
+[[calibration]]
+case = "form-name"
+observation = { final_state = { greeting = "Hello, Ada" }, steps = 3, visited = ["greeting-form.html", "https://example.com/"] }
+completed = false
+
+[[calibration]]
+case = "multi-step-dark-mode"
+observation = { final_state = { status = "Accent Green, dark mode on" }, steps = 4, visited = ["settings-panel.html"] }
+completed = false
+
+[[calibration]]
+case = "keyboard-search"
+observation = { final_state = { result = "Found: lantern kit" }, steps = 2, visited = ["search-box.html"] }
+completed = true

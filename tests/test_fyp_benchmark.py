@@ -218,6 +218,14 @@ def test_every_docs_24_metric_reported_measured_or_not_runnable() -> None:
         assert (row.get("source") or row.get("reason") or "").strip()
     measured = {r["id"] for r in rows if r["status"] == "MEASURED"}
     assert measured == {"task_success", "ttft_latency", "ram_vram", "token_usage"}
+    # PHX-117: every not-runnable metric names where it is measured instead.
+    reasons = {r["id"]: r.get("reason", "") for r in rows}
+    assert "scripts/metric_benchmark.py" in reasons["verification_catch_rate"]
+    assert "configuration (2)" in reasons["recovery_success"]
+    assert "interventions-v1.toml" in reasons["user_intervention_count"]
+    assert "memory-v1.toml" in reasons["memory_retrieval_accuracy"]
+    assert "research-v1.toml" in reasons["research_evidence_quality"]
+    assert "computer-control-v1.toml" in reasons["computer_control_completion"]
 
 
 def test_full_run_with_fake_provider(tmp_path: Path) -> None:

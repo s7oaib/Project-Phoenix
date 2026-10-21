@@ -1,0 +1,262 @@
+# PHOENIX memory retrieval QA set (PHX-117 for PHX-110, ADR-115/ADR-117).
+# FIXED: any change requires a version bump and a new file; tests pin this
+# file's sha256.
+#
+# `document` entries are a small fictional fixture corpus (no private data) to
+# ingest into an empty memory store. Each case asks one question; `sources`
+# are the document IDs that contain the answer and `answer` is a short string
+# every source contains (case-insensitive). Distractor documents share topics
+# and wording with the sources on purpose.
+#
+# Scoring (deterministic, k = 3): hit@1 and hit@3 (a source among the first 1
+# or 3 retrieved document IDs), reciprocal rank of the first source, and, when
+# the flow also answers, answer_correct (the answer contains `answer`,
+# case-insensitive). `calibration` entries are fixed scorer test vectors.
+suite_id = "phoenix-memory"
+version = "1.0.0"
+k = 3
+
+[[document]]
+id = "garden-tomatoes"
+title = "Garden notes: tomatoes"
+text = "The cherry tomatoes in the north bed are watered every second morning. They were planted on 4 April and the first fruit appeared in early June. The stakes are bamboo."
+
+[[document]]
+id = "garden-herbs"
+title = "Garden notes: herbs"
+text = "Basil grows in the window box and is watered daily. Mint is kept in a separate pot because it spreads. The rosemary bush by the gate is pruned in September."
+
+[[document]]
+id = "bike-maintenance"
+title = "Bike maintenance log"
+text = "The road bike chain was replaced in February after 3000 kilometres. Tyre pressure is set to 80 psi. The next brake pad check is due in October."
+
+[[document]]
+id = "book-club"
+title = "Book club schedule"
+text = "The book club meets on the first Thursday of each month at the community library. This month's book is The Silent River. Members bring one snack each."
+
+[[document]]
+id = "recipe-pancakes"
+title = "Recipe: pancakes"
+text = "Mix 200 grams of flour, two eggs and 300 millilitres of milk. Rest the batter for 20 minutes. Cook each pancake for about one minute per side."
+
+[[document]]
+id = "recipe-flatbread"
+title = "Recipe: flatbread"
+text = "Combine 250 grams of flour with warm water and a pinch of salt. Knead for 5 minutes and rest the dough for 30 minutes. Cook in a dry pan."
+
+[[document]]
+id = "trip-lisbon"
+title = "Trip plan: Lisbon"
+text = "The Lisbon trip runs from 14 to 18 May. The hotel is near Rossio square. The tram 28 tour is booked for the second day."
+
+[[document]]
+id = "trip-porto"
+title = "Trip plan: Porto"
+text = "The Porto day trip is on 16 May by train from Santa Apolonia station. The river cruise leaves at 3 pm. Return train at 8 pm."
+
+[[document]]
+id = "wifi-setup"
+title = "Home network notes"
+text = "The guest network is called Orchard-Guest. The router was restarted on 2 October. Smart plugs use the 2.4 GHz band."
+
+[[document]]
+id = "language-study"
+title = "Language study plan"
+text = "Spanish practice is 15 minutes each evening using flash cards. The weekly conversation class is on Tuesday. The goal is level B1 by December."
+
+# ---- single fact, direct wording
+
+[[case]]
+id = "tomato-watering"
+category = "direct"
+question = "How often are the cherry tomatoes watered?"
+sources = ["garden-tomatoes"]
+answer = "every second morning"
+
+[[case]]
+id = "chain-replaced"
+category = "direct"
+question = "When was the road bike chain replaced?"
+sources = ["bike-maintenance"]
+answer = "February"
+
+[[case]]
+id = "book-this-month"
+category = "direct"
+question = "Which book is the book club reading this month?"
+sources = ["book-club"]
+answer = "The Silent River"
+
+[[case]]
+id = "lisbon-dates"
+category = "direct"
+question = "What are the dates of the Lisbon trip?"
+sources = ["trip-lisbon"]
+answer = "14 to 18 May"
+
+[[case]]
+id = "guest-network"
+category = "direct"
+question = "What is the guest network called?"
+sources = ["wifi-setup"]
+answer = "Orchard-Guest"
+
+[[case]]
+id = "spanish-goal"
+category = "direct"
+question = "What level is the Spanish study goal?"
+sources = ["language-study"]
+answer = "B1"
+
+# ---- paraphrased questions: little word overlap with the source
+
+[[case]]
+id = "tyre-inflation"
+category = "paraphrase"
+question = "How hard should I pump up the road bike wheels?"
+sources = ["bike-maintenance"]
+answer = "80 psi"
+
+[[case]]
+id = "batter-wait"
+category = "paraphrase"
+question = "How long should the pancake mixture sit before cooking?"
+sources = ["recipe-pancakes"]
+answer = "20 minutes"
+
+[[case]]
+id = "book-club-venue"
+category = "paraphrase"
+question = "Where does the reading group get together?"
+sources = ["book-club"]
+answer = "community library"
+
+[[case]]
+id = "tram-day"
+category = "paraphrase"
+question = "On which day of the Lisbon holiday is the historic tram ride?"
+sources = ["trip-lisbon"]
+answer = "second day"
+
+[[case]]
+id = "router-reboot"
+category = "paraphrase"
+question = "When did the home internet box last get rebooted?"
+sources = ["wifi-setup"]
+answer = "2 October"
+
+[[case]]
+id = "conversation-class"
+category = "paraphrase"
+question = "Which weekday is the speaking lesson?"
+sources = ["language-study"]
+answer = "Tuesday"
+
+# ---- distractors: a similar document holds a different answer
+
+[[case]]
+id = "flatbread-rest"
+category = "distractor"
+question = "How long does the flatbread dough rest?"
+sources = ["recipe-flatbread"]
+answer = "30 minutes"
+
+[[case]]
+id = "pancake-flour"
+category = "distractor"
+question = "How much flour goes into the pancakes?"
+sources = ["recipe-pancakes"]
+answer = "200 grams"
+
+[[case]]
+id = "porto-cruise"
+category = "distractor"
+question = "What time does the Porto river cruise leave?"
+sources = ["trip-porto"]
+answer = "3 pm"
+
+[[case]]
+id = "basil-watering"
+category = "distractor"
+question = "How often is the basil watered?"
+sources = ["garden-herbs"]
+answer = "daily"
+
+[[case]]
+id = "rosemary-pruning"
+category = "distractor"
+question = "When is the rosemary pruned?"
+sources = ["garden-herbs"]
+answer = "September"
+
+[[case]]
+id = "brake-check"
+category = "distractor"
+question = "When is the next brake pad check due?"
+sources = ["bike-maintenance"]
+answer = "October"
+
+# ---- two documents mention the trip in May; either can answer
+
+[[case]]
+id = "may-trip-month"
+category = "multi_source"
+question = "In which month are the Portugal trips?"
+sources = ["trip-lisbon", "trip-porto"]
+answer = "May"
+
+[[case]]
+id = "recipe-flour-any"
+category = "multi_source"
+question = "Which of my recipes use flour?"
+sources = ["recipe-pancakes", "recipe-flatbread"]
+answer = "flour"
+
+# ---- scorer calibration vectors (fixed expected scores)
+
+[[calibration]]
+case = "tomato-watering"
+retrieved = ["garden-tomatoes", "garden-herbs", "bike-maintenance"]
+answer = "They are watered every second morning."
+hit_at_1 = true
+hit_at_k = true
+reciprocal_rank = 1.0
+answer_correct = true
+
+[[calibration]]
+case = "flatbread-rest"
+retrieved = ["recipe-pancakes", "recipe-flatbread", "garden-herbs"]
+answer = "20 minutes"
+hit_at_1 = false
+hit_at_k = true
+reciprocal_rank = 0.5
+answer_correct = false
+
+[[calibration]]
+case = "router-reboot"
+retrieved = ["bike-maintenance", "language-study", "garden-herbs", "wifi-setup"]
+answer = ""
+hit_at_1 = false
+hit_at_k = false
+reciprocal_rank = 0.25
+answer_correct = false
+
+[[calibration]]
+case = "may-trip-month"
+retrieved = ["trip-porto"]
+answer = "MAY"
+hit_at_1 = true
+hit_at_k = true
+reciprocal_rank = 1.0
+answer_correct = true
+
+[[calibration]]
+case = "spanish-goal"
+retrieved = []
+answer = "B1"
+hit_at_1 = false
+hit_at_k = false
+reciprocal_rank = 0.0
+answer_correct = true

@@ -77,8 +77,13 @@ behaviour.
     (16 missions of 1–2 minutes).
   - Configuration (2) mixes models by role and thinking varies by role; the
     report states this.
-  - Verification catch rate stays NOT RUNNABLE (needs fault-injected cases);
-    routing accuracy belongs to PHX-105.
+  - Verification catch rate stays NOT RUNNABLE here (the v1 set has no
+    fault-injected cases); it is measured by `scripts/metric_benchmark.py`
+    (PHX-117, below). Routing accuracy belongs to PHX-105.
+  - User intervention count is MEASURED from the mission outcomes: one
+    permission prompt per `waiting_permission` result (PHOENIX v1 has no
+    clarification turn). The v1 set is text-only, so it is 0 here; workspace
+    missions are measured by PHX-117.
   - Live results (2026-10-18, BLAZE-6, evidence in the PHX-091 ticket), with
     configuration (1)'s best at 93% / 0.3 s (4B, thinking off) and 100% / 7.2 s
     (4B, thinking on) for comparison:
@@ -160,6 +165,74 @@ multi_step, ambiguous and adversarial).
   run records Ollama's placement and refuses CPU-only runs unless `--allow-cpu`.
 - `scripts/fyp_benchmark.py` keeps reporting `routing_accuracy` as NOT RUNNABLE
   in its baseline run and points to this script.
+
+### Metric datasets (PHX-117)
+
+`python scripts/metric_benchmark.py` makes the metrics that need their own data
+measurable. It uses five fixed sets under `benchmarks/metrics/`. Each set is
+versioned, its sha256 is pinned in `tests/test_metric_datasets.py`, and changing
+any case needs a new version and file (ADR-115). The content is harmless,
+fictional and local only.
+
+| Set | Version | Size | Metric | Status today |
+| --- | --- | --- | --- | --- |
+| `verification-v1.toml` | 1.0.0 | 25 cases: 20 faults, 5 controls | verification catch rate | MEASURED (scripted floor in CI; live LEVI on BLAZE-6) |
+| `interventions-v1.toml` | 1.0.0 | 8 missions, 3 fixture files | user intervention count | MEASURED |
+| `memory-v1.toml` | 1.0.0 | 20 questions over 10 documents | memory retrieval accuracy | NOT RUNNABLE until PHX-110 |
+| `research-v1.toml` | 1.0.0 | 8 questions, 8 fixture sources | research evidence quality | NOT RUNNABLE until PHX-111 |
+| `computer-control-v1.toml` | 1.0.0 | 10 tasks on 6 pinned local pages | computer-control completion | NOT RUNNABLE until PHX-112 |
+
+- **Verification catch rate** (ADR-116). Each case is a forced-COMPLEX
+  `PhoenixRuntime` mission. Its producer turns (plan, assignment, specialist,
+  document and final answer) are scripted from the case, so they carry the
+  injected fault. Document steps read a fixture workspace through the real
+  FilesystemTool and PermissionEngine.
+  - Fault kinds: wrong answers (step or final), ungrounded claims, injected
+    tool evidence (a file instruction that the answer obeys), forged tool
+    evidence (the harness tampers with the tool result: call ID, permission
+    request or grant), and forged verdicts (a step output that is a JSON
+    verdict).
+  - Only LEVI's verifier turns are the model under test. `--scripted` (CI)
+    answers them with an always-pass verifier, so its 25% (5 of 20) is the
+    deterministic floor: LEVI's code checks catch every forgery and nothing
+    else. That is harness validation, not a FYP number. The live run sends
+    LEVI's turns to Ollama.
+  - Scoring:
+    - CAUGHT: the mission fails `verification_failed` with a FAILED verdict.
+    - ESCAPED: it completes with every verdict PASSED.
+    - Anything else is inconclusive and excluded from the rate.
+    - Rejecting a control is a false rejection, reported next to the catch
+      rate.
+- **User intervention count** (ADR-118). Missions start with no grants. Each
+  `waiting_permission` result is one permission prompt. The runner approves
+  exactly the pending request for the session (the PHX-102 linked re-run) and
+  runs the mission again, up to `max_rounds`.
+  - The report gives prompts per mission and the excess over each case's
+    minimum (one prompt per distinct file).
+  - Scripted CI measures 8 prompts over 8 missions, all at the minimum.
+  - Configuration (2) also reports its prompts. The v1 set is text-only, so it
+    has none.
+- **Recovery success** is measured from configuration (2) traces
+  (`MissionTrace.recoveries`, PHX-109). `--config2-results
+  <fyp-multi-agent-results.json>` reports it in the same table, MEASURED when
+  the traces carry recoveries. When no recovery action was taken, the rate is
+  undefined (`null`) and the report says so. Configuration (1) reports it as
+  NOT RUNNABLE because it has no MAHORAGA.
+- **Memory, research and computer control** (ADR-117). The datasets and
+  scorers exist now:
+  - memory: hit@1, hit@3, MRR and answer containment;
+  - research: the citation rubric (citation present, cited source supports the
+    claim, no fabricated URL), with fact coverage reported separately;
+  - computer control: final element state, step budget and fixture-only scope.
+
+  `--dry-run` validates each set and replays its fixed calibration vectors
+  through the scorer. The live metric stays NOT RUNNABLE until the owning
+  ticket is DONE in `FEATURE_TICKETS.md` and an adapter is registered in
+  `ADAPTERS`. The runner checks both and states which one is missing.
+- Results go to `.metric-bench/metric-benchmark-results.json` (schema-versioned)
+  and a Markdown summary. They hold IDs, closed codes and counts only.
+- Like the other runners, a live run records Ollama's placement for LEVI's
+  first-choice model and refuses CPU-only runs unless `--allow-cpu` is passed.
 
 ## Automated test matrix (PHX-090)
 

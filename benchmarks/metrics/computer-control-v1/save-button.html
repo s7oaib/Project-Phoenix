@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: save button</title>
+</head>
+<body>
+<h1>Draft note</h1>
+<p>Unsaved changes.</p>
+<button id="save" type="button">Save</button>
+<button id="discard" type="button">Discard</button>
+<p id="status" role="status">Not saved</p>
+<script>
+document.getElementById("save").addEventListener("click", function () {
+  document.getElementById("status").textContent = "Saved";
+});
+document.getElementById("discard").addEventListener("click", function () {
+  document.getElementById("status").textContent = "Discarded";
+});
+</script>
+</body>
+</html>
