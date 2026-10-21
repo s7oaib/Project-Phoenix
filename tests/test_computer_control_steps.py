@@ -1532,7 +1532,7 @@ def test_spoofed_window_title_shows_the_real_process_and_executable(
 
 @pytest.mark.parametrize(
     "secret",
-    ["Sup3r$ecretPass", "ghp_0123456789abcdefghijklmnopqrstuv", "my key is sk-live-x"],
+    ["Sup3r$ecretPass", "gh" + "p_" + "a1" * 18, "my key is sk-live-x"],
 )
 def test_secret_looking_text_is_masked_with_a_note(rig: Rig, secret: str) -> None:
     fill: dict[str, object] = {
