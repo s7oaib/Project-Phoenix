@@ -157,9 +157,18 @@ Existing suites pass unchanged: runtime, e2e, MAHORAGA, events, mission service,
 | Variant | Verified | Mean mission (s) | Median mission (s) | final_verifier calls / mean (s) |
 |---|---|---|---|---|
 | Before (main `5722431`) | 4 / 5 (run 5: final_verifier rejected "AURORA") | 149.8 (run 1 includes a cold load: 236.1) | 119.3 | 5 / 44.6 |
-| After (this branch, idle machine) | see Completion evidence | | | 0 (all 5 grounded) |
+| After (this branch, idle machine) | **5 / 5** | 133.3 | 121.5 | 0 / — (all 5 `grounded`) |
 
-Every final answer in both variants was exactly `AURORA`. The scratch evidence (raw replies) stays in the agent's scratch directory and is not committed.
+- **Every final answer was exactly `AURORA`,** in both variants.
+- **A contended after-run gave the same verdicts.** An earlier after-run, made while the pytest suite was running, was also 5 / 5 grounded.
+- **Why end-to-end latency barely moved.** The final_verifier's 35–54 s is gone, but in these back-to-back runs the next mission's planner now has to reload the 9B model:
+  - before, the 9B final_verifier was the last call of a run, so the next planner found it loaded (3.4 s);
+  - after, the 4B final answer is the last call, and the planner took 27–47 s.
+
+  On a single mission from a cold start, the saving is the full final_verifier call.
+- **Mean of the other phases.** Before and after respectively: document_verifier about 44 s / 46 s; final_answer about 22 s / 29 s. This is GPU/CPU split and run-to-run variance.
+
+ The scratch evidence (raw replies) stays in the agent's scratch directory and is not committed.
 
 ## Open issues (for the owner)
 
@@ -178,4 +187,30 @@ Every final answer in both variants was exactly `AURORA`. The scratch evidence (
 
 ## Completion evidence
 
-Filled in by the implementation commit's report; see below.
+**Commits** (on branch `feature/PHX-118-levi-final-verifier`):
+- `d382b11`: the implementation;
+- `81812a8`: the pin (`PHX_118_COMMIT`);
+- then this docs update.
+
+**Changed files:**
+- `phoenix/agents/final_grounding.py` (new);
+- `phoenix/agents/runtime.py`;
+- `tests/test_final_grounding.py` (new);
+- `tests/test_phoenix_runtime.py` (the module-boundary scan includes the new module);
+- `tests/test_prompt_injection_defenses.py` (the re-pin);
+- `tests/matrix.toml`;
+- `DECISIONS.md` (ADR-100);
+- `FEATURE_TICKETS.md`;
+- this ticket.
+
+**Commands and results:**
+- **Targeted tests:** `uv run pytest tests/test_final_grounding.py` passed 28.
+- **Impacted suites:** `uv run pytest` on the runtime, e2e, MAHORAGA, mission events, mission service, FYP, REST and triage suites passed 355.
+- **Lint and types:** ruff, ruff format and strict mypy are clean.
+- **Full matrix:** `uv run python scripts/test_matrix.py --allow-dirty`. The only untracked path was a hook's `.swarm/` directory, not part of the change.
+  - **First run:** 12 of 13 gates passed. pytest reported 16,372 passed and 1 failed. The failure, `tests/test_model_benchmark.py::test_inflight_timeout_and_caller_cancel_cleanup[timeout-True]`, is a timing test unrelated to this change, which failed while other agents loaded the machine. It passed 3 of 3 times when re-run alone.
+  - **Re-run** on the final HEAD: see the final report.
+
+**Assumptions:**
+- The rehearsal's exe flow, which triages the request and then has the user approve the read, reaches the same final step as the forced COMPLEX path with a pre-granted read.
+- The scratch harness records raw replies only in the scratch directory.
