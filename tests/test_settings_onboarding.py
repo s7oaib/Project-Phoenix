@@ -426,14 +426,17 @@ def test_required_models_are_tier_models() -> None:
 # ---- ADR-112: capability flags
 
 
+# PHX-120 (ADR-161): memory, web research, media and document generation are
+# enabled; web research is reported enabled only with the launch opt-in
+# (PHOENIX_WEB_RESEARCH_ENABLED, off in these tests).
 EXPECTED_FLAGS = [
     ("workspace_documents", True, "PHX-046", "document_analyst"),
-    ("memory", False, "PHX-110", "memory"),
+    ("memory", True, "PHX-110", "memory"),
     ("web_research", False, "PHX-111", "web_research"),
-    ("computer_control", False, "PHX-112", "computer_control"),
-    ("media", False, "PHX-113", "media"),
-    ("document_generation", False, "PHX-113", "document_analyst"),
-    ("voice", False, "PHX-114", "voice"),
+    ("computer_control", True, "PHX-112", "computer_control"),  # ADR-152
+    ("media", True, "PHX-113", "media"),
+    ("document_generation", True, "PHX-113", "document_analyst"),
+    ("voice", True, "PHX-114", "voice"),  # PHX-114 (ADR-108)
 ]
 
 
@@ -466,8 +469,9 @@ def test_a_later_ticket_only_flips_a_flag(
     backend: Backend, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     flipped = dict(CAPABILITY_FLAGS)
-    flipped[CapabilityId.WEB_RESEARCH] = CapabilityFlag(
-        enabled=True, ticket="PHX-111", agent_id="web_research"
+    # Every flag is on in this build, so the flip turns one off.
+    flipped[CapabilityId.VOICE] = CapabilityFlag(
+        enabled=False, ticket="PHX-114", agent_id="voice"
     )
     monkeypatch.setattr(
         capability_module, "CAPABILITY_FLAGS", MappingProxyType(flipped)
@@ -480,8 +484,27 @@ def test_a_later_ticket_only_flips_a_flag(
             item["capability_id"]: item["enabled"]
             for item in client.get("/capabilities").json()["capabilities"]
         }
-    assert flags["web_research"] is True
-    assert flags["computer_control"] is False
+    assert flags["computer_control"] is True
+    assert flags["voice"] is False
+
+
+def test_web_research_flag_follows_the_launch_opt_in(backend: Backend) -> None:
+    # PHX-120 (ADR-161): the flag is on, but the Research view is told it is
+    # enabled only while this launch holds the web research tool.
+    assert CAPABILITY_FLAGS[CapabilityId.WEB_RESEARCH].enabled is True
+    for opted_in in (False, True):
+        backend.settings = AppSettings(  # type: ignore[call-arg]
+            data_dir=backend.base / "data",
+            web_research_enabled=opted_in,
+            _env_file=None,
+        )
+        with backend.client() as client:
+            flags = {
+                item["capability_id"]: item["enabled"]
+                for item in client.get("/capabilities").json()["capabilities"]
+            }
+            assert (services_of(client).runtime._research is not None) is opted_in
+        assert flags["web_research"] is opted_in
 
 
 def test_new_routes_require_the_token(backend: Backend) -> None:

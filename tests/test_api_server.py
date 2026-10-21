@@ -10,6 +10,7 @@ import io
 import json
 import os
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
@@ -28,9 +29,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, inspect
 
 from alembic import command
+from phoenix.agents.control_steps import (
+    control_permission_policy,
+    control_tool_definitions,
+)
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
+from phoenix.agents.router import RoutingDomain
 from phoenix.agents.runtime import MissionKind, PhoenixRuntimeError
 from phoenix.api import launcher
+from phoenix.api import server as server_module
 from phoenix.api.launcher import (
     LaunchOptions,
     PhoenixServer,
@@ -66,7 +73,10 @@ from phoenix.models.provider import (
     ProviderHealthStatus,
 )
 from phoenix.persistence.database import create_engine_for_settings
+from phoenix.tools.document_files import document_file_tool_definitions
 from phoenix.tools.filesystem import filesystem_tool_definitions
+from phoenix.tools.web_research import web_research_tool_definitions
+from phoenix.tools.youtube import youtube_tool_definitions
 
 HEAD = "0009_default_mission_path"
 ROOT = Path(__file__).resolve().parents[1]
@@ -217,20 +227,16 @@ def test_construction_is_lazy(settings: AppSettings) -> None:
     # PHX-103 (ADR-087) adds WS /events.
     assert {"/health", "/ready", "/events"} <= paths
     # PHX-104 (ADR-089) includes the REST routers (tests/test_rest_api.py owns
-    # the exact table); docs and the deferred PHX-110 routes stay absent.
+    # the exact table); docs stay absent. PHX-110 (ADR-133) adds the
+    # knowledge routes.
     included = {
         getattr(route, "path", None)
         for router in app.routes
         for route in getattr(getattr(router, "original_router", None), "routes", ())
     }
     assert {"/chat", "/missions", "/agents", "/models", "/settings"} <= included
-    assert not (paths | included) & {
-        "/tasks",
-        "/files/upload",
-        "/memory/search",
-        "/docs",
-        "/openapi.json",
-    }
+    assert {"/files/upload", "/memory", "/memory/search"} <= included
+    assert not (paths | included) & {"/tasks", "/docs", "/openapi.json"}
 
 
 def test_lifespan_builds_services_once_and_closes_them(settings: AppSettings) -> None:
@@ -250,8 +256,26 @@ def test_lifespan_builds_services_once_and_closes_them(settings: AppSettings) ->
         assert services.lifecycle.capacity == 1  # INV-023
         assert services.migration_heads == (HEAD,)
         assert services.event_bus.subscriber_count == 0
-        assert services.tool_registry.list_tools() == filesystem_tool_definitions()
-        assert services.permission_policy.rules == ()
+        # PHX-111: the research declaration is registered; the tool is not
+        # built because web research is disabled by default.
+        # PHX-120 (ADR-162): the PHX-113 document and YouTube declarations too.
+        assert services.tool_registry.list_tools() == (
+            *filesystem_tool_definitions(),
+            *web_research_tool_definitions(),
+            *document_file_tool_definitions(),
+            *youtube_tool_definitions(),
+            *control_tool_definitions(),
+        )
+        assert services.runtime._research is None
+        # No workspace yet: capability steps offer media only, not documents.
+        assert services.runtime._capabilities is not None
+        assert services.runtime._capabilities.domains == (RoutingDomain.MEDIA,)
+        # PHX-112 (ADR-152): control steps are enabled; the only standing
+        # rule is PHOENIX's own browser teardown.
+        assert services.permission_policy == control_permission_policy()
+        assert services.control_steps is not None
+        assert services.control_steps.tool_kinds == ("browser", "windows")
+        assert services.runtime.control_enabled
         assert fakes.default.closed == fakes.structured.closed == 0
     assert get_services(app) is None
     assert fakes.default.closed == fakes.structured.closed == 1
@@ -300,7 +324,72 @@ def test_ready_when_provider_and_database_are_healthy(settings: AppSettings) -> 
             "clear_observations": 0,
             "release_after": 2,
         },
+        # PHX-092 (ADR-127): first-run prerequisites; never installed or pulled.
+        "prerequisites": {
+            "ollama": "running",
+            "missing_models": [
+                {"provider_id": "ollama", "model_id": "qwen3.5:9b"},
+                {"provider_id": "ollama", "model_id": "qwen2.5-coder:7b"},
+            ],
+        },
     }
+
+
+@pytest.mark.parametrize(
+    ("installed", "expected"), [(True, "not_running"), (False, "not_found")]
+)
+def test_prerequisites_report_ollama_not_running_or_not_found(
+    settings: AppSettings,
+    monkeypatch: pytest.MonkeyPatch,
+    installed: bool,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(server_module, "ollama_installed", lambda: installed)
+    fakes = factory(status=ProviderHealthStatus.UNAVAILABLE)
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=fakes
+    )
+    with client_for(app) as client:
+        body = client.get("/ready").json()
+    assert body["status"] == "degraded"
+    assert body["prerequisites"] == {
+        "ollama": expected,
+        "missing_models": [
+            {"provider_id": "ollama", "model_id": model}
+            for model in ("qwen3.5:4b", "qwen3.5:2b", "qwen3.5:9b", "qwen2.5-coder:7b")
+        ],
+    }
+
+
+def test_degraded_ollama_still_counts_as_running(
+    settings: AppSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(server_module, "ollama_installed", lambda: False)
+    fakes = factory(status=ProviderHealthStatus.DEGRADED)
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=fakes
+    )
+    with client_for(app) as client:
+        body = client.get("/ready").json()
+    assert body["prerequisites"]["ollama"] == "running"
+
+
+def test_ollama_installed_checks_path_then_the_default_location(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    found: list[str] = []
+    monkeypatch.setattr(shutil, "which", lambda name: found.pop())
+    found.append("C:/tools/ollama.exe")
+    assert server_module.ollama_installed() is True
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    assert server_module.ollama_installed() is False
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert server_module.ollama_installed() is False
+    executable = tmp_path / "Programs" / "Ollama" / "ollama.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"")
+    assert server_module.ollama_installed() is True
 
 
 def test_missing_tier_models_are_skipped(settings: AppSettings) -> None:

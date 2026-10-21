@@ -1751,13 +1751,11 @@ PHX_104_PATHS = ("alembic/env.py",)
 # api/missions.py (optional path, decisions, re-runs), persistence/missions.py
 # (nullable path, triage_outcome) and the REST routes and schemas; all stay
 # pinned, at the PHX-105 implementation commit. PHX-109 moved runtime.py and
-# mission_events.py, PHX-108 api/missions.py, and PHX-119 the REST
-# mission route and schemas, to their own pins (below).
+# mission_events.py, PHX-108 api/missions.py and schemas.py, PHX-110
+# prompts.py and routes/missions.py, and PHX-112 persistence/missions.py, to
+# their own pins (below), so nothing stays on the PHX-105 commit.
 PHX_105_COMMIT = "e34142ca0062dc14c05a5a1d18720b64446cdaa7"
-PHX_105_PATHS = (
-    "phoenix/agents/prompts.py",
-    "phoenix/persistence/missions.py",
-)
+PHX_105_PATHS: tuple[str, ...] = ()
 # PHX-106/107 (ADR-091, ADR-092) intentionally changed the desktop manifest,
 # entry point, Tauri config (capability and CSP) and native host (backend
 # sidecar, proxy and event bridge); they stay pinned, at the PHX-106/107
@@ -1792,10 +1790,18 @@ PHX_118_PATHS: tuple[str, ...] = ()
 # (FinalGrounding.request) and final_grounding.py (the label rule); both stay
 # pinned, at the PHX-118b merge resolution commit.
 PHX_118B_COMMIT = "0a23c66c98b728d44d9859cb96c7eacc4575fa00"
-PHX_118B_PATHS = (
-    "phoenix/agents/runtime.py",
-    "phoenix/agents/final_grounding.py",
-)
+PHX_118B_PATHS = ("phoenix/agents/final_grounding.py",)
+# PHX-112 (ADR-150 to ADR-152) intentionally changed runtime.py (optional
+# ControlStepRunner, approvals, MissionTrace.control_calls, kill switch),
+# api/missions.py (control grants and one-time P4 approvals in the approve ->
+# re-run loop), persistence/missions.py (approve_once), server.py (the
+# ControlStepRunner), capabilities.py (computer_control enabled), and the
+# missions, permissions and schemas routes (display-only approval summary; no
+# workspace check for control requests); all stay pinned, at the PHX-112
+# resolution commit on top of PHX-108 and PHX-118 (the PR must merge with a
+# merge commit so this commit stays reachable).
+PHX_112_COMMIT = "b71e716046595a7c16e9e94c71f6dd7ccf93f4aa"
+PHX_112_PATHS = ("phoenix/persistence/missions.py",)
 # PHX-108 (ADR-110 to ADR-114) intentionally changed server.py (ModelRegistrar),
 # api/missions.py (before_run), the REST route package, schemas and settings
 # routes, the settings store, the native proxy allowlist and the desktop
@@ -1804,12 +1810,8 @@ PHX_118B_PATHS = (
 # server.py and schemas.py to its own pin (below).
 PHX_108_COMMIT = "f70b201a42338cc3c38c2159d2b2ee5d1c84e416"
 PHX_108_PATHS = (
-    "phoenix/api/missions.py",
-    "phoenix/api/routes/__init__.py",
     "phoenix/api/routes/system.py",
     "phoenix/persistence/settings.py",
-    "apps/desktop/src-tauri/src/proxy.rs",
-    "apps/desktop/src/adapters/core.ts",
     "apps/desktop/src/adapters/ConnectedApp.tsx",
     "apps/desktop/src/adapters/connected.css",
 )
@@ -1820,11 +1822,82 @@ PHX_108_PATHS = (
 # schemas.py also carry PHX-118 and PHX-108 changes, so all five stay pinned
 # at the PHX-119 resolution commit that merged PHX-108 (with PHX-118).
 PHX_119_COMMIT = "f378ac80951eb2d6b0f1f8fd86fe08fdc32c8c7b"
-PHX_119_PATHS = (
+PHX_119_PATHS: tuple[str, ...] = ()
+# PHX-114 (ADR-108) intentionally changed server.py (VoiceService wiring, merged
+# with PHX-108's ModelRegistrar), routes/__init__.py (voice routes, merged with
+# PHX-108's setup routes) and mission_events.py (voice.* allowlist); all three
+# stay pinned, at the PHX-114 resolution commit.
+PHX_114_COMMIT = "fc08a14b74fec8d590753b406afa5ac5651ee0f0"
+PHX_114_PATHS: tuple[str, ...] = ()
+# PHX-115 (ADR-145 to ADR-148) intentionally changed server.py (metrics
+# collector wiring), launcher.py (structured JSON logs), routes/__init__.py
+# (GET /metrics), proxy.rs (allowlist) and core.ts (metrics adapter); all stay
+# pinned, at the PHX-115 commit that merged PHX-108 into it (implementation
+# commit 459c281; server.py, routes/__init__.py, proxy.rs and core.ts carry
+# both tickets). The PR must merge with a merge commit so this commit stays
+# reachable.
+PHX_115_COMMIT = "253829afc1a97402519bc279ddce416daabddb95"
+PHX_115_PATHS = (
+    "phoenix/api/launcher.py",
+    "apps/desktop/src-tauri/src/proxy.rs",
+    "apps/desktop/src/adapters/core.ts",
+)
+# PHX-092 (ADR-125, ADR-127) intentionally changed server.py (/ready
+# prerequisites) and the desktop backend sidecar (installed-mode resolution,
+# isolated bundled interpreter); both stay pinned, at the PHX-092 merge
+# resolution commit with PHX-108 (ModelRegistrar and /ready prerequisites
+# combined; the first implementation commit was 43c9c39).
+PHX_092_COMMIT = "9d50200e39cee06cd045371149731c39b49a9909"
+PHX_092_PATHS = ("apps/desktop/src-tauri/src/backend.rs",)
+# PHX-110 (ADR-130 to ADR-134) intentionally changed prompts.py, runtime.py,
+# server.py, body_limit.py (upload cap) and the REST routes package, mission
+# routes and schemas (sources); body_limit.py and routes/missions.py stay
+# pinned, at the PHX-110 implementation commit. PHX-120 moved the others to its
+# own pin (below).
+PHX_110_COMMIT = "da95fb4b9015ca3bf528ebc1df01c55594bf09d4"
+PHX_110_PATHS = ("phoenix/api/body_limit.py",)
+# PHX-111 (ADR-135 to ADR-139) intentionally changed runtime.py,
+# mission_events.py, prompts.py, api/missions.py, routes/permissions.py,
+# server.py and core/config.py (web_research_enabled); core/config.py stays
+# pinned, at the PHX-111 implementation commit. PHX-120 moved the others to its
+# own pin (below).
+PHX_111_COMMIT = "4a844623e48a1ad8acf39bae2a042e2bd1d58a33"
+PHX_111_PATHS = ("phoenix/core/config.py",)
+# PHX-113 (ADR-140) intentionally changed runtime.py and mission_events.py;
+# PHX-120 moved both to its own pin (below), so nothing stays on the PHX-113
+# commit.
+PHX_113_COMMIT = "6c27714839e28ba5e494680bf36e607d70d4407a"
+PHX_113_PATHS: tuple[str, ...] = ()
+# PHX-120 (ADR-160 to ADR-164) integrates PHX-110, PHX-111 and PHX-113: every
+# protected file that more than one of those tickets, PHX-108, PHX-109, PHX-118
+# or PHX-120 itself changed (prompts v5, runtime dispatch and planner choice,
+# mission events, assignment descriptions, backend wiring, grant store,
+# permission route, capability flags and their route) stays pinned, at the
+# PHX-120 implementation commit (the PR must merge with a merge commit).
+PHX_120_COMMIT = "ea7ea165147317afd873f6e61c0a3782b5e37e47"
+PHX_120_PATHS = (
+    "phoenix/agents/prompts.py",
+    "phoenix/agents/responders.py",
+    "phoenix/api/routes/setup.py",
+)
+
+# Release train 2026-10-21 (ADR-165) merged PHX-114, PHX-117, PHX-116,
+# PHX-115, PHX-092, PHX-120 and PHX-112 onto PHX-118b/PHX-119 main. Every
+# protected path more than one of them changed matches no earlier pin, so it
+# moved here (out of the blocks above, whose comments name the earlier
+# owners), pinned at the train's resolution commit. The train must merge
+# with a merge commit so this commit stays reachable.
+PHX_TRAIN_COMMIT = "65b3d935d51b241fa9c7d1e6eefaf321184b3460"
+PHX_TRAIN_PATHS = (
     "phoenix/agents/mission_events.py",
-    "phoenix/api/server.py",
+    "phoenix/agents/runtime.py",
+    "phoenix/api/capabilities.py",
+    "phoenix/api/missions.py",
+    "phoenix/api/routes/__init__.py",
     "phoenix/api/routes/missions.py",
+    "phoenix/api/routes/permissions.py",
     "phoenix/api/routes/schemas.py",
+    "phoenix/api/server.py",
 )
 
 
@@ -1851,6 +1924,15 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_118_PATHS
         and path not in PHX_119_PATHS
         and path not in PHX_118B_PATHS
+        and path not in PHX_114_PATHS
+        and path not in PHX_115_PATHS
+        and path not in PHX_092_PATHS
+        and path not in PHX_110_PATHS
+        and path not in PHX_111_PATHS
+        and path not in PHX_113_PATHS
+        and path not in PHX_120_PATHS
+        and path not in PHX_112_PATHS
+        and path not in PHX_TRAIN_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1865,6 +1947,15 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_118B_COMMIT, path) for path in PHX_118B_PATHS]
     baselines += [(PHX_108_COMMIT, path) for path in PHX_108_PATHS]
     baselines += [(PHX_119_COMMIT, path) for path in PHX_119_PATHS]
+    baselines += [(PHX_114_COMMIT, path) for path in PHX_114_PATHS]
+    baselines += [(PHX_115_COMMIT, path) for path in PHX_115_PATHS]
+    baselines += [(PHX_092_COMMIT, path) for path in PHX_092_PATHS]
+    baselines += [(PHX_110_COMMIT, path) for path in PHX_110_PATHS]
+    baselines += [(PHX_111_COMMIT, path) for path in PHX_111_PATHS]
+    baselines += [(PHX_113_COMMIT, path) for path in PHX_113_PATHS]
+    baselines += [(PHX_120_COMMIT, path) for path in PHX_120_PATHS]
+    baselines += [(PHX_112_COMMIT, path) for path in PHX_112_PATHS]
+    baselines += [(PHX_TRAIN_COMMIT, path) for path in PHX_TRAIN_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

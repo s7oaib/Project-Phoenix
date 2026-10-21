@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: search box</title>
+</head>
+<body>
+<h1>Catalogue search</h1>
+<label for="query">Search</label>
+<input id="query" type="search">
+<p id="result" role="status">No search yet</p>
+<ul>
+<li>phoenix feather pen</li>
+<li>harbour map</li>
+<li>lantern kit</li>
+</ul>
+<script>
+var items = ["phoenix feather pen", "harbour map", "lantern kit"];
+document.getElementById("query").addEventListener("keydown", function (event) {
+  if (event.key !== "Enter") {
+    return;
+  }
+  var query = event.target.value.trim().toLowerCase();
+  var found = items.filter(function (item) {
+    return query && item.indexOf(query) !== -1;
+  });
+  document.getElementById("result").textContent = found.length
+    ? "Found: " + found.join(", ")
+    : "No results";
+});
+</script>
+</body>
+</html>

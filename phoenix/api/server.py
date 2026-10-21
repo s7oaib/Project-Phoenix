@@ -27,14 +27,30 @@ only once at startup. A bounded background loop, the start of each
 mission (while a required model is missing), ``GET /ready`` and
 ``GET /onboarding`` register any tier model that is still missing once its
 provider answers, so starting Ollama after PHOENIX no longer leaves every
-mission failing ``no_eligible_model`` until a restart.
+mission failing ``no_eligible_model`` until a restart. PHX-114 (ADR-108) adds
+the voice service (``/voice`` routes): off until requested (``POST
+/voice/start`` or ``PHOENIX_VOICE_AUTOSTART=1``), it submits spoken requests
+through MissionService like ``POST /chat``, and it stops first at shutdown; a
+voice failure never stops the backend (INV-016). PHX-115
+(ADR-145, ADR-146) puts a ``MetricsCollector`` between the publishers and the
+stream: it logs and aggregates each content-free event, then forwards it, and
+serves ``GET /metrics``. PHX-110 (ADR-130 to ADR-134) adds the user's knowledge base
+(``KnowledgeService``): uploads and memories are embedded with the provider
+set's embedding provider (EmbeddingGemma on Ollama by default), and every
+runtime receives it as its mission KnowledgeSource.
+PHX-112 (ADR-152) enables computer-control steps: one ControlStepRunner over
+PHOENIX's own isolated browser (Chromium from the PHOENIX-owned browser folder)
+and the Windows UI tool, shared by every runtime. Every action still goes
+through ToolRegistry and PermissionEngine and waits for the user's approval;
+the screenshot/vision and terminal control tools are not wired here.
 """
 
 import asyncio
 import contextlib
+import os
 import sys
 import time
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -51,6 +67,12 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from alembic import command
+from phoenix.agents.capability_steps import CapabilityTools
+from phoenix.agents.control_steps import (
+    ControlStepRunner,
+    control_permission_policy,
+    control_tool_definitions,
+)
 from phoenix.agents.kaido import (
     KaidoMonitor,
     KaidoPolicy,
@@ -69,19 +91,28 @@ from phoenix.api.event_stream import (
     WS_TRY_AGAIN_LATER,
     EventStream,
 )
+from phoenix.api.knowledge import KnowledgeService
 from phoenix.api.missions import MissionService
-from phoenix.api.onboarding import REQUIRED_MODELS
+from phoenix.api.observability import (
+    MetricsCollector,
+    VramReport,
+    probe_ollama_vram,
+)
+from phoenix.api.onboarding import REQUIRED_MODELS, runtime_installed
 from phoenix.api.security import (
     LocalApiSecurity,
     accept_websocket,
     error_response,
     install_local_api_security,
 )
+from phoenix.api.voice import ComponentFactory, VoiceService, health_probes
 from phoenix.api.workspace import WorkspaceService
 from phoenix.core.config import AppSettings
 from phoenix.core.event_bus import EventBus
+from phoenix.models.embeddings import EmbeddingProvider
 from phoenix.models.lifecycle import ModelLifecycleManager
 from phoenix.models.ollama import OllamaProvider
+from phoenix.models.ollama_embeddings import OllamaEmbeddingProvider
 from phoenix.models.provider import (
     ModelProvider,
     ModelProviderError,
@@ -98,8 +129,24 @@ from phoenix.persistence.missions import MissionStore
 from phoenix.persistence.settings import SettingsStore
 from phoenix.security.audit import AuditTrail
 from phoenix.security.permissions import PermissionPolicy
+from phoenix.security.secrets import WindowsCredentialStore
+from phoenix.tools.browser import BrowserTool
+from phoenix.tools.browser_setup import (
+    PLAYWRIGHT_ENV,
+    browsers_path,
+    use_phoenix_browsers,
+)
+from phoenix.tools.document_files import (
+    DocumentFileTool,
+    document_file_tool_definitions,
+)
 from phoenix.tools.filesystem import FilesystemTool, filesystem_tool_definitions
 from phoenix.tools.registry import ToolRegistry
+from phoenix.tools.web_research import WebResearchTool, web_research_tool_definitions
+from phoenix.tools.windows_ui import WindowsUITool
+from phoenix.tools.youtube import YouTubeTool, youtube_tool_definitions
+from phoenix.web.duckduckgo import DuckDuckGoSearchProvider
+from phoenix.web.page_fetch import HttpPageFetcher
 
 if sys.platform == "win32":
     import msvcrt
@@ -164,6 +211,11 @@ class ServerConfig(BaseModel):
     # (psutil, no subprocess) can be turned off, then only provider health counts.
     kaido_policy: KaidoPolicy = KaidoPolicy()
     kaido_ram_probe: bool = True
+    # PHX-114: listen for "Rise, Phoenix" from launch (explicit owner opt-in).
+    voice_autostart: bool = Field(
+        default_factory=lambda: os.environ.get("PHOENIX_VOICE_AUTOSTART", "") == "1"
+    )
+    voice_models_dir: Path | None = None  # None: phoenix.voice.engines.models
 
 
 class MigrationLockTimeout(TimeoutError):
@@ -176,6 +228,8 @@ class ProviderSet:
 
     providers: tuple[ModelProvider, ...]
     structured: tuple[ModelProvider, ...] = ()
+    # PHX-110: embeddings for the knowledge base; None leaves it read-only.
+    embedding: EmbeddingProvider | None = None
 
 
 ProviderFactory = Callable[[ServerConfig], ProviderSet]
@@ -186,6 +240,7 @@ def ollama_providers(config: ServerConfig) -> ProviderSet:
     return ProviderSet(
         providers=(OllamaProvider(config.ollama_base_url),),
         structured=(OllamaProvider(config.ollama_base_url, think=False),),
+        embedding=OllamaEmbeddingProvider(config.ollama_base_url),
     )
 
 
@@ -248,6 +303,30 @@ class BackendServices:
     workspace: WorkspaceService
     kaido: KaidoMonitor  # PHX-119: shared by readiness and every runtime
     model_registrar: "ModelRegistrar"  # PHX-108: late provider start
+    voice: VoiceService  # PHX-114
+    knowledge: KnowledgeService  # PHX-110
+    observability: MetricsCollector | None = None  # PHX-115
+    control_steps: ControlStepRunner | None = None  # PHX-112 (ADR-152)
+
+
+@dataclass(frozen=True)
+class _BackendHealth:
+    """The startup ritual's bounded database and provider checks (PHX-114)."""
+
+    probe: DatabaseProbe
+    model_providers: tuple[ModelProvider, ...]
+    timeout: float
+
+    async def database_ok(self) -> bool:
+        return await self.probe.at_head(self.timeout)
+
+    async def providers_ok(self) -> bool:
+        statuses = await asyncio.gather(
+            *(probe_provider(p, self.timeout) for p in self.model_providers)
+        )
+        return bool(statuses) and all(
+            status == ProviderHealthStatus.HEALTHY for status in statuses
+        )
 
 
 class ReadinessStatus(StrEnum):
@@ -274,6 +353,26 @@ class DatabaseReadiness(_Contract):
     at_head: bool
 
 
+class OllamaPrerequisite(StrEnum):
+    """PHX-092 (ADR-127): first-run check; Ollama is never installed by PHOENIX."""
+
+    RUNNING = "running"  # the Ollama provider answered the bounded probe
+    NOT_RUNNING = "not_running"  # an Ollama executable exists but does not answer
+    NOT_FOUND = "not_found"  # no Ollama executable on PATH or in its default place
+
+
+class PrerequisiteReadiness(_Contract):
+    """What the user must install or start; models are never pulled by PHOENIX.
+
+    ``missing_models`` are tier-table models that are not registered yet; the
+    model registrar (PHX-108, ADR-110) registers a model once it is pulled, so
+    no restart is needed.
+    """
+
+    ollama: OllamaPrerequisite
+    missing_models: tuple[ModelReadiness, ...]
+
+
 class ReadinessResponse(_Contract):
     """Statuses and IDs plus the PHOENIX version only.
 
@@ -289,6 +388,49 @@ class ReadinessResponse(_Contract):
     database: DatabaseReadiness
     # PHX-119: KAIDO's state after this probe; null when no backend runs.
     kaido: KaidoStatus | None
+    # PHX-092 (ADR-127); null only while the backend services are unavailable.
+    prerequisites: PrerequisiteReadiness | None
+
+
+OLLAMA_PROVIDER_ID = "ollama"
+
+
+def ollama_installed() -> bool:
+    """An Ollama executable on PATH or at the per-user installer's default path.
+
+    The same detection as ``GET /onboarding`` (PHX-108, ADR-113). Only a boolean
+    leaves this function; the path is never reported.
+    """
+    return runtime_installed(OLLAMA_PROVIDER_ID)
+
+
+def prerequisites(
+    services: BackendServices,
+    statuses: Sequence[ProviderHealthStatus],
+) -> PrerequisiteReadiness:
+    running = any(
+        provider.provider_id == OLLAMA_PROVIDER_ID
+        and status != ProviderHealthStatus.UNAVAILABLE
+        for provider, status in zip(services.providers, statuses, strict=True)
+    )
+    if running:
+        ollama = OllamaPrerequisite.RUNNING
+    elif ollama_installed():
+        ollama = OllamaPrerequisite.NOT_RUNNING
+    else:
+        ollama = OllamaPrerequisite.NOT_FOUND
+    registered = {
+        (record.provider_id, record.model_id)
+        for record in services.capability_registry.list_records()
+    }
+    return PrerequisiteReadiness(
+        ollama=ollama,
+        missing_models=tuple(
+            ModelReadiness(provider_id=provider_id, model_id=model_id)
+            for provider_id, model_id in tier_models(services.tier_table)
+            if (provider_id, model_id) not in registered
+        ),
+    )
 
 
 def tier_models(table: ModelTierTable) -> tuple[tuple[str, str], ...]:
@@ -463,7 +605,14 @@ class ModelRegistrar:
                 await self.refresh()
 
 
-async def _close_provider(provider: ModelProvider) -> None:
+def _restore_env(name: str, value: str | None) -> None:
+    if value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = value
+
+
+async def _close_provider(provider: ModelProvider | EmbeddingProvider) -> None:
     close = getattr(provider, "aclose", None)
     if callable(close):
         await close()
@@ -488,7 +637,11 @@ async def cancel_active_missions(services: BackendServices) -> int:
 
 @asynccontextmanager
 async def open_services(
-    settings: AppSettings, config: ServerConfig, factory: ProviderFactory
+    settings: AppSettings,
+    config: ServerConfig,
+    factory: ProviderFactory,
+    *,
+    voice_factory: ComponentFactory | None = None,
 ) -> AsyncIterator[BackendServices]:
     """Build the services once; on exit (or failed startup) close what was opened."""
     async with AsyncExitStack() as stack:
@@ -498,6 +651,8 @@ async def open_services(
         provider_set = factory(config)
         for provider in (*provider_set.providers, *provider_set.structured):
             stack.push_async_callback(_close_provider, provider)
+        if provider_set.embedding is not None:
+            stack.push_async_callback(_close_provider, provider_set.embedding)
         agents = build_default_agent_registry()
         table = default_tier_table()
         capabilities = ModelCapabilityRegistry()
@@ -511,20 +666,81 @@ async def open_services(
             pass  # keep what registered; readiness reports the gap (INV-022)
         lifecycle = ModelLifecycleManager()
         session_factory = create_session_factory(engine)
-        tools = ToolRegistry(filesystem_tool_definitions())
+        # PHX-111: the research declaration is always registered (so a stored
+        # research request can be shown and decided); the tool itself exists
+        # only when web research is enabled.
+        # PHX-120 (ADR-162): the PHX-113 document and YouTube declarations are
+        # registered too, so their stored requests can be shown and decided.
+        tools = ToolRegistry(
+            (
+                *filesystem_tool_definitions(),
+                *web_research_tool_definitions(),
+                *document_file_tool_definitions(),
+                *youtube_tool_definitions(),
+                *control_tool_definitions(),
+            )
+        )
+        research: WebResearchTool | None = None
+        if settings.web_research_enabled:
+            search = DuckDuckGoSearchProvider()
+            stack.push_async_callback(search.aclose)
+            fetcher = HttpPageFetcher()
+            stack.push_async_callback(fetcher.aclose)
+            research = WebResearchTool(tools, search, fetcher)
         bus = EventBus(capacity=EVENT_BUS_CAPACITY)
         stream = EventStream(
             bus,
             client_buffer=config.event_client_buffer,
             max_connections=config.event_max_connections,
         )
-        policy = PermissionPolicy()
+        # PHX-112: the one standing rule lets PHOENIX close its own browser.
+        policy = control_permission_policy()
         audit = AuditTrail(session_factory, tools)
+        # PHX-115: VRAM comes from Ollama's placement report, only when the
+        # configured providers include Ollama.
+        uses_ollama = any(
+            isinstance(provider, OllamaProvider) for provider in provider_set.providers
+        )
+
+        async def vram() -> VramReport:
+            if not uses_ollama:
+                return VramReport(status="unavailable")
+            return await probe_ollama_vram(
+                config.ollama_base_url, config.probe_timeout_seconds
+            )
+
+        observer = MetricsCollector(stream, vram_probe=vram)
+        observer.bind_stream_counters(
+            lambda: (stream.dropped_events, stream.rejected_events)
+        )
+        # KAIDO's and the voice pipeline's events go through the collector too.
         kaido = KaidoMonitor(
             policy=config.kaido_policy,
             resource_probe=system_ram_sample if config.kaido_ram_probe else None,
-            events=stream,
+            events=observer,
         )
+        # PHX-120 (ADR-162): PHX-113 media steps. YouTube reads its API key from
+        # the Windows credential store at call time (no key: tool_failed); no
+        # player adapter exists yet, so open/play/pause fail explicitly. Spotify
+        # needs an owner-registered client ID and is not wired.
+        youtube = YouTubeTool(tools, policy, WindowsCredentialStore())
+        stack.push_async_callback(youtube.aclose)
+        knowledge = KnowledgeService(
+            sessions=session_factory,
+            embedding=provider_set.embedding,
+            lifecycle=lifecycle,
+            agent_registry=agents,
+        )
+        previous_browsers = os.environ.get(PLAYWRIGHT_ENV)
+        use_phoenix_browsers(browsers_path())  # never downloads (ADR-150)
+        stack.callback(_restore_env, PLAYWRIGHT_ENV, previous_browsers)
+        control = ControlStepRunner(
+            registry=tools,
+            policy=policy,
+            browser=BrowserTool(tools, policy, audit),
+            windows=WindowsUITool(tools, policy, audit),
+        )
+        stack.callback(control.close)
 
         def build_runtime(workspace_root: str | None = None) -> PhoenixRuntime:
             """PHX-104: one runtime per workspace root; None has no documents."""
@@ -538,8 +754,19 @@ async def open_services(
                 filesystem_tool=None
                 if workspace_root is None
                 else FilesystemTool(workspace_root, tools, policy, audit),
-                events=stream,
+                events=observer,
                 kaido=kaido,
+                knowledge=knowledge,
+                research_tool=research,
+                # PHX-120 (ADR-162): PHX-113 document read/create under the
+                # same workspace root, and YouTube media steps.
+                capabilities=CapabilityTools(
+                    documents=None
+                    if workspace_root is None
+                    else DocumentFileTool(workspace_root, tools, policy),
+                    youtube=youtube,
+                ),
+                control=control,
             )
 
         runtime = build_runtime()
@@ -547,16 +774,33 @@ async def open_services(
             runtime=runtime,
             store=MissionStore(session_factory),
             tool_registry=tools,
-            events=stream,
+            events=observer,
             before_run=registrar.refresh_required,
         )
+        observer.bind_traces(missions.get_trace)
         settings_store = SettingsStore(session_factory)
+        database_probe = DatabaseProbe(engine, heads)
+        voice = VoiceService(
+            missions,
+            observer,
+            probes=health_probes(
+                _BackendHealth(
+                    database_probe,
+                    provider_set.providers,
+                    config.probe_timeout_seconds,
+                ),
+                tools,
+                agents,
+            ),
+            factory=voice_factory,
+            models_dir=config.voice_models_dir,
+        )
         services = BackendServices(
             settings=settings,
             engine=engine,
             session_factory=session_factory,
             migration_heads=heads,
-            database_probe=DatabaseProbe(engine, heads),
+            database_probe=database_probe,
             agent_registry=agents,
             tier_table=table,
             capability_registry=capabilities,
@@ -579,6 +823,10 @@ async def open_services(
             ),
             kaido=kaido,
             model_registrar=registrar,
+            voice=voice,
+            knowledge=knowledge,
+            observability=observer,
+            control_steps=control,
         )
         refresher: asyncio.Task[None] | None = None
         try:
@@ -589,9 +837,12 @@ async def open_services(
                     config.model_refresh_seconds, config.model_refresh_idle_seconds
                 )
             )
+            if config.voice_autostart:
+                await services.voice.start()  # never raises (INV-016)
             yield services
         finally:
             try:
+                await services.voice.aclose()  # voice first: no new missions
                 if refresher is not None:
                     refresher.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
@@ -618,6 +869,7 @@ async def readiness(
             models=(),
             database=DatabaseReadiness(at_head=False),
             kaido=None,
+            prerequisites=None,  # not checked before the services exist
         )
     statuses = await asyncio.gather(
         *(probe_provider(provider, timeout) for provider in services.providers)
@@ -661,6 +913,7 @@ async def readiness(
         models=models,
         database=DatabaseReadiness(at_head=at_head),
         kaido=kaido,
+        prerequisites=prerequisites(services, statuses),
     )
 
 
@@ -699,6 +952,7 @@ def build_server_app(
     security: LocalApiSecurity,
     config: ServerConfig | None = None,
     provider_factory: ProviderFactory | None = None,
+    voice_factory: ComponentFactory | None = None,
 ) -> FastAPI:
     """create_app() plus the owning lifespan, GET /ready, WS /events and the
     PHX-104 REST routes.
@@ -721,7 +975,9 @@ def build_server_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        async with open_services(settings, options, factory) as services:
+        async with open_services(
+            settings, options, factory, voice_factory=voice_factory
+        ) as services:
             setattr(app.state, STATE_KEY, services)
             try:
                 yield

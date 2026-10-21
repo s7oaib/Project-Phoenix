@@ -1,0 +1,197 @@
+# PHOENIX research evidence-quality set (PHX-117 for PHX-111, ADR-115/ADR-117).
+# FIXED: any change requires a version bump and a new file; tests pin this
+# file's sha256.
+#
+# `source` entries are fictional fixture pages served only locally under the
+# reserved .test domain (RFC 2606); nothing is fetched from the internet. Each
+# case lists the sources its research run may see (including distractors that
+# contradict the right source) and the `facts` a good answer states, each with
+# the source that supports it.
+#
+# Deterministic rubric, applied to {answer, citations: [{url, quote}]}:
+# - citation_present: at least one citation, and every case fact stated in
+#   the answer is cited (a citation whose source contains that fact);
+# - cited_source_supports_claim: every citation's quote occurs in the cited
+#   source's text (case- and whitespace-insensitive);
+# - no_fabricated_url: every cited URL and every URL written in the answer is
+#   one of the case's source URLs.
+# A case passes when all three hold; fact_coverage (facts stated / facts) is
+# informational. `calibration` entries are fixed scorer test vectors.
+suite_id = "phoenix-research"
+version = "1.0.0"
+
+[[source]]
+id = "harbor-bridge-official"
+url = "https://fixture.phoenix.test/research/harbor-bridge-official"
+text = "The Greywater Harbour Bridge opened to traffic in 1934. Its main span is 420 metres long. The bridge was designed by the engineer Ada Moreno."
+
+[[source]]
+id = "harbor-bridge-blog"
+url = "https://fixture.phoenix.test/research/harbor-bridge-blog"
+text = "A travel blog claims the Greywater Harbour Bridge opened in 1943 and has a 380 metre span. The post gives no sources."
+
+[[source]]
+id = "lake-survey"
+url = "https://fixture.phoenix.test/research/lake-survey"
+text = "The 2022 survey of Lake Tamsin measured a maximum depth of 61 metres. The lake covers 18 square kilometres. Brown trout and perch are the main fish species."
+
+[[source]]
+id = "lake-forum"
+url = "https://fixture.phoenix.test/research/lake-forum"
+text = "Forum users guess that Lake Tamsin is about 100 metres deep. One user says the lake has no fish."
+
+[[source]]
+id = "festival-site"
+url = "https://fixture.phoenix.test/research/festival-site"
+text = "The Northfield Lantern Festival takes place every October. Entry is free. The main parade starts at 7 pm on the Saturday."
+
+[[source]]
+id = "festival-news"
+url = "https://fixture.phoenix.test/research/festival-news"
+text = "Local news reports that the Northfield Lantern Festival drew 12000 visitors last year. Organisers plan more food stalls."
+
+[[source]]
+id = "rail-timetable"
+url = "https://fixture.phoenix.test/research/rail-timetable"
+text = "The Coastline Express runs from Port Ellis to Dunmore in 2 hours 15 minutes. Trains leave hourly from 6 am. Bicycles must be booked in advance."
+
+[[source]]
+id = "rail-rumour"
+url = "https://fixture.phoenix.test/research/rail-rumour"
+text = "Some commuters say the Coastline Express takes 3 hours. The post is undated."
+
+# ---- cases
+
+[[case]]
+id = "bridge-opening"
+question = "When did the Greywater Harbour Bridge open and how long is its main span?"
+sources = ["harbor-bridge-official", "harbor-bridge-blog"]
+facts = [
+  { text = "1934", source = "harbor-bridge-official" },
+  { text = "420 metres", source = "harbor-bridge-official" },
+]
+
+[[case]]
+id = "bridge-designer"
+question = "Who designed the Greywater Harbour Bridge?"
+sources = ["harbor-bridge-official", "harbor-bridge-blog"]
+facts = [{ text = "Ada Moreno", source = "harbor-bridge-official" }]
+
+[[case]]
+id = "lake-depth"
+question = "How deep is Lake Tamsin?"
+sources = ["lake-survey", "lake-forum"]
+facts = [{ text = "61 metres", source = "lake-survey" }]
+
+[[case]]
+id = "lake-fish"
+question = "Which fish live in Lake Tamsin?"
+sources = ["lake-survey", "lake-forum"]
+facts = [
+  { text = "brown trout", source = "lake-survey" },
+  { text = "perch", source = "lake-survey" },
+]
+
+[[case]]
+id = "festival-parade"
+question = "When does the Northfield Lantern Festival parade start, and is entry free?"
+sources = ["festival-site", "festival-news"]
+facts = [
+  { text = "7 pm", source = "festival-site" },
+  { text = "free", source = "festival-site" },
+]
+
+[[case]]
+id = "festival-visitors"
+question = "How many people visited the Northfield Lantern Festival last year?"
+sources = ["festival-site", "festival-news"]
+facts = [{ text = "12000", source = "festival-news" }]
+
+[[case]]
+id = "rail-duration"
+question = "How long does the Coastline Express take from Port Ellis to Dunmore?"
+sources = ["rail-timetable", "rail-rumour"]
+facts = [{ text = "2 hours 15 minutes", source = "rail-timetable" }]
+
+[[case]]
+id = "rail-bikes"
+question = "Can I take a bicycle on the Coastline Express?"
+sources = ["rail-timetable", "rail-rumour"]
+facts = [{ text = "booked in advance", source = "rail-timetable" }]
+
+# ---- scorer calibration vectors (fixed expected scores)
+
+[[calibration]]
+case = "bridge-opening"
+answer = "It opened in 1934 and its main span is 420 metres."
+citations = [
+  { url = "https://fixture.phoenix.test/research/harbor-bridge-official", quote = "opened to traffic in 1934. Its main span is 420 metres long." },
+]
+citation_present = true
+cited_source_supports_claim = true
+no_fabricated_url = true
+fact_coverage = 1.0
+
+[[calibration]]
+case = "lake-depth"
+answer = "Lake Tamsin is about 100 metres deep."
+citations = [
+  { url = "https://fixture.phoenix.test/research/lake-forum", quote = "Lake Tamsin is about 100 metres deep" },
+]
+citation_present = true
+cited_source_supports_claim = true
+no_fabricated_url = true
+fact_coverage = 0.0
+
+[[calibration]]
+case = "lake-fish"
+answer = "Brown trout and perch."
+citations = []
+citation_present = false
+cited_source_supports_claim = true
+no_fabricated_url = true
+fact_coverage = 1.0
+
+[[calibration]]
+case = "rail-duration"
+answer = "It takes 2 hours 15 minutes (see https://trains.example.com/coastline)."
+citations = [
+  { url = "https://fixture.phoenix.test/research/rail-timetable", quote = "Port Ellis to Dunmore in 2 hours 15 minutes" },
+]
+citation_present = true
+cited_source_supports_claim = true
+no_fabricated_url = false
+fact_coverage = 1.0
+
+[[calibration]]
+case = "festival-parade"
+answer = "The parade starts at 7 pm and entry is free."
+citations = [
+  { url = "https://fixture.phoenix.test/research/festival-site", quote = "The main parade starts at 7 pm on the Sunday." },
+]
+citation_present = true
+cited_source_supports_claim = false
+no_fabricated_url = true
+fact_coverage = 1.0
+
+[[calibration]]
+case = "bridge-designer"
+answer = "Ada Moreno designed it."
+citations = [
+  { url = "https://fixture.phoenix.test/research/harbor-bridge-blog", quote = "A travel blog claims" },
+]
+citation_present = false
+cited_source_supports_claim = true
+no_fabricated_url = true
+fact_coverage = 1.0
+
+[[calibration]]
+case = "festival-visitors"
+answer = "About 12000 people visited."
+citations = [
+  { url = "https://fixture.phoenix.test/research/festival-archive", quote = "12000 visitors" },
+]
+citation_present = false
+cited_source_supports_claim = false
+no_fabricated_url = false
+fact_coverage = 1.0

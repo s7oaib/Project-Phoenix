@@ -796,17 +796,63 @@ def historic(path: str) -> str:
     ).decode()
 
 
+# PHX-114 (ADR-105 to ADR-107) adds the voice stack after PHX-103. Exactly these
+# manifest entries, lock constraint and package records are set aside here;
+# tests/test_voice_pipeline.py pins their exact delta, versions and hashes.
+VOICE_REQUIREMENTS = (
+    "faster-whisper>=1.2.1,<2",
+    "numpy>=2,<3",
+    "piper-tts>=1.8,<2",
+    "sounddevice>=0.5.6,<0.6",
+)
+VOICE_PACKAGES = frozenset(
+    {
+        "av",
+        "cffi",
+        "ctranslate2",
+        "faster-whisper",
+        "filelock",
+        "flatbuffers",
+        "fsspec",
+        "hf-xet",
+        "huggingface-hub",
+        "numpy",
+        "onnxruntime",
+        "pathvalidate",
+        "piper-tts",
+        "protobuf",
+        "pycparser",
+        "pyyaml",
+        "requests",
+        "sounddevice",
+        "tokenizers",
+        "tqdm",
+        "urllib3",
+    }
+)
+
+
 def test_exact_websockets_dependency_delta() -> None:
     before = tomllib.loads(historic("pyproject.toml"))
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert project["project"]["dependencies"].count(WEBSOCKETS) == 1
     project["project"]["dependencies"].remove(WEBSOCKETS)
+    for requirement in VOICE_REQUIREMENTS:
+        project["project"]["dependencies"].remove(requirement)
+    assert project["tool"].pop("uv") == {
+        "constraint-dependencies": ["huggingface-hub<1"]
+    }
     assert project == before
     old = tomllib.loads(historic("uv.lock"))
     new = tomllib.loads((ROOT / "uv.lock").read_text())
     old_records = {p["name"]: p for p in old.pop("package")}
     new_records = {p["name"]: p for p in new.pop("package")}
+    assert new.pop("manifest") == {
+        "constraints": [{"name": "huggingface-hub", "specifier": "<1"}]
+    }
     assert old == new
+    for name in VOICE_PACKAGES:
+        del new_records[name]
     assert set(new_records) - set(old_records) == {"websockets"}
     assert not set(old_records) - set(new_records)
     added = new_records["websockets"]
@@ -826,8 +872,13 @@ def test_exact_websockets_dependency_delta() -> None:
         if name == "phoenix":
             requires = after["metadata"]["requires-dist"]
             assert {"name": "websockets", "specifier": ">=17.2,<18"} in requires
+            voice = {r.split(">")[0] for r in VOICE_REQUIREMENTS}  # PHX-114
             for entries in (after["dependencies"], requires):
-                entries[:] = [x for x in entries if x["name"] != "websockets"]
+                entries[:] = [
+                    x
+                    for x in entries
+                    if x["name"] != "websockets" and x["name"] not in voice
+                ]
         assert after == record, name
     assert version("websockets") == "17.2"
     assert metadata("websockets")["License-Expression"] == "BSD-3-Clause"

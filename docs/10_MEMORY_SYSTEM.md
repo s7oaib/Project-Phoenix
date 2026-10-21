@@ -23,3 +23,17 @@ id, type, content, source_type, source_ref, scope, confidence, importance, creat
 - Contradictions are not silently overwritten.
 - User can inspect and delete persisted memory.
 - Authoritative project documents beat inferred memory.
+
+## Write policy (PHX-110, ADR-132)
+
+- Only the user writes memory, through `POST /memory`; missions and models
+  never do, so no chat turn becomes memory automatically.
+- A memory is one note of at most 2,000 characters, typed `user` (default),
+  `project` or `semantic`, in the single `user` scope (`source_type`
+  `user_note`, confidence 1.0, importance 0.5, no expiry); at most 2,000.
+- Credential-shaped text is refused (`secret_rejected`) before it is embedded
+  or stored; the same rule is PUDDING's admission policy (INV-018).
+- Every memory is listed (`GET /memory`), searchable (`GET /memory/search`)
+  and deletable with its vector (`DELETE /memory/{id}`).
+- Missions read memories only through knowledge steps (docs/11), as untrusted
+  guarded data, and cite them like documents.

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: to-do list</title>
+</head>
+<body>
+<h1>Chores</h1>
+<ul>
+<li><label><input id="todo-laundry" type="checkbox"> Laundry</label></li>
+<li><label><input id="todo-dishes" type="checkbox"> Dishes</label></li>
+<li><label><input id="todo-plants" type="checkbox"> Water plants</label></li>
+</ul>
+<p id="status" role="status">0 done</p>
+<script>
+var boxes = document.querySelectorAll("input[type=checkbox]");
+function update() {
+  var done = 0;
+  for (var i = 0; i < boxes.length; i += 1) {
+    if (boxes[i].checked) {
+      done += 1;
+    }
+  }
+  document.getElementById("status").textContent = done + " done";
+}
+for (var i = 0; i < boxes.length; i += 1) {
+  boxes[i].addEventListener("change", update);
+}
+</script>
+</body>
+</html>

@@ -621,7 +621,8 @@ latest 64 transcript entries, long answers in ordered parts), Permissions (pendi
 requests, P1–P4 `approval_required` evidence, approve with `session` or deny; the
 linked re-run is followed), Task Graph and Agent Network (live step and agent states
 from events; objectives and dependencies are not published), Models and Observability
-(recent events and timings). Memory, Files and Voice stay unconnected. `main.tsx`
+(recent events and timings, plus the backend's `GET /metrics` snapshot and recent
+structured event logs since PHX-115, ADR-148). Memory, Files and Voice stay unconnected. `main.tsx`
 renders `ConnectedApp` only inside the native shell; a plain browser keeps the honest
 unconnected App. App.tsx is unchanged by PHX-107, so its captions still describe ports as
 caller-supplied; PHX-108 adds only the header status line (below).
@@ -676,3 +677,43 @@ Demo: `uv sync` in the repository, then `npm run tauri:dev --workspace @phoenix/
 (or run the release build from `npm run tauri:build --workspace @phoenix/desktop`).
 Overrides: `PHOENIX_BACKEND_ROOT`, `PHOENIX_BACKEND_PYTHON`, `PHOENIX_DATA_DIR`.
 Backend stderr is written to `<data>/phoenix.desktop-backend.log`.
+
+## PHX-092 Windows installer (ADR-125 to ADR-129)
+
+Build (Windows, from the repository root, after `npm ci`):
+`uv run --locked python scripts/build_installer.py`. It stages
+`build/phoenix-runtime/` (python.org embeddable CPython 3.11.9, SHA-256 pinned;
+every runtime wheel from `uv.lock`, hash-checked and binary-only; PHOENIX's own
+wheel plus `alembic/` and `alembic.ini`), smoke-imports the backend with the
+staged interpreter, then runs `tauri build --bundles nsis --config
+packaging/windows/tauri.installer.conf.json`. The installer is
+`apps/desktop/src-tauri/target/release/bundle/nsis/PHOENIX_<version>_x64-setup.exe`.
+`--stage-only` stops after staging. CI: the `release-installer` workflow
+uploads the installer as the `phoenix-installer-windows-x64` artifact.
+
+Install: run the setup file. It is **unsigned**, so SmartScreen shows "Windows
+protected your PC": choose *More info*, then *Run anyway*. It installs for the
+current user only (no administrator rights) to `%LOCALAPPDATA%\PHOENIX` by
+default; the directory page accepts another folder (for example
+`D:\Phoenix\app`). WebView2 is installed only if missing.
+
+Prerequisites, never installed or downloaded by PHOENIX: Ollama (running) and
+the tier models (`ollama pull qwen3.5:4b`, `qwen3.5:2b`, `qwen3.5:9b`,
+`qwen2.5-coder:7b`). `GET /ready` reports them under `prerequisites`
+(`ollama`: `running` / `not_running` / `not_found`; `missing_models`); PHX-108
+shows the fuller `GET /onboarding` view. A pulled model is registered without a
+restart (ADR-110).
+
+Run: the installed app starts `backend\python\python.exe -I -m phoenix.api`
+from `backend\app` next to the executable (installed mode). A run-time
+`PHOENIX_BACKEND_ROOT` still selects a checkout instead. Data: `PHOENIX_DATA_DIR`
+if set (per-user environment variable; on BLAZE-6 `D:\Phoenix\data`), else
+`%USERPROFILE%\.phoenix\data`.
+
+Uninstall: *Settings → Apps → PHOENIX → Uninstall* (or `uninstall.exe` in the
+install folder). Program files, shortcuts and the `backend` folder are removed;
+user data stays unless "Delete the application data" is ticked, which also
+removes the default `%USERPROFILE%\.phoenix\data` (a custom
+`PHOENIX_DATA_DIR` is never deleted), Tauri's WebView data and the remembered
+install folder (`HKCU\Software\PHOENIX`). Silent uninstall (`uninstall.exe /S`)
+always keeps user data. Ollama and its models are never touched.

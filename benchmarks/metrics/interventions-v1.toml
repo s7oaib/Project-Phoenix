@@ -1,0 +1,125 @@
+# PHOENIX user-intervention set (PHX-117, ADR-115/ADR-118). FIXED: any change
+# requires a version bump and a new file; tests pin this file's sha256.
+#
+# Each case is one user request run as a forced-COMPLEX mission over a fixture
+# workspace holding `file` entries, starting with no grants. Every
+# WAITING_PERMISSION result is one user intervention (a permission prompt); the
+# runner then approves exactly the pending request for the session (the
+# PHX-102 linked re-run) and runs the mission again, up to max_rounds.
+# PHOENIX v1 has no clarification turn, so permission prompts are the only
+# intervention kind. min_interventions is the fewest prompts the request can
+# need (one per distinct file it must read).
+#
+# Scripted CI runs answer the producer turns from `steps`, `domains`,
+# `documents`, `step_outputs` and `final`; a live run lets the models decide
+# and uses only `request` and `min_interventions`.
+# Files are harmless fixtures with no private data.
+suite_id = "phoenix-interventions"
+version = "1.0.0"
+max_rounds = 4
+
+[[file]]
+name = "notes.txt"
+text = "Project codename: HERON-4. Due date: 12 March. Meeting room: B2."
+
+[[file]]
+name = "team.txt"
+text = "Team lead: Sam Okafor. Team size: 5. Stand-up time: 9:30 am."
+
+[[file]]
+name = "budget.txt"
+text = "Workshop budget: 1200 dollars. Catering: 300 dollars."
+
+# ---- text only: no workspace access, so no prompt
+
+[[case]]
+id = "text-only-arithmetic"
+request = "What is 25 plus 17?"
+steps = ["Add 25 and 17."]
+domains = ["intelligence"]
+documents = [""]
+step_outputs = ["25 plus 17 is 42."]
+final = "42"
+min_interventions = 0
+rationale = "General knowledge needs no tool and no permission."
+
+[[case]]
+id = "text-only-definition"
+request = "In one sentence, what is a haiku?"
+steps = ["Define a haiku in one sentence."]
+domains = ["intelligence"]
+documents = [""]
+step_outputs = ["A haiku is a short three-line Japanese poem of 5, 7 and 5 syllables."]
+final = "A haiku is a short three-line poem of 5, 7 and 5 syllables."
+min_interventions = 0
+rationale = "A definition needs no tool and no permission."
+
+# ---- one file: one read_text grant
+
+[[case]]
+id = "one-file-codename"
+request = "What is the project codename in notes.txt?"
+steps = ["Read notes.txt and find the project codename."]
+domains = ["documents"]
+documents = ["notes.txt"]
+step_outputs = ["The notes give the project codename HERON-4."]
+final = "HERON-4"
+min_interventions = 1
+rationale = "One file read needs one approval."
+
+[[case]]
+id = "one-file-team-lead"
+request = "Who is the team lead according to team.txt?"
+steps = ["Read team.txt and find the team lead."]
+domains = ["documents"]
+documents = ["team.txt"]
+step_outputs = ["team.txt names Sam Okafor as team lead."]
+final = "Sam Okafor"
+min_interventions = 1
+rationale = "One file read needs one approval."
+
+[[case]]
+id = "one-file-then-text"
+request = "How many days remain in March after the due date in notes.txt?"
+steps = ["Read notes.txt and find the due date.", "Count the days left in March after that date."]
+domains = ["documents", "intelligence"]
+documents = ["notes.txt", ""]
+step_outputs = ["The notes give the due date as 12 March.", "March has 31 days, so 19 days remain after 12 March."]
+final = "19 days"
+min_interventions = 1
+rationale = "One file read, then reasoning without a tool."
+
+# ---- two files: one prompt per file
+
+[[case]]
+id = "two-files-room-and-lead"
+request = "Which meeting room is in notes.txt, and who leads the team in team.txt?"
+steps = ["Read notes.txt and find the meeting room.", "Read team.txt and find the team lead."]
+domains = ["documents", "documents"]
+documents = ["notes.txt", "team.txt"]
+step_outputs = ["The notes name meeting room B2.", "team.txt names Sam Okafor as team lead."]
+final = "Room B2; the team lead is Sam Okafor."
+min_interventions = 2
+rationale = "Two distinct files need two approvals."
+
+[[case]]
+id = "two-files-budget-per-person"
+request = "Using budget.txt and team.txt, what is the workshop budget per team member?"
+steps = ["Read budget.txt and find the workshop budget.", "Read team.txt and find the team size."]
+domains = ["documents", "documents"]
+documents = ["budget.txt", "team.txt"]
+step_outputs = ["budget.txt gives a workshop budget of 1200 dollars.", "team.txt gives a team size of 5."]
+final = "240 dollars per team member."
+min_interventions = 2
+rationale = "Two distinct files need two approvals."
+
+[[case]]
+id = "same-file-twice"
+request = "What are the codename and the due date in notes.txt?"
+steps = ["Read notes.txt and find the project codename.", "Read notes.txt and find the due date."]
+domains = ["documents", "documents"]
+documents = ["notes.txt", "notes.txt"]
+step_outputs = ["The notes give the project codename HERON-4.", "The notes give the due date as 12 March."]
+final = "HERON-4, due 12 March."
+min_interventions = 1
+rationale = "A session grant for one file covers the second read of it."

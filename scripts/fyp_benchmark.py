@@ -14,8 +14,10 @@ Usage::
     python scripts/fyp_benchmark.py --model T1=qwen3.5:4b --runs 1
     python scripts/fyp_benchmark.py --think off        # thinking-off row (PHX-017)
     python scripts/fyp_benchmark.py --config phoenix-multi-agent --help  # config (2)
+    python scripts/fyp_benchmark.py --config phoenix-adaptive-deep --help  # config (3)
 
-``--config phoenix-multi-agent`` dispatches to ``scripts/fyp_multi_agent.py``.
+``--config phoenix-multi-agent`` dispatches to ``scripts/fyp_multi_agent.py`` and
+``--config phoenix-adaptive-deep`` to ``scripts/fyp_adaptive_deep.py`` (PHX-116).
 """
 
 from __future__ import annotations
@@ -66,12 +68,39 @@ DEFAULT_TIERS: tuple[tuple[str, str], ...] = (
     ("T2-code", "qwen2.5-coder:7b"),
 )
 CONFIG3_REASON = (
-    "PhoenixRuntime has no adaptive model routing or Colibri deep-tier (T3) path; "
-    "its tier table covers T0-T2 only."
+    "Not part of a baseline run; measured separately with --config "
+    "phoenix-adaptive-deep (PHX-116) once scripts/colibri_gate.py has gated the "
+    "Colibri deep tier (T3)."
 )
 CATCH_RATE_REASON = (
     "Needs fault-injected cases: the v1 set has no known-bad candidates, and a "
-    "LEVI rejection hides the rejected answer, so a catch cannot be scored."
+    "LEVI rejection hides the rejected answer, so a catch cannot be scored here. "
+    "Measured separately by scripts/metric_benchmark.py (PHX-117) on "
+    "benchmarks/metrics/verification-v1.toml."
+)
+# PHX-117 (ADR-117): these datasets exist and are validated by
+# scripts/metric_benchmark.py --dry-run; the metric waits for its capability.
+MEMORY_REASON = (
+    "Needs PHX-110 (memory and RAG in missions); its retrieval QA set "
+    "benchmarks/metrics/memory-v1.toml is defined and validated (PHX-117)."
+)
+RESEARCH_REASON = (
+    "Needs PHX-111 (web research in missions); its evidence rubric set "
+    "benchmarks/metrics/research-v1.toml is defined and validated (PHX-117)."
+)
+CONTROL_REASON = (
+    "Needs PHX-112 (computer-control steps); its task set "
+    "benchmarks/metrics/computer-control-v1.toml is defined and validated (PHX-117)."
+)
+RECOVERY_REASON = (
+    "A single-model baseline has no MAHORAGA; recovery is measured from "
+    "configuration (2) MissionTrace.recoveries (PHX-109) and summarized by "
+    "scripts/metric_benchmark.py --config2-results (PHX-117)."
+)
+INTERVENTION_REASON = (
+    "A single-model baseline has no permission prompts; measured by "
+    "scripts/metric_benchmark.py (PHX-117) on benchmarks/metrics/"
+    "interventions-v1.toml and per mission in configuration (2)."
 )
 NOT_RUNNABLE_CONFIGS: tuple[dict[str, str], ...] = (
     {
@@ -97,15 +126,18 @@ METRICS: tuple[tuple[str, str | None], ...] = (
         " benchmarks/routing/routing-v1.toml; not part of this baseline run.",
     ),
     ("verification_catch_rate", CATCH_RATE_REASON),
-    ("recovery_success", "Needs model-backed MAHORAGA/KAIDO execution."),
-    ("memory_retrieval_accuracy", "Needs an end-to-end RAG answering flow."),
-    ("research_evidence_quality", "Needs a model-backed URAHARA research flow."),
-    ("computer_control_completion", "Needs model-driven tool execution."),
+    ("recovery_success", RECOVERY_REASON),
+    ("memory_retrieval_accuracy", MEMORY_REASON),
+    ("research_evidence_quality", RESEARCH_REASON),
+    ("computer_control_completion", CONTROL_REASON),
     ("ttft_latency", None),
     ("ram_vram", None),
     ("token_usage", None),
-    ("colibri_disk_io", "Colibri deep tier is not installed."),
-    ("user_intervention_count", "Needs interactive end-to-end task execution."),
+    (
+        "colibri_disk_io",
+        "Measured by scripts/colibri_gate.py --live (PHX-116), not by a baseline run.",
+    ),
+    ("user_intervention_count", INTERVENTION_REASON),
 )
 MEASURED_FROM = {
     "task_success": "summary.score_accuracy and summary.success_rate",
@@ -361,7 +393,7 @@ def _num(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.0f}"
 
 
-CONFIGS = ("baseline", "phoenix-multi-agent")
+CONFIGS = ("baseline", "phoenix-multi-agent", "phoenix-adaptive-deep")
 
 
 def _multi_agent(argv: list[str]) -> int:
@@ -371,6 +403,15 @@ def _multi_agent(argv: list[str]) -> int:
     import fyp_multi_agent
 
     return fyp_multi_agent.main(argv)
+
+
+def _adaptive_deep(argv: list[str]) -> int:
+    scripts = str(Path(__file__).resolve().parent)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import fyp_adaptive_deep
+
+    return fyp_adaptive_deep.main(argv)
 
 
 def main(
@@ -383,6 +424,8 @@ def main(
     known, rest = dispatch.parse_known_args(argv)
     if known.config == "phoenix-multi-agent":
         return _multi_agent(rest)
+    if known.config == "phoenix-adaptive-deep":
+        return _adaptive_deep(rest)
     parser = argparse.ArgumentParser(description="PHOENIX FYP benchmark suite")
     parser.add_argument(
         "--config", choices=CONFIGS, default="baseline", help="FYP configuration"

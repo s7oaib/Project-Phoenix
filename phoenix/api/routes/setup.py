@@ -15,7 +15,7 @@ import asyncio
 
 from fastapi import APIRouter, Request
 
-from phoenix.api.capabilities import CAPABILITY_FLAGS
+from phoenix.api.capabilities import CAPABILITY_FLAGS, CapabilityId
 from phoenix.api.onboarding import (
     REQUIRED_MODELS,
     display_name,
@@ -100,12 +100,17 @@ async def get_onboarding(request: Request) -> OnboardingOut:
 
 @router.get("/capabilities", response_model=CapabilitiesOut)
 async def get_capabilities(request: Request) -> CapabilitiesOut:
-    backend(request)  # 503 while the backend is starting or stopping
+    services = backend(request)  # 503 while the backend is starting or stopping
     return CapabilitiesOut(
         capabilities=tuple(
             CapabilityOut(
                 capability_id=capability_id,
-                enabled=flag.enabled,
+                # PHX-120 (ADR-161): web research also needs the launch opt-in.
+                enabled=flag.enabled
+                and (
+                    capability_id != CapabilityId.WEB_RESEARCH
+                    or services.settings.web_research_enabled
+                ),
                 ticket=flag.ticket,
                 agent_id=flag.agent_id,
             )

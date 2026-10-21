@@ -10,7 +10,7 @@ Callers own deadlines; cancellation is forwarded to the provider best-effort.
 import asyncio
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from hashlib import sha256
@@ -313,20 +313,23 @@ class ModelStepAssignmentResponder:
         guard: PromptInjectionGuard,
         *,
         allowed_domains: tuple[RoutingDomain, ...],
+        descriptions: Mapping[str, str] = prompts.DOMAIN_DESCRIPTIONS,
     ) -> None:
+        # PHX-120 (ADR-160): the runtime passes the v5 capability documents
+        # description when PHX-113 capability steps offer that domain.
         if not allowed_domains or any(
-            domain.value not in prompts.DOMAIN_DESCRIPTIONS
-            for domain in allowed_domains
+            domain.value not in descriptions for domain in allowed_domains
         ):
             raise ValueError("Every allowed domain needs a prompt description")
         self._binding = binding
         self._guard = guard
         self._allowed = allowed_domains
+        self._descriptions = descriptions
 
     async def assign(self, plan: AizenPlan) -> StepAssignments:
         system = prompts.ASSIGNMENT_SYSTEM.format(
             domains="\n".join(
-                f"- {domain.value}: {prompts.DOMAIN_DESCRIPTIONS[domain.value]}"
+                f"- {domain.value}: {self._descriptions[domain.value]}"
                 for domain in self._allowed
             )
         )

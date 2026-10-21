@@ -14,7 +14,7 @@ default 50) and `offset` (0-1,000,000) and return
 | Route | Success | Body / query | Notes |
 | --- | --- | --- | --- |
 | `GET /health` | 200 | | PHX-002, unchanged |
-| `GET /ready` | 200 / 503 | | PHX-100. PHX-119 adds `kaido`: `engaged`, `failsafe_id`, `trigger`, `capabilities`, `clear_observations`, `release_after` (`null` before the backend runs); an engaged KAIDO makes `status` `degraded`. Each call is one KAIDO observation. |
+| `GET /ready` | 200 / 503 | | PHX-100. PHX-119 adds `kaido`: `engaged`, `failsafe_id`, `trigger`, `capabilities`, `clear_observations`, `release_after` (`null` before the backend runs); an engaged KAIDO makes `status` `degraded`. Each call is one KAIDO observation. PHX-092 (ADR-127) adds `prerequisites`: `{"ollama": "running" \| "not_running" \| "not_found", "missing_models": [{"provider_id", "model_id"}]}` (tier models not registered yet; see ADR-110), `null` while the services are unavailable. Enums and model IDs only; PHOENIX never installs Ollama or pulls models. |
 | `POST /chat` | 202 | `{"text", "conversation_id"?, "path"?}` | Queues a mission and returns `{"mission_id", "conversation_id", "status": "queued", "rerun_of": null}` at once. A missing `conversation_id` starts a conversation. `path` is optional (PHX-105, ADR-090): omitted (or `null`), PHOENIX triages the request when it runs (falling back to `complex` if triage fails); `direct` or `complex` is the client's choice and is used as is. Text: 1-16,000 characters, not blank. |
 | `GET /missions` | 200 | `conversation_id`?, `limit`, `offset` | Mission summaries: IDs, status, `path` (`null` until triage decides), `triage_outcome` (`decided`, `fallback`, `client`, or `null` before a decision), failure code, responder error, `rerun_of`, timestamps. No text. |
 | `GET /missions/{mission_id}` | 200 | | Summary plus `request_text` (the user's message), `answer_text` (only when completed), `rerun_id`, `task_id`, `task_states` and the `permission_request` if any. PHX-119: `kaido` (`failsafe_id`, `trigger`, `scope`, `outcome`, `verified` (always false), `recovery_id`) when the mission ran in KAIDO degraded mode, else `null`. |
@@ -36,6 +36,29 @@ default 50) and `offset` (0-1,000,000) and return
 | `PATCH /settings` | 200 | `{"workspace_root"?, "default_mission_path"?}` | At least one field. `workspace_root` is the folder document steps may read: validated (below), stored, and used by missions that start afterwards; a running mission keeps its workspace. `default_mission_path` (PHX-108, ADR-111) is stored; the desktop sends it as `path` on new missions (`auto` omits `path`), and `POST /chat` itself is unchanged. The workspace is applied first: if it is refused, nothing is saved. |
 | `GET /onboarding` | 200 | | PHX-108 (ADR-113) setup checks, in order: `runtimes` (`provider_id`, `display_name`, `state`: `running`, `degraded`, `not_running` or `not_detected`), `models` (each tier model: `required`, `registered`, `install_command` while missing), `storage` (`data_dir`, `free_bytes`, `database_ready`), `workspace` (as in settings) and `complete` (runtime running, required models registered, database ready, workspace active). Missing tier models are registered first if their provider now answers. Nothing is persisted. |
 | `GET /capabilities` | 200 | | PHX-108 (ADR-112) fixed capability flags: `capabilities` of `capability_id`, `enabled`, `ticket`, `agent_id`. A later ticket enables its capability by flipping its flag. Flags grant no permission. |
+| `GET /metrics` | 200 | | PHX-115 (ADR-146): runtime metrics since launch. `missions` (status-change counts), `latency` (per stage: `mission.queue_wait`, `mission.run`, `mission.first_answer`, `step`, `tool`, `verification`, `recovery`, `agent.<role>`; `count` plus p50/p95/max/mean over the last 256), `ttft_basis` (`mission_first_answer`: queued to completed, as generations do not stream), `generation` (tokens in/out, durations, output tokens per second, per-model usage, the provider health the last mission saw), `tools` (calls, success rate, by status), `permissions` (requested, approved, denied, policy-denied, by risk), `verification` (LEVI passed/failed, by verdict), `recoveries` (MAHORAGA started/completed/exhausted, by action and outcome), `resources` (process RSS, system RAM, process CPU %, and `vram` from Ollama's `/api/ps` or `unavailable`), `events` (observed, rejected, stream drops) and `logs` (the last 64 structured event logs: IDs, closed codes and timings). No prompt, answer, tool output, path or secret. |
+
+Voice (PHX-114, ADR-108): voice is off until requested. Each route returns the
+voice status `{"state", "code", "wake_phrase", "session_id", "conversation_id",
+"mission_id", "components"}`:
+
+- `state`: off, starting, sleeping, listening, thinking, speaking,
+  degraded_voice, text_only or unavailable.
+- `code`: `null`, `models_missing`, `dependency_unavailable`,
+  `microphone_unavailable` or `voice_failure`.
+- `components`: six `{"id", "status"}` entries for `wake_word`, `vad`, `stt`,
+  `tts`, `conversation` and `audio_output`, each `available`, `degraded` or
+  `unavailable`.
+
+The status never holds a transcript or answer text. A spoken request becomes a
+normal chat mission in `conversation_id`, so its text and answer are read like
+any chat.
+
+| Route | Success | Body / query | Notes |
+| --- | --- | --- | --- |
+| `GET /voice/status` | 200 | | The current voice status. |
+| `POST /voice/start` | 202 | none | Starts listening for "Rise, Phoenix"; models load in the background (`starting`). Idempotent while running. A failure shows as `unavailable` with its code, never as an HTTP error. |
+| `POST /voice/stop` | 200 | none | Stops listening and speaking and releases the microphone (`off`). |
 
 Workspace validation (422, code per rule): `workspace_invalid` (not absolute,
 UNC or device path, a `..` segment, control characters, over 4,096
@@ -69,8 +92,34 @@ Errors: 404 `not_found` (unknown ID or route), 409 `invalid_state` or
 `workspace_changed`, 413 `payload_too_large` (a request body over 64 KiB, after
 authentication), 422 `invalid_request` (or a `workspace_*` code), 503
 `service_unavailable` (the backend is starting or stopping). Responses never contain raw model output,
-tool output or file content. `/files/upload` and `/memory/search` are deferred
-to PHX-110 and do not exist (404).
+tool output or file content.
+
+Knowledge (PHX-110, ADR-131 to ADR-133):
+
+- `POST /files/upload?filename=<name>` with the raw file as the body (up to
+  8 MiB; this path's own cap) -> 201 `{document_id, filename, media_type,
+  chunk_count, indexed_at}`. The file is parsed (PHX-072 formats except images),
+  ingested, embedded with EmbeddingGemma and indexed, or nothing is kept.
+  `GET /files` (paginated) lists uploads; `DELETE /files/{document_id}` -> 204
+  removes one with its chunks and vectors.
+- `POST /memory` `{content, memory_type?}` (`user` default, `project` or
+  `semantic`; at most 2,000 characters) -> 201 `{memory_id, memory_type, scope,
+  content, created_at}`. Only the user writes memory; missions never do.
+  `GET /memory` (paginated) lists every memory with its text;
+  `DELETE /memory/{memory_id}` -> 204 removes one with its vector.
+- `GET /memory/search?q=<text>&limit=<1..20>` -> `{items: [{kind, source_id,
+  document_id, title, text, score}]}` over memories and uploads; `text` is the
+  user's own matching text (at most 500 characters).
+- `GET /missions/{id}` adds `sources`: the sources a completed answer cites,
+  each `{marker, kind, source_id, document_id, title, page, section,
+  chunk_index, memory_type, label}`, where `marker` is the "[n]" used in
+  `answer_text`. Sources never carry source text.
+
+Knowledge errors: 413 `payload_too_large`, 415 `unsupported_format` or
+`media_type_mismatch`, 422 `invalid_upload` (unparseable, empty, bad name) or
+`secret_rejected` (credential-shaped content in a note or upload), 409
+`knowledge_full`, 503 `knowledge_unavailable` (no embedding backend, or
+embedding failed).
 
 ## WebSocket
 

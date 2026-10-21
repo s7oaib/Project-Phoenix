@@ -4,7 +4,12 @@ Every schema forbids extra fields. Responses carry only the user's message
 text, PHOENIX's final answer text, IDs, statuses, codes and timestamps, and a
 pending permission's tool, action, resource path and risk so the user can
 decide on it. Raw model output, tool output and file content are never part of
-any schema.
+any schema. PHX-110 (ADR-131): a mission also lists the sources its answer
+cites (marker, provenance and file name; never the source text). PHX-112
+(ADR-151): a pending computer-control request also carries
+a display-only ``summary`` (what the action does, the page URL or window with
+its real process and executable, and the text to be typed unless it looks like
+a secret); it is never part of a request body and never used to authorize.
 
 Request bodies hold only what the user chooses. An approval names a duration;
 the tool, action, resource and actor always come from the stored request
@@ -61,6 +66,22 @@ class MissionAccepted(Contract):
     rerun_of: str | None = None
 
 
+class ApprovalSummaryOut(Contract):
+    """PHX-112: display only; the approval binds to the stored request."""
+
+    action: str
+    page_url: str | None
+    element: str | None
+    window_title: str | None
+    process_name: str | None
+    executable_path: str | None
+    process_id: int | None
+    command: str | None
+    text: str | None
+    text_masked: bool
+    note: str | None
+
+
 class PermissionRequestOut(Contract):
     request_id: str
     mission_id: str
@@ -71,6 +92,7 @@ class PermissionRequestOut(Contract):
     risk_level: str | None
     requested_at: datetime
     decided_at: datetime | None
+    summary: ApprovalSummaryOut | None = None
 
 
 class MissionSummary(Contract):
@@ -101,6 +123,21 @@ class KaidoOut(Contract):
     recovery_id: str | None
 
 
+class SourceOut(Contract):
+    """PHX-110: one cited source; ``marker`` is the "[n]" used in the answer."""
+
+    marker: str
+    kind: Literal["memory", "document_chunk"]
+    source_id: str
+    document_id: str | None
+    title: str | None
+    page: int | None
+    section: str | None
+    chunk_index: int | None
+    memory_type: str | None
+    label: str
+
+
 class MissionDetail(MissionSummary):
     request_text: str | None
     answer_text: str | None
@@ -110,6 +147,8 @@ class MissionDetail(MissionSummary):
     permission_request: PermissionRequestOut | None
     # PHX-119: set when KAIDO engaged for this mission (degraded mode).
     kaido: KaidoOut | None
+    # PHX-110: the sources behind the answer, in citation order.
+    sources: tuple[SourceOut, ...] = ()
 
 
 class CancelResult(Contract):

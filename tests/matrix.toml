@@ -29,7 +29,7 @@ timeout = 1200
 [[gate]]
 # pyproject.toml is guard-pinned, so scripts/ get their own strict mypy gate.
 id = "mypy-scripts"
-command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py"]
+command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py", "scripts/voice_setup.py", "scripts/voice_smoke.py", "scripts/metric_datasets.py", "scripts/metric_benchmark.py", "scripts/fyp_adaptive_deep.py", "scripts/colibri_gate.py", "scripts/build_installer.py", "scripts/phoenix_knowledge_smoke.py", "scripts/research_mission_smoke.py", "scripts/phoenix_control_smoke.py", "scripts/install_control_browser.py"]
 timeout = 600
 
 [[gate]]
@@ -144,10 +144,36 @@ categories = ["unit", "integration", "tools", "permissions", "permission_bypass"
 # forged_tool_results: test_success_result_contradictions
 
 [[file]]
+path = "tests/test_build_installer.py"
+categories = ["unit", "path_traversal"]
+# PHX-092 installer build script with fakes;
+# path_traversal: test_unsafe_archive_members_are_refused
+
+[[file]]
 path = "tests/test_colibri_provider.py"
 categories = ["unit", "integration", "model_provider_contracts", "secret_leakage"]
 # model_provider_contracts: test_nonstream_request_response_and_metrics
 # secret_leakage: test_auth_headers_and_repr_privacy
+
+[[file]]
+path = "tests/test_colibri_gate.py"
+categories = ["unit", "integration"]
+# PHX-116 deep-tier gate; integration: test_live_run_measures_the_served_model_without_content
+# (real BenchmarkRunner + ModelLifecycleManager driving a fake Colibri provider)
+
+[[file]]
+path = "tests/test_computer_control_steps.py"
+categories = ["integration", "end_to_end", "permissions", "tools", "prompt_injection", "permission_bypass", "command_argument_injection", "forged_tool_results"]
+# PHX-112 computer-control missions (real runtime, ToolRegistry/PermissionEngine, real Browser/
+# WindowsUI/Screenshot/Terminal tools over fixture backends, migrated SQLite audit, MissionService
+# approve -> re-run loop; scripted model, local fixture pages and fixture windows only)
+# end_to_end: test_approve_rerun_loop_grants_p2_and_p1_then_completes
+# permissions: test_p4_click_needs_one_explicit_approval_and_is_audited, test_p5_is_blocked_before_any_tool_call
+# tools: test_cancel_trips_the_kill_switch_and_stops_the_step (kill switch), test_terminal_profiles_run_with_their_own_risk
+# prompt_injection: test_injected_page_content_stays_inert, test_an_answer_that_echoes_an_injected_action_runs_nothing
+# permission_bypass: test_model_text_cannot_supply_authority, test_caller_evidence_outside_the_control_scope_is_refused
+# command_argument_injection: test_terminal_arguments_outside_the_profile_are_rejected
+# forged_tool_results: test_forged_tool_evidence_fails_levi_before_its_model
 
 [[file]]
 path = "tests/test_config.py"
@@ -198,6 +224,15 @@ categories = ["unit", "integration", "prompt_injection"]
 # prompt_injection: test_ungrounded_or_wrong_final_answers_still_go_to_the_model_and_fail (injected file case)
 
 [[file]]
+path = "tests/test_fyp_adaptive_deep.py"
+categories = ["unit", "integration", "routing"]
+# PHX-116 configuration (3) runner; integration:
+# test_only_rejected_answers_escalate_and_the_deep_tier_rescues_them (real
+# PhoenixRuntime triage, AIZEN, router, LEVI with scripted Ollama + Colibri)
+# routing: test_escalation_policy_uses_closed_runtime_evidence_only,
+# test_deep_tier_serves_text_answers_and_never_control_roles
+
+[[file]]
 path = "tests/test_fyp_benchmark.py"
 categories = ["unit", "integration"]
 # PHX-091 FYP runner; integration: test_full_run_with_fake_provider (real
@@ -229,6 +264,32 @@ categories = ["unit", "integration", "recovery", "api_contract", "secret_leakage
 # secret_leakage: test_engaged_mission_is_one_labelled_t0_reply (sentinel absent from trace and events)
 
 [[file]]
+path = "tests/test_knowledge_api.py"
+categories = ["unit", "integration", "api_contract", "migrations", "permission_bypass", "secret_leakage"]
+# PHX-110 knowledge routes and cited missions over REST (composition root, middleware, MissionService,
+# PhoenixRuntime, KnowledgeService, migrated SQLite; scripted model and embeddings)
+# integration: test_cited_mission_answer_and_sources_over_the_api
+# api_contract: test_upload_lists_and_deletes_a_document, test_invalid_uploads_are_refused_and_leave_nothing,
+# test_memory_request_shape_is_exact, test_upload_has_its_own_body_cap
+# migrations: test_knowledge_runs_on_the_backend_event_loop (knowledge persists across launches)
+# permission_bypass: test_every_knowledge_route_requires_the_token
+# secret_leakage: test_secret_memory_is_refused, test_invalid_uploads_are_refused_and_leave_nothing
+
+[[file]]
+path = "tests/test_knowledge_missions.py"
+categories = ["unit", "integration", "end_to_end", "permissions", "tools", "prompt_injection", "forged_tool_results", "secret_leakage"]
+# PHX-110 knowledge steps in full missions (real orchestrator/AIZEN/router/task graph/handoff/LEVI/lifecycle,
+# PermissionEngine, prompt guard, KnowledgeService with parsers/ingestion/vector store/retrieval/citations
+# on migrated SQLite; scripted model and embeddings)
+# end_to_end: test_cited_answer_completes_with_sources_and_no_content_in_trace
+# permissions: test_knowledge_retrieval_is_p0_through_permission_engine
+# tools: test_embedding_failure_is_an_explicit_tool_failure
+# prompt_injection: test_injected_document_stays_inert_guarded_data, test_sources_reach_models_only_as_numbered_guarded_items
+# forged_tool_results: test_forged_citation_number_fails_without_the_model_verifier,
+# test_forged_retrieval_evidence_fails_levi, test_final_answer_with_a_forged_citation_fails
+# secret_leakage: test_secrets_never_become_memory_or_vectors
+
+[[file]]
 path = "tests/test_levi_verification.py"
 categories = ["unit", "forged_tool_results"]
 # forged_tool_results: test_contradictory_results_and_forged_gate_evidence_rejected
@@ -248,9 +309,35 @@ categories = ["unit", "recovery", "forged_tool_results"]
 # recovery: test_one_exact_request_one_bounded_proposal_no_execution
 
 [[file]]
+path = "tests/test_media_document_steps.py"
+categories = ["unit", "integration", "end_to_end", "tools", "permissions", "path_traversal", "permission_bypass", "prompt_injection", "malicious_documents", "forged_tool_results", "secret_leakage"]
+# PHX-113 media and document steps (real PhoenixRuntime + LEVI + DocumentFileTool/FilesystemTool/Spotify/YouTube
+# tools + PermissionEngine on tmp_path; scripted model, MockTransport, fake player)
+# end_to_end: test_read_document_mission_completes_with_verified_evidence, test_create_document_mission_writes_one_verified_file
+# path_traversal: test_write_path_traversal_and_bad_targets_are_refused, test_write_path_traversal_in_a_mission_is_rejected, test_write_through_junction_is_refused
+# permission_bypass: test_write_without_grant_waits_and_writes_nothing, test_write_denied_path_in_a_mission, test_model_text_cannot_grant
+# malicious_documents / prompt_injection: test_malicious_document_stays_inert_guarded_tool_output
+# forged_tool_results: test_forged_tool_result_fails_levi_without_model
+# secret_leakage: test_read_document_mission_completes_with_verified_evidence (trace and events content-free)
+
+[[file]]
 path = "tests/test_memory_schema.py"
 categories = ["unit", "migrations"]
 # migrations: test_real_alembic_upgrade_downgrade_reupgrade_lifecycle
+
+[[file]]
+path = "tests/test_metric_benchmark.py"
+categories = ["unit", "integration", "permissions", "forged_tool_results"]
+# PHX-117 metric runner; integration: test_scripted_run_measures_the_deterministic_floor
+# (fault-injected missions through a real PhoenixRuntime, LEVI, FilesystemTool,
+# PermissionEngine and migrated audit DB with a scripted model)
+# permissions: test_scripted_run_counts_permission_prompts (WAITING_PERMISSION, exact-request re-run grants)
+# forged_tool_results: test_scripted_run_measures_the_deterministic_floor (forged tool evidence caught by LEVI)
+
+[[file]]
+path = "tests/test_metric_datasets.py"
+categories = ["unit"]
+# PHX-117 fixed metric datasets (sha256 pins), validators and deterministic scorers
 
 [[file]]
 path = "tests/test_mission_events.py"
@@ -284,6 +371,14 @@ categories = ["unit", "model_provider_contracts"]
 path = "tests/test_model_registry.py"
 categories = ["unit", "integration"]
 # integration: test_ollama_refresh_uses_neutral_contract (registry + OllamaProvider)
+
+[[file]]
+path = "tests/test_observability.py"
+categories = ["unit", "integration", "api_contract", "permission_bypass", "secret_leakage"]
+# integration: test_metrics_route_requires_the_token_and_reports_a_real_mission (REST + composition root + MissionService + PhoenixRuntime + SQLite)
+# api_contract: test_metrics_route_requires_the_token_and_reports_a_real_mission
+# permission_bypass: test_metrics_route_requires_the_token_and_reports_a_real_mission (401/403 without the token or bound Host)
+# secret_leakage: test_redact_removes_credential_shapes, test_log_entry_keeps_only_safe_fields_and_never_exception_text, test_launcher_logs_json_to_the_data_directory_and_redacts_the_token
 
 [[file]]
 path = "tests/test_ollama_provider.py"
@@ -464,9 +559,33 @@ categories = ["unit", "integration", "voice_states", "recovery", "permission_byp
 # recovery: test_stage_failures_and_degraded_recovery (degraded fail-safe path)
 
 [[file]]
+path = "tests/test_voice_pipeline.py"
+categories = ["unit", "integration", "api_contract", "voice_states", "recovery", "end_to_end", "permission_bypass", "secret_leakage"]
+# PHX-114 voice pipeline (fake audio/models; live test skipped unless PHOENIX_VOICE_LIVE=1)
+# end_to_end/integration: test_spoken_request_runs_as_a_chat_mission_and_the_answer_is_spoken
+# (real composition root: MissionService, triage, PermissionEngine, SQLite; scripted model)
+# voice_states: test_wake_listen_answer_speak_then_sleep_after_the_follow_up_window,
+# test_user_speech_interrupts_playback_and_becomes_the_next_turn
+# recovery: test_voice_failures_never_break_text_chat, test_transcription_failures_retry_quietly_then_fall_back_to_text
+# api_contract: test_voice_routes_require_the_token_and_start_nothing_by_themselves
+# permission_bypass: test_spoken_outcomes_never_claim_success_or_approve
+# secret_leakage: test_voice_service_publishes_allowlisted_state_and_isolates_failures
+
+[[file]]
 path = "tests/test_wake_word_provider.py"
 categories = ["unit", "voice_states"]
 # voice_states: test_scoped_cancellation_keeps_unrelated_operation_and_sorted_ids
+
+[[file]]
+path = "tests/test_web_research.py"
+categories = ["unit", "integration", "end_to_end", "tools", "permissions", "permission_bypass", "prompt_injection", "forged_tool_results", "secret_leakage"]
+# PHX-111 DuckDuckGo provider (MockTransport fixtures), page reader, WebResearchTool,
+# LEVI's deterministic citation checks and full research missions (scripted model).
+# end_to_end: test_granted_research_mission_completes_with_cited_answer
+# permission_bypass: test_no_grant_waits_for_permission_and_sends_nothing
+# prompt_injection: test_sources_reach_the_model_only_as_guarded_untrusted_items
+# forged_tool_results: test_fabricated_citation_url_fails_levi
+# secret_leakage: test_granted_research_mission_completes_with_cited_answer (trace/events)
 
 [[file]]
 path = "tests/test_windows_ui_automation.py"

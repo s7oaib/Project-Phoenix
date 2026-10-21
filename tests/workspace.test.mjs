@@ -213,14 +213,15 @@ test('text and selected navigation tokens meet readable contrast', () => {
 test('PHX-080 leaves manifests, entry point and Tauri native security files byte-identical', () => {
   const root = fileURLToPath(new URL('../', import.meta.url));
   // PHX-088 (ADR-075) intentionally changed the native host files; they stay pinned, at the PHX-088 commit.
-  // PHX-103 (ADR-088) intentionally added websockets to pyproject.toml and uv.lock; they stay pinned, at the PHX-103 commit.
+  // PHX-103 (ADR-088) added websockets and PHX-114 (ADR-105 to ADR-107) the voice stack to pyproject.toml and uv.lock;
+  // they stay pinned, at the PHX-114 implementation commit.
   // PHX-106/107 (ADR-091, ADR-092) intentionally changed the desktop manifest, lock, entry point, Tauri config and
   // native host (sidecar, proxy, ACL); they stay pinned, at the PHX-106/107 implementation commit.
   const baselines = {
     '4a70867203a70d3a85e2c141ef0dbb92bdff42e2': ['package.json', 'apps/desktop/tsconfig.json', 'apps/desktop/vite.config.ts'],
     'e34ca3d18e9444ff5ed32b3f1abb60fc5344f246': ['package-lock.json', 'apps/desktop/package.json', 'apps/desktop/src/main.tsx', 'apps/desktop/src-tauri/tauri.conf.json',
       'apps/desktop/src-tauri/Cargo.toml', 'apps/desktop/src-tauri/Cargo.lock', 'apps/desktop/src-tauri/src/main.rs', 'apps/desktop/src-tauri/build.rs'],
-    '829670b7713eacf246e3dd282e0e15f1c94c142f': ['pyproject.toml', 'uv.lock'],
+    '0d5de2ef19db99dbccce7177be2ff944d38ab1cb': ['pyproject.toml', 'uv.lock'],
   };
   for (const [commit, paths] of Object.entries(baselines)) {
     for (const path of paths) {
@@ -260,6 +261,28 @@ test('desktop grants exactly the PHX-106 proxy commands and event listening, wit
   assert.match(manifest, /^tauri = \{ version = "2", features = \[\] \}$/m);
   assert.deepEqual(Object.keys(readJson('../apps/desktop/package.json').dependencies), ['@tauri-apps/api', 'react', 'react-dom']);
   assert.equal(readJson('../apps/desktop/package.json').dependencies['@tauri-apps/api'], '2.12.1');
+});
+
+test('PHX-092 installer config only bundles: per-user NSIS, the staged backend, no capability, CSP or plugin', () => {
+  // Merged over tauri.conf.json by `tauri build --config` for the installer only (ADR-128).
+  const installer = readJson('../packaging/windows/tauri.installer.conf.json');
+  assert.deepEqual(Object.keys(installer).sort(), ['$schema', 'bundle']);
+  assert.deepEqual(installer.bundle, {
+    active: true,
+    targets: ['nsis'],
+    publisher: 'PHOENIX',
+    shortDescription: 'PHOENIX local-first desktop assistant',
+    resources: { '../../../build/phoenix-runtime/': 'backend/' },
+    windows: { nsis: { installMode: 'currentUser', installerHooks: '../../../packaging/windows/installer-hooks.nsh' } },
+  });
+  // The app's own config keeps the exe-only build; the bundle is never active without the installer config.
+  const config = readJson('../apps/desktop/src-tauri/tauri.conf.json');
+  assert.equal(config.bundle.active, false);
+  assert.equal(readJson('../apps/desktop/package.json').scripts['tauri:build'], 'tauri build --no-bundle');
+  // The shell resolves the installed backend next to the executable and starts it isolated (ADR-125).
+  const backend = readFileSync(new URL('../apps/desktop/src-tauri/src/backend.rs', import.meta.url), 'utf8');
+  assert.match(backend, /pub const BUNDLED_BACKEND_DIR: &str = "backend";/);
+  assert.match(backend, /if self\.isolated \{ &\["-I"\] \}/);
 });
 
 test('development CSP allows only the React refresh preamble as an inline script', () => {
@@ -2061,7 +2084,7 @@ test('PHX-087 suppressed sources report counts unavailable rather than claiming 
   assert.doesNotMatch(empty, /Diagnostic counts unavailable/);
 });
 
-test('PHX-108 the native proxy allowlist is exactly the twenty documented REST routes', () => {
+test('PHX-108/115 the native proxy allowlist is exactly the twenty-one documented REST routes', () => {
   const proxy = readFileSync(new URL('../apps/desktop/src-tauri/src/proxy.rs', import.meta.url), 'utf8');
   const table = proxy.slice(proxy.indexOf('pub const ROUTES'), proxy.indexOf('];', proxy.indexOf('pub const ROUTES')));
   const routes = [...table.matchAll(/Method::(Get|Post|Patch),\s*"([^"]+)",\s*&\[([^\]]*)\]/g)]
@@ -2074,6 +2097,8 @@ test('PHX-108 the native proxy allowlist is exactly the twenty documented REST r
     'GET /settings []', 'PATCH /settings []',
     // PHX-108 (ADR-110, ADR-112): read-only setup routes, no query and no body.
     'GET /onboarding []', 'GET /capabilities []',
+    // PHX-115 (ADR-147): read-only runtime metrics, no query.
+    'GET /metrics []',
   ]);
   // Every fixed route the adapters name is on the allowlist (destructive routes stay absent).
   const core = readFileSync(new URL('../apps/desktop/src/adapters/core.ts', import.meta.url), 'utf8');

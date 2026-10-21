@@ -4684,6 +4684,178 @@ Every answer that is not eligible goes to the unchanged final_verifier model.
 (`PHX_118B_COMMIT` / `PHX_118B_PATHS`, replacing `PHX_118_*`), in a separate
 pin commit. No prompt, event, migration or API change.
 
+## ADR-105 — faster-whisper for wake spotting and transcription on the CPU
+
+Status: Accepted (owner decision 2026-10-21; versions, constraint and model
+sizes are the recommended defaults, pending the owner's review in PHX-114)
+Date: 2026-10-21
+Ticket: PHX-114
+
+The owner chose faster-whisper for both the always-on wake check and speech to
+text, on the CPU, so the RTX 3050 stays with Ollama.
+
+- **Requirement.** `faster-whisper>=1.2.1,<2`, locked **1.2.1** (MIT). It
+  brings CTranslate2 4.8.3 (MIT), ONNX Runtime 1.31.0 (MIT), PyAV 18.1.0,
+  tokenizers 0.23.3, huggingface-hub, tqdm, PyYAML and their own
+  dependencies.
+- **Constraint.** `[tool.uv] constraint-dependencies = ["huggingface-hub<1"]`
+  (locked **0.36.2**, with requests 2.34.2 and urllib3 2.8.0). huggingface-hub
+  2.x depends on `httpx2`, which Starlette 1.7's TestClient then prefers over
+  `httpx`. That would change every API test's client library. huggingface-hub
+  1.x adds `typer` and its CLI tree. faster-whisper only imports the hub, and
+  PHOENIX never calls it (models load from a local directory with
+  `local_files_only=True`). hf-xet's platform marker excludes Windows'
+  `AMD64`, so it is locked but not installed on BLAZE-6.
+- **Use.** `WhisperModel(dir, device="cpu", compute_type="int8",
+  local_files_only=True)`. `tiny.en` (4 threads, beam 1) checks each speech
+  burst for the wake phrase, and `base.en` (8 threads, beam 5) transcribes
+  requests. Measured on BLAZE-6: base.en takes 0.5 s for a 3.2 s utterance,
+  small.en 1.8 s, with the same transcript. faster-whisper's own Silero VAD
+  filter is off; PHOENIX's endpointer decides utterances. Segments Whisper marks
+  as probable non-speech (`no_speech_prob` 0.6 or more) or decodes poorly
+  (`avg_logprob` -1.0 or less) are dropped, so silence yields no text.
+- **Imports.** The adapters load the engine through `importlib` when a
+  model is loaded, so importing the backend loads no native library, and
+  strict mypy needs no override.
+
+## ADR-106 — Piper for speech synthesis
+
+Status: Accepted (owner decision 2026-10-21; on 2026-10-21 the owner accepted
+piper-tts's GPL-3.0-or-later licence for the FYP build, to be revisited before
+any public release)
+Date: 2026-10-21
+Ticket: PHX-114
+
+- **Requirement.** `piper-tts>=1.8,<2`, locked **1.8.0**, with ONNX Runtime
+  (shared with faster-whisper) and pathvalidate 3.3.1. It bundles espeak-ng for
+  phonemization; no system install is needed on Windows.
+- **Licence.** piper-tts 1.x (OHF-Voice/piper1-gpl) is **GPL-3.0-or-later**,
+  unlike the archived MIT rhasspy/piper. It is a runtime dependency of the
+  backend. The owner accepted it for the FYP build on 2026-10-21.
+  Distributing PHOENIX with it carries GPL obligations, so the licence must be
+  revisited before any public release. Coqui XTTS stays a candidate behind the same TtsProvider
+  contract.
+- **Use.** `PiperVoice.load(path, use_cuda=False)` (ONNX Runtime CPU).
+  Loading runs one warm-up synthesis: Piper's first call costs about 4 s once.
+  After that, the first sentence of a reply is ready in about 45 ms and a
+  4-second reply in about 0.16 s. `PiperTtsProvider` returns the whole reply as
+  one PHX-063 `TtsAudio`, at most 115 s. Spoken replies are short renderings,
+  so streaming playback is not needed yet.
+
+## ADR-107 — sounddevice for microphone and speaker; numpy as a direct requirement
+
+Status: Accepted (owner decision 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-114
+
+- **Requirements.** `sounddevice>=0.5.6,<0.6`, locked **0.5.6** (MIT), with
+  cffi 2.1.1 and pycparser 3.11. Its Windows wheel bundles PortAudio. Also
+  `numpy>=2,<3`, locked **2.4.6**. numpy was already pulled in by CTranslate2
+  and ONNX Runtime, but PHOENIX now uses it directly: PCM to float for Whisper,
+  and linear resampling.
+- **Capture.** The default input is opened only when voice starts. It
+  delivers 30 ms mono 16 kHz S16LE `PcmAudioFrame`s through a bounded queue
+  (6 s; the oldest frame is dropped and counted). A device that refuses 16 kHz
+  is opened at its default rate and resampled. A device that stops delivering
+  for 2 s fails the run (`microphone_unavailable`).
+- **Playback.** Blocking writes in a worker thread, in 50 ms blocks, checking
+  an interrupt flag between blocks (barge-in). A device that refuses the voice
+  rate gets resampled audio.
+- **Privacy.** Audio is never written to disk, logged or put in events.
+
+## ADR-108 — The voice loop: same path as chat, opt-in, isolated, observable
+
+Status: Accepted (recommended defaults applied; the owner reviews R4 to R11
+in `tickets/PHX-114-voice-pipeline.md`)
+Date: 2026-10-21
+Ticket: PHX-114
+
+Decision:
+
+- **Composition.** `VoicePipeline` drives the PHX-064
+  `VoiceConversationManager`. For the first wake of a run it also drives the
+  PHX-065 `RisePhoenixStartupCoordinator`: the spoken acknowledgement, six real
+  health checks, then the ready or degraded line. Later wakes play a 160 ms
+  chime. An energy endpointer (EnergyVad, -45 dBFS, 30 ms frames) cuts
+  utterances: 450 ms of silence ends a wake utterance and 810 ms ends a request.
+  The first 3 s of a wake utterance go to the wake provider. A wake utterance
+  of 2.2 s or more is also the first request. Requests are rechunked into 1 s
+  frames, up to 30 s. Follow-ups need no wake phrase for 30 s of silence.
+- **Same path as `POST /chat` (INV-001, INV-003, INV-004).** The responder
+  calls `MissionService.create_conversation` and `submit(conversation_id, text,
+  None)`, so PHOENIX triages the request and tool calls still pass
+  PermissionEngine and ToolRegistry. It reads the settled mission (at most
+  600 s) and speaks a short rendering of the stored answer. It never approves,
+  denies or revokes. A mission waiting for permission is announced aloud and
+  left to the user. One conversation is kept per voice run.
+- **Barge-in.** A stricter detector (-28 dBFS for 8 consecutive frames) runs
+  while PHOENIX speaks. The manager's scoped interruption stops playback, and
+  the speech already heard seeds the next request. There is no acoustic echo
+  cancellation.
+- **Opt-in.** Voice is off at launch. `POST /voice/start` (202) or
+  `PHOENIX_VOICE_AUTOSTART=1` starts it. `POST /voice/stop` releases the
+  microphone. Models load in worker threads while the state is `starting`.
+- **Isolation (INV-015, INV-016).** A failed transcription is retried
+  quietly twice, then the state becomes `text_only`. A TTS or playback failure
+  gives `degraded_voice`, and answers continue in the chat. Five wake errors in
+  a row, a dead microphone, missing models or missing native libraries end the
+  run as `unavailable` with a closed code. `start`, `stop` and `status` never
+  raise. Voice stops first at shutdown, before missions are cancelled.
+- **API.** `GET /voice/status`, `POST /voice/start` and `POST /voice/stop`,
+  behind PHX-101. Each returns `state`, `code`, `wake_phrase`, `session_id`,
+  `conversation_id`, `mission_id` and six `components` (`wake_word`, `vad`,
+  `stt`, `tts`, `conversation`, `audio_output`: available, degraded or
+  unavailable). There is no transcript or answer text; those stay in the
+  conversation.
+- **Events.** The PHX-103 allowlist gains `voice.listening`, `voice.speaking`
+  and `voice.interrupted`. Their payloads may hold `state` (off, starting,
+  sleeping, listening, thinking, speaking, degraded_voice, text_only,
+  unavailable), `session_id`, `turn_id`, `mission_id` (UUIDs) and `code`.
+  `voice.listening` carries every state change except speaking and barge-in.
+  The correlation ID is the voice session, and the agent is `voice` (UTA). The
+  vocabulary stays at 32. The manager's and coordinator's own events stay on a
+  private bus.
+- **Capability flag.** After merging PHX-108, its ADR-112 `voice` flag is
+  `enabled` (a fixed fact about this build, as ADR-112 requires). Whether voice
+  is running, or its models and devices are available right now, is runtime
+  state reported by `GET /voice/status`, not by the flag.
+- **Pins.** `pyproject.toml` and `uv.lock` (in `workspace.test.mjs`) are pinned
+  to the PHX-114 implementation commit. `mission_events.py`, `server.py` and
+  `routes/__init__.py` (in `test_prompt_injection_defenses.py`; the last two
+  merged with PHX-108's ModelRegistrar and setup routes) are pinned to the
+  PHX-114 resolution commit. Each pin lands in a separate pin commit, so the PR
+  must merge with a merge commit.
+
+## ADR-109 — Voice models: pinned, explicitly installed, stored on D:
+
+Status: Accepted (owner decision 2026-10-21: whisper models and one Piper
+English voice pre-approved, stored under `D:\Phoenix\models\voice`, never
+auto-downloaded for end users)
+Date: 2026-10-21
+Ticket: PHX-114
+
+- **Manifest.** `phoenix/voice/engines/models.py` pins every file to a Hugging
+  Face commit URL, an exact size and a SHA-256 digest:
+  - Systran `faster-whisper-tiny.en` (75.5 MB), `base.en` (145 MB) and
+    `small.en` (484 MB, optional), all MIT;
+  - Piper `en_US-norman-medium` (63.5 MB and its JSON config), from
+    rhasspy/piper-voices, MIT. The voice was trained from scratch on public
+    domain LibriVox recordings.
+- **Setup.** `scripts/voice_setup.py` is the only downloader, run explicitly
+  by the owner or at first-run setup. It uses stdlib HTTPS to the pinned URLs,
+  writes to a `.partial` file, verifies size and digest before an atomic
+  rename, and keeps files that already verify. `--check` verifies with no
+  network. The backend never downloads. It checks file sizes and reports
+  `models_missing` when anything is absent.
+- **Location.** `PHOENIX_VOICE_MODELS_DIR`, else `D:\Phoenix\models\voice`
+  when that directory exists (BLAZE-6 keeps large data on D:), else
+  `~/.phoenix/models/voice`. `PHOENIX_VOICE_STT_MODEL` may select `tiny.en` or
+  `small.en`; the default is `base.en`.
+- **Primary voice provenance.** The contract requires the primary profile to
+  be `original`. The stock Piper voice is declared original in that sense: a
+  generic synthetic voice that imitates no character or voice actor, built from
+  a public-domain dataset. This is a declaration, not proof of rights (PHX-063).
+
 ## ADR-110 — Tier models register whenever their provider becomes available
 
 Status: Accepted (recommended option, under the owner's instruction "use
@@ -4847,6 +5019,1243 @@ Decision:
 Consequences: no new dependency, command, event or plugin. Manual WebView2
 acceptance of the new views remains to be done.
 
+## ADR-115 — Fixed, versioned, sha-pinned metric datasets
+
+Status: Accepted (owner instruction 2026-10-21: recommended options throughout)
+Date: 2026-10-21
+Ticket: PHX-117
+
+docs/24 requires a fixed, versioned task set. Six metrics had no data:
+verification catch rate, memory retrieval accuracy, research evidence quality,
+computer-control completion, user intervention count, and recovery success
+(which had data but no single place). ADR numbers 095–114 are reserved for
+other in-flight work.
+
+Decision:
+
+- Five sets live under `benchmarks/metrics/`: `verification-v1.toml`,
+  `interventions-v1.toml`, `memory-v1.toml`, `research-v1.toml` and
+  `computer-control-v1.toml`. They follow the PHX-105 routing-set rule. Each
+  file's name carries its major version, and its sha256 and version are pinned
+  together in `tests/test_metric_datasets.py`. Any change to a case needs a new
+  version and file.
+- The computer-control fixture pages (`computer-control-v1/*.html`) are pinned
+  transitively. The set lists each page's sha256, and the loader checks it. The
+  directory must hold exactly the listed pages.
+- Text fixtures (memory documents, research sources and workspace files) are
+  inline in the TOML, so the one sha256 pin covers them.
+- All content is harmless and fictional, with no private data and nothing
+  fetched:
+  - research URLs use the reserved `.test` domain;
+  - fixture pages are refused if they reference anything remote or loadable;
+  - workspace missions read temporary fixture files only.
+- Loaders and deterministic scorers live in `scripts/metric_datasets.py`, which
+  is pure: no models, network or runtime. The runner is
+  `scripts/metric_benchmark.py`. Both are under the strict `mypy-scripts`
+  matrix gate.
+- Results hold IDs, closed codes and counts only (ADR-029).
+
+No new dependencies, event types, migrations or API changes; nothing under
+`phoenix/` changes.
+
+## ADR-116 — Verification catch rate by producer-side fault injection
+
+Status: Accepted (owner instruction 2026-10-21: recommended options throughout)
+Date: 2026-10-21
+Ticket: PHX-117
+
+PHX-091 reported the catch rate as NOT RUNNABLE: the v1 set has no known-bad
+candidates, and a LEVI rejection hides the rejected answer.
+
+Decision:
+
+- **Missions.** Each `verification-v1` case is one forced-COMPLEX
+  `PhoenixRuntime` mission. A `FaultInjectionProvider` routes turns by their
+  PHOENIX role:
+  - producer turns (planner, assignment, specialist, document specialist and
+    answer, final answer, direct) get the case's scripted replies, which carry
+    the fault;
+  - LEVI's verifier turns (`verifier`, `step_verifier`, `document_verifier`,
+    `final_verifier`) are the model under test.
+
+  This isolates LEVI from producer quality. Document steps run through the
+  real FilesystemTool, PermissionEngine and grants.
+- **Forged tool evidence.** The harness wraps `FilesystemTool.execute` for one
+  case and one tool instance, then restores it. The tool is slotted and the
+  runtime accepts only that exact type. The wrapper changes the call ID, the
+  permission request ID or the matched grant.
+  - An `effect_applied` forgery was dropped: the `FilesystemToolResult`
+    contract rejects it before LEVI ever sees it.
+- **Faults, 20 in all:**
+  - wrong answers: 7, at the step or the final answer;
+  - ungrounded claims: 5, in text or documents;
+  - injected tool evidence: 3, a file instruction that the answer obeys;
+  - forged tool evidence: 3;
+  - forged verdicts: 2, a JSON verdict as a step output.
+
+  There are also 5 correct controls. Each fault declares its expected
+  detector: `deterministic` (LEVI's code checks) or `model`.
+- **Scoring.**
+  - CAUGHT: the mission fails `verification_failed` with a FAILED verdict.
+  - ESCAPED: it completes with every verdict PASSED.
+  - Anything else (a provider or schema failure before LEVI decided) is
+    inconclusive and leaves the rate.
+  - The catch rate is caught ÷ (caught + escaped). Rejected controls are
+    reported as the false-rejection rate.
+- **Two modes.**
+  - `--scripted` (CI) answers LEVI's model turns with an always-pass verifier,
+    so it measures the deterministic floor (5/20). It is labelled harness
+    validation, not a FYP number.
+  - The live run uses Ollama's default and think=False providers with the
+    runtime tier table. Like the other runners, it refuses a CPU-only placement
+    of LEVI's first-choice model unless `--allow-cpu` is passed.
+
+Limitations: the producer turns are fixed text, so the live number measures
+LEVI against these 20 faults, not the system's whole error rate. Faults
+outside the set (for example, subtle reasoning errors in long answers) are not
+represented. The live run awaits a BLAZE-6 GPU session.
+
+## ADR-117 — Capability-gated metrics: datasets first, NOT RUNNABLE until the capability lands
+
+Status: Accepted (owner instruction 2026-10-21: recommended options throughout)
+Date: 2026-10-21
+Ticket: PHX-117
+
+Memory (PHX-110), research (PHX-111) and computer control (PHX-112) are not
+built. Their metrics still need fixed data ahead of the FYP.
+
+Decision:
+
+- Their datasets and scorers ship now:
+  - memory: hit@1, hit@3, MRR and answer containment over a 10-document
+    corpus;
+  - research: a three-check citation rubric (citation present, cited source
+    supports the claim, no fabricated URL), with fact coverage reported
+    separately;
+  - computer control: expected element texts, a step budget and fixture-only
+    scope.
+- Each set carries fixed **calibration vectors**: sample outputs with their
+  expected scores. `--dry-run` validates every set and replays the vectors, and
+  any mismatch fails it.
+- The live metric is NOT RUNNABLE until two conditions hold, and the runner
+  checks both and says which one is missing:
+  - the owning ticket is `DONE` in `FEATURE_TICKETS.md`;
+  - an adapter is registered in `ADAPTERS` in `scripts/metric_benchmark.py`.
+
+  The owning ticket adds the adapter. It maps the capability's output to the
+  scorer input; it does not change the set.
+
+Limitations: the research rubric checks evidence, not correctness. An answer
+that faithfully cites a wrong source passes the rubric, and the separate fact
+coverage shows the gap (one calibration vector pins this). The observation
+format for computer control (`final_state`, `steps`, `visited`) is a contract
+PHX-112 must produce.
+
+## ADR-118 — User intervention count and recovery success, defined once
+
+Status: Accepted (owner instruction 2026-10-21: recommended options throughout)
+Date: 2026-10-21
+Ticket: PHX-117
+
+Decision:
+
+- **One intervention is one permission prompt**: a mission result of
+  `waiting_permission`. PHOENIX v1 has no clarification turn, so
+  clarifications are reported as 0 by definition, not measured.
+- **Interventions set.** `interventions-v1` missions start with no grants.
+  After each prompt, the runner approves exactly the pending request for the
+  session and runs the mission again (the PHX-102 linked re-run), up to
+  `max_rounds`.
+  - The report gives total prompts, prompts per mission, completion, and the
+    excess over each case's minimum (one prompt per distinct file read).
+  - Scripted producers give the minimum (8 prompts over 8 missions). A live
+    run lets the models choose their reads.
+- **Configuration (2)** reports `user_intervention_count` as MEASURED from its
+  own outcomes (`summary.interventions`). The text-only v1 set gives 0.
+  Configuration (1) reports it as NOT RUNNABLE because it has no permission
+  prompts.
+- **Recovery success** stays defined by PHX-109: recovered MAHORAGA actions
+  over actions taken, from `MissionTrace.recoveries`.
+  - The metric runner reads it from a configuration (2) results file
+    (`--config2-results`). It is MEASURED when the traces carry recoveries,
+    with a `null` rate and an explicit note when no action was taken.
+  - Configuration (1) states that it has no MAHORAGA and points to
+    configuration (2).
+
+## ADR-119 — Model routing freeze criteria (docs/05 benchmark gate)
+
+Status: Accepted (owner instruction 2026-10-21: recommended options throughout)
+Date: 2026-10-21
+Ticket: PHX-117
+
+docs/05 said routing is not frozen until benchmarks cover the listed
+dimensions, but gave no pass criteria.
+
+Decision:
+
+- **Scope and evidence.**
+  - The tier table stays provisional and freezes one role at a time.
+  - Evidence must come from the pinned sets only, on BLAZE-6 with the model on
+    the GPU (no CPU-only runs), with at least 3 measured runs per candidate.
+  - Prompt set, Ollama version and thinking setting are recorded, and every
+    metric is MEASURED or NOT RUNNABLE.
+- **Thresholds.** The per-role thresholds are in docs/05 "Model routing freeze
+  criteria":
+  - triage: ≥ 90% accuracy, ≥ 80% per category, ≤ 5% fallbacks;
+  - structured roles: ≥ 95% schema-valid;
+  - LEVI: ≥ 80% live catch rate, ≤ 20% false rejections, and every
+    deterministic fault caught;
+  - configuration (2): no wrong answer reported as LEVI-verified, and
+    accuracy within 10 points of the best configuration (1) model;
+  - latency: DIRECT median ≤ 5 s, COMPLEX median ≤ 180 s;
+  - VRAM: within 6 GB with one heavy generation at a time.
+- **Provisional roles.** Vision, memory and research roles stay provisional
+  until their metrics are MEASURED. The deep tier is never default-routed until
+  it beats T2 on quality at an accepted latency.
+- **Tie-break.** A larger model needs a lead of at least 5 points to replace a
+  smaller one.
+- **Re-opening.** A model, prompt set, major Ollama or benchmark set change
+  re-opens the role. Each freeze or re-open is recorded here with its results
+  files.
+
+Limitations: the thresholds are recommended starting values, not derived from
+data. The first live runs may justify an owner-approved amendment. Nothing is
+frozen by this ADR itself.
+
+## ADR-120 — Colibri deep tier: official release engine, catalog container and a measured gate
+
+Status: Accepted (owner decision 2026-10-21: "yes, try it"; downloads
+pre-approved from official sources; recommended options otherwise)
+Date: 2026-10-21
+Ticket: PHX-116
+
+Context: docs/05 lists Qwen3.6-35B-A3B on Colibri as the optional T3 deep tier,
+"benchmark-gated" (ADR-007), and docs/24 FYP configuration (3) has been NOT
+RUNNABLE because Colibri was not installed (ADR-079). BLAZE-6 has 24 GB RAM
+(23.7 GiB usable, 2 x 12 GB DDR5-4800), an RTX 3050 Laptop 6 GB (compute
+capability 8.6, driver 610.62), one Samsung NVMe SSD, and no MinGW/MSVC
+toolchain.
+
+Decision:
+
+- **Engine.** The official `JustVugg/colibri` release v2.0.0 Windows archive
+  plus its CUDA overlay (`coli_cuda.dll`, compute capability 8.0 and newer;
+  bundles NVIDIA's `cudart64_12.dll`), both checked against the release's
+  `SHA256SUMS.txt` and GitHub's asset digests, unpacked to
+  `D:\Phoenix\colibri\engine-v2.0.0-cuda`. The upstream Windows build needs
+  MinGW gcc/make and MSVC for the CUDA DLL; installing system toolchains is out
+  of scope, and the project's own docs make the release archive the Windows
+  path. The source checkout (`D:\Phoenix\colibri\src`, `e0db083`) is kept for
+  reference only.
+- **Model.** The container Colibri's own setup installs for `qwen36-35b`
+  (`c/setup_catalog.py` at `e0db083`):
+  `Kreuzzelg/qwen36-35b-a3b-colibri-i4-gs64` pinned to revision `c619aa59…`,
+  int4 group-scaled experts, 23.1 GB, into
+  `D:\Phoenix\models\colibri\qwen36-35b-a3b-colibri-i4-gs64`. Its model card
+  names `Qwen/Qwen3.6-35B-A3B` as the base model; it was converted and
+  published by Kreuzzelg, a Colibri contributor (author of the group-scaled
+  path), not by Qwen. The Colibri project designates it, so it counts as the
+  project's official artifact, and it holds data files only (safetensors,
+  JSON, tokenizer), no code.
+  The alternative, converting the official Qwen bf16 checkpoint locally
+  (~70 GB download plus a PyTorch install), is recorded but not taken. The 42
+  large files' Hugging Face LFS sha256 values are pinned in
+  `benchmarks/colibri/qwen36-35b-a3b-colibri-i4-gs64.sha256` and verified by
+  the gate. Nothing under `D:\Phoenix` is committed.
+- **Port.** Colibri keeps its default `127.0.0.1:8000` (the `ColibriProvider`
+  default, ADR-028). PHOENIX's backend takes an OS-assigned port (ADR-084), so
+  they do not conflict. PHOENIX still never installs, starts or stops Colibri.
+- **Gate.** `scripts/colibri_gate.py` measures, through the unchanged
+  `ColibriProvider` and PHX-016 `BenchmarkRunner`, the fixed FYP v1 task set on
+  the served model, plus host facts, the container manifest, a sequential
+  NVMe read of the shards and the engine process's own disk reads and RSS. PASS
+  needs every criterion: success rate >= 0.9, accuracy >= 0.5, TTFT median
+  <= 60 s, output tokens / whole latency >= 2 tok/s, RAM headroom at peak
+  >= 1.5 GiB, VRAM peak <= 98% of the card, shard read >= 1000 MB/s, manifest
+  OK. The 1000 MB/s floor is pre-registered. After preliminary reads of
+  662–823 MB/s, a 600 MB/s floor was briefly considered. The owner rejected it
+  on 2026-10-21, because changing a threshold after seeing data is not
+  acceptable for the FYP. The gate report prints every measured value next to
+  its threshold, so the FYP can state which criteria failed. Any failure is FAIL: configuration (3) is then reported as measured and
+  rejected with the numbers. A missing measurement is INCOMPLETE, never PASS.
+- **Honest metrics.** TTFT is time to the first visible answer, so it includes
+  Qwen3.6's reasoning; `ColibriProvider` cannot turn thinking off without a
+  contract change. Throughput uses output tokens / whole latency (ADR-079).
+
+Limitations: the shard read is buffered and may include OS cache; the live
+run is pending a free GPU. INV-024: Colibri stays optional; no dependency,
+lock or `phoenix/` change.
+
+## ADR-121 — Configuration (3): escalate to the deep tier only on PHOENIX's own failure evidence
+
+Status: Accepted (owner decision 2026-10-21; recommended options)
+Date: 2026-10-21
+Ticket: PHX-116
+
+Decision: `scripts/fyp_adaptive_deep.py`, reached through
+`scripts/fyp_benchmark.py --config phoenix-adaptive-deep`, runs each v1 task as
+configuration (2) first (triage by default). It escalates once to a second
+runtime whose tier table puts `colibri/<deep model>` first in the default row
+(text specialists and the final answer) and the `build_engineer` row, when:
+
+- the first mission failed with `verification_failed` (LEVI rejected it) or
+  `responder_output` (unusable output after MAHORAGA's retry); or
+- it completed only through an unverified DIRECT fallback (PHX-109).
+
+Nothing else escalates: prompt-boundary refusals, permission and tool
+outcomes, cancellation, timeouts, provider and routing failures and runtime
+defects keep the first result (INV-008, INV-021). The benchmark score is never
+consulted. The escalated attempt is a forced COMPLEX mission: triage, AIZEN,
+assignment and LEVI stay on Ollama with thinking off, so a different model
+verifies the deep answer. Both runtimes share one `ModelLifecycleManager`, so
+only one heavy generation runs at a time (INV-023). A deep tier that turns
+unhealthy mid-run makes the router fall back to Ollama, and the run reports it
+as `deep_not_used` (INV-022). The run refuses to start if Colibri is not
+serving the model.
+
+Reports keep codes, counts, timings and hashes (ADR-029). They include the
+first-attempt summary (configuration (2) on the same run), the final summary,
+escalations by reason, deep generations, rescued missions (completed,
+LEVI-verified, scored passes) and the deep attempt's latency. A mission's
+latency is the sum of both attempts.
+
+`phoenix/` is unchanged: the policy lives in the FYP runner, using only the
+existing `PhoenixRuntime` multi-provider and `tier_table` parameters. Product
+escalation inside PHOENIX is a later ticket, if the gate passes and the owner
+wants it.
+
+## ADR-125 — A self-contained bundled backend: embeddable CPython 3.11 plus the locked wheels
+
+Status: Accepted (owner decisions for PHX-092, 2026-10-21: bundled embeddable
+Python 3.11 with the locked wheels, launched by the Rust shell as the sidecar)
+Date: 2026-10-21
+Ticket: PHX-092
+
+Context: PHX-106 (ADR-091) started the backend from the repository's `.venv`
+(demo/dev launch mode), so a release build only ran on the machine that built
+it. An installed app needs its own interpreter and dependencies, and later
+tickets add native wheels (faster-whisper, piper, playwright's driver).
+
+Decision:
+
+- **Runtime.** `scripts/build_installer.py` stages `build/phoenix-runtime/`:
+  `python/` is the official python.org embeddable package, CPython **3.11.9**
+  (the last 3.11 release with Windows binaries), pinned by SHA-256
+  `009d6bf7e3b2ddca3d784fa09f90fe54336d5b60f0e0f305c37f400bf83cfd3b` (its MD5
+  matches python.org's published checksum) and cached under `build/`.
+  `python311._pth` is `python311.zip`, `.`, `Lib\site-packages`, `..\app`,
+  `import site`.
+- **Wheels from the lock, generically.** `uv export --frozen --no-dev
+  --no-emit-project` produces the hashed runtime closure of `uv.lock`, and
+  `uv pip install --target python/Lib/site-packages --python-version 3.11
+  --python-platform x86_64-pc-windows-msvc --only-binary :all: --no-deps
+  --require-hashes --no-config` installs it. A dependency added to the lock is
+  bundled with no script change; an sdist-only dependency fails the build
+  instead of compiling on the build machine.
+- **PHOENIX itself.** `app/` is the contents of PHOENIX's own wheel
+  (`uv build --wheel`: the package and its `dist-info`, so
+  `importlib.metadata.version("phoenix")` works) plus the git-tracked
+  `alembic/` and `alembic.ini`, the layout `phoenix.api.server` expects
+  (`ROOT = parents[2]`).
+- **Smoke and manifest.** The build imports `phoenix.api.server` with the staged
+  interpreter under `-I` and fails unless it reports 3.11.9, a PHOENIX version,
+  isolation and no user site-packages. `runtime-manifest.json` records the
+  Python source and digest and every `name==version`.
+- **Launch.** Tauri maps the staged directory to `backend/` next to the
+  executable. `LaunchConfig::resolve` order: a run-time `PHOENIX_BACKEND_ROOT`
+  (explicit developer override); else, when `<exe dir>/backend` exists,
+  installed mode (`backend/app`, `backend/python/python.exe` unless
+  `PHOENIX_BACKEND_PYTHON`), which never falls back to a checkout when
+  incomplete (`backend_not_found` / `python_not_found`); else the PHX-106
+  demo/dev mode. The bundled interpreter starts with `-I` before `-m
+  phoenix.api`: environment variables (`PYTHONPATH`, `PYTHONHOME`, …) and user
+  site-packages are ignored. Everything else in ADR-091 (token on stdin, ready
+  line, job object, lock, 90 s bound) is unchanged.
+
+Consequences: no new Python or Rust dependency; `uv` (already required) does
+the export and install. The installed backend is about 220 MB in about 3,700
+files (playwright's driver, pywin32, lxml and Pillow dominate); the LZMA
+installer is about 56 MiB. The runtime is
+deliberately not compiled to bytecode at build time; Python writes caches
+under `backend/` at run time, which the uninstaller removes (ADR-128).
+`apps/desktop/src-tauri/src/backend.rs` moves from the `origin/main` guard,
+and `phoenix/api/server.py` from the PHX-104 pin, to the PHX-092 pin.
+
+## ADR-126 — Data stays at `~/.phoenix/data` unless the user chooses another location
+
+Status: Accepted (owner decision for PHX-092, 2026-10-21: keep the default
+unless the docs require `D:\Phoenix`)
+Date: 2026-10-21
+Ticket: PHX-092
+
+Context: `docs/06_HARDWARE_PROFILE.md` lists `D:\Phoenix\` as the *preferred*
+location for large model and data storage on the BLAZE-6 development machine.
+It is a hardware-profile preference, not a requirement: a generic installer
+cannot assume a D: drive, and the large files (models) belong to Ollama, which
+has its own `OLLAMA_MODELS` setting.
+
+Decision: the installed app uses the backend's existing data setting:
+`PHOENIX_DATA_DIR` if the user sets it (a per-user environment variable; the
+user's chosen location), else `%USERPROFILE%\.phoenix\data`, exactly as in
+dev mode. On BLAZE-6 the documented choice is `PHOENIX_DATA_DIR=D:\Phoenix\data`
+and, for models, Ollama's `OLLAMA_MODELS=D:\Phoenix\models`. The program
+itself installs per user to `%LOCALAPPDATA%\PHOENIX` by default, and the NSIS
+directory page lets the user choose another folder (for example
+`D:\Phoenix\app`). Program files and user data never share a directory, so
+uninstalling never touches data by accident.
+
+Consequences: no installer page or new setting is added; PHX-108 may later
+offer a data-location setting. A custom `PHOENIX_DATA_DIR` is never removed by
+the uninstaller (ADR-128).
+
+## ADR-127 — First-run prerequisites are reported by `GET /ready`
+
+Status: Accepted (owner decision for PHX-092, 2026-10-21: expose the
+prerequisite checks as backend readiness; PHX-108 owns the UI)
+Date: 2026-10-21
+Ticket: PHX-092
+
+Context: Ollama and the tier models are prerequisites that PHOENIX never
+installs or downloads (owner policy; `docs/25_DEPENDENCIES.md`). A fresh
+install needs to tell the user what is missing. `/ready` already reports the
+provider probe and the registered models, but not whether Ollama is installed
+but stopped, nor which tier models are missing.
+
+Decision: `ReadinessResponse` gains `prerequisites`:
+`{"ollama": "running" | "not_running" | "not_found", "missing_models":
+[{"provider_id", "model_id"}, …]}`. `running` means the `ollama` provider's
+bounded probe (the one `/ready` already runs) was not `unavailable`;
+otherwise `not_running` if an `ollama` executable is on `PATH` or at the
+per-user installer's default `%LOCALAPPDATA%\Programs\Ollama\ollama.exe`, else
+`not_found` (the same detection as PHX-108's `GET /onboarding`, ADR-113).
+`missing_models` are tier-table models not registered yet (in tier-table
+order); PHX-108's model registrar (ADR-110) registers a model once it is
+pulled, so no restart is needed. `GET /onboarding` remains the richer
+first-run view (required models, install commands, storage); `/ready` carries
+the compact prerequisite summary. Only enums and model IDs are returned, never a path,
+URL or detail. `prerequisites` is `null` only while the services are
+unavailable. The overall `status` rules are unchanged. No new route: the
+desktop already forwards `GET /ready` (ADR-091).
+
+Consequences: one additive response field (docs/13); no extra network I/O
+(one `shutil.which` and one file check when Ollama does not answer).
+
+## ADR-128 — Unsigned per-user NSIS installer; uninstall keeps user data unless opted in
+
+Status: Accepted (owner decisions for PHX-092, 2026-10-21: NSIS via the Tauri
+bundler, unsigned with the SmartScreen warning documented, clean uninstall that
+leaves user data unless the user opts in)
+Date: 2026-10-21
+Ticket: PHX-092
+
+Decision:
+
+- **Bundle.** `packaging/windows/tauri.installer.conf.json` is merged over the
+  app's `tauri.conf.json` only for the installer build (`tauri build --bundles
+  nsis --config …`): `bundle.active`, target `nsis`, the staged runtime as the
+  one resource (`backend/`), `installMode: currentUser` (no elevation, no
+  machine-wide install) and the hooks file. It adds no window, capability, CSP
+  or plugin; `tauri.conf.json` and the exe-only `tauri:build` script are
+  unchanged, so dev and CI builds without a staged runtime still work.
+- **WebView2.** Tauri's default `downloadBootstrapper` runs only when WebView2
+  is missing (it ships with Windows 11); it is the only download an
+  installation may make.
+- **Unsigned.** No code-signing certificate exists. Windows SmartScreen shows
+  "Windows protected your PC" for the installer; the user chooses *More info*,
+  then *Run anyway*. The build prints the installer's SHA-256 for verification.
+- **Uninstall.** Tauri's uninstaller removes the files it installed, the
+  shortcuts and the HKCU uninstall key. `NSIS_HOOK_POSTUNINSTALL` then removes
+  `$INSTDIR\backend` recursively (it holds run-time bytecode caches; removed on
+  updates too, so no stale module survives) and the then-empty install folder.
+  User data is kept unless the user ticks Tauri's "Delete the application
+  data" box on the confirmation page (never in silent `/S` or update mode);
+  then the default `%USERPROFILE%\.phoenix\data` is removed along with Tauri's
+  WebView data under `%LOCALAPPDATA%\io.github.s7oaib.phoenix` and the
+  remembered install folder (`HKCU\Software\PHOENIX\PHOENIX`, which Tauri
+  otherwise keeps so a reinstall offers the same folder). A custom
+  `PHOENIX_DATA_DIR` is never deleted.
+
+Consequences: Ollama and its models are untouched by install and uninstall.
+Signing can be added later (`bundle.windows.certificateThumbprint` or a sign
+command) without changing the layout.
+
+## ADR-129 — A release-build CI job builds and uploads the installer
+
+Status: Accepted (owner decision for PHX-092, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-092
+
+Decision: `.github/workflows/release-installer.yml` runs on `windows-latest`
+for manual dispatch, pushes to `main`, `v*` tags and pull requests that touch
+packaging, the desktop, the backend or the locks. It sets up Python, uv 0.12.10,
+Node 22 and stable Rust as the test matrix does, runs
+`uv run --locked python scripts/build_installer.py`, and uploads the NSIS
+installer and `runtime-manifest.json` as the `phoenix-installer-windows-x64`
+artifact (30 days). Permissions are `contents: read`; it creates no release and
+uses no secret. The test matrix stays the merge gate; this job proves that the
+installer still builds.
+
+Consequences: each run downloads the embeddable Python (verified by its pinned
+digest) and the locked wheels (verified by the lock's hashes). Build outputs are
+never committed (`build/` and `target/` are ignored).
+
+## ADR-130 — Knowledge steps in missions: a PHOENIX-built P0 retrieval
+
+Status: Accepted (recommended defaults applied under the coordinator's
+instruction of 2026-10-21; R1–R14 in `tickets/PHX-110-memory-rag-missions.md`
+await the owner's review)
+Date: 2026-10-21
+Ticket: PHX-110
+
+Context: PHX-030 to PHX-035 built memory, ingestion, a vector store, scoped
+retrieval and citations, but no mission used them. The capability pattern
+(PHX-046) is a domain step whose tool call PermissionEngine decides, with
+guarded output and a deterministic LEVI evidence check.
+
+Decision:
+
+- **Domain.** Missions gain `knowledge_rag` (agent `knowledge_rag`), offered to
+  the assignment only when the runtime has a caller `KnowledgeSource` and the
+  source reports something indexed. `PhoenixRuntime(knowledge=...)` is
+  optional; without it nothing changes.
+- **PHOENIX builds the retrieval.** The model proposes nothing: the query is
+  the planned step objective and the scope is the caller's (every indexed
+  upload plus the `user` memory scope). Model text cannot widen the scope.
+- **Permission.** `knowledge.retrieve` is a P0 `ToolDefinition` (docs/08 lists
+  memory retrieval as P0). PHOENIX issues a `PermissionRequest` per step and
+  only an ALLOWED (`p0_internal`) decision proceeds. P0 writes no audit row.
+- **Guarded sources.** Each chunk or memory reaches a model only as one
+  numbered guarded item ("[n]", origin `uploaded_document` or
+  `external_text`); numbers are mission-wide. Both knowledge turns use the
+  structured providers.
+- **No sources.** An empty retrieval yields the fixed sentence
+  `No source answers this step.` without a generation; the model may also
+  answer with exactly that sentence.
+- **Failures.** A retrieval or embedding failure is `tool_failed`, a refused
+  decision `tool_rejected`; no new codes. The step's generation is not retried
+  (as for document steps, ADR-093); its LEVI generation is.
+- **Events.** No new event types and no allowlist change: the step publishes the
+  specialist agent phase and LEVI's events; retrievals are recorded in the
+  trace (ADR-131).
+
+Consequences: shared-file edits are additive (`runtime.py`, `prompts.py`); the
+logic lives in the new `phoenix/agents/retrieval_steps.py`. Every changed
+protected file is re-pinned to the PHX-110 implementation commit.
+
+## ADR-131 — Citations in MissionResult and the API
+
+Status: Accepted (as ADR-130)
+Date: 2026-10-21
+Ticket: PHX-110
+
+Decision:
+
+- `MissionTrace` gains `retrievals` (one `RetrievalRecord` per knowledge
+  retrieval: IDs, decision status, outcome, item counts, first number) and
+  `citations` (one `MissionCitation` per source a **verified** knowledge step
+  cited: marker, ordinal, step, retrieval ID, source kind, ID and hash, document
+  ID, upload file name, page, section, chunk, memory type and scope, and the
+  PHX-035 rendered label). Neither holds source text. Both default to empty, so
+  stored traces still load; the trace is JSON, so no migration.
+- `MissionResult.citations` returns the trace's citations.
+- `GET /missions/{id}` adds `sources` (a completed mission's citations; empty
+  otherwise). Responses still never carry source or file text.
+- The final answer may repeat the markers; it need not (an exact-format answer
+  stays exact).
+
+## ADR-132 — Memory write policy
+
+Status: Accepted (as ADR-130)
+Date: 2026-10-21
+Ticket: PHX-110
+
+Decision (docs/10: not every turn becomes memory; secrets never do; the user
+can inspect and delete):
+
+- **Only the user writes memory**, through `POST /memory`. Missions and models
+  never write memory; no chat turn is remembered automatically.
+- **Shape.** One plain note of at most 2,000 characters, typed `user`
+  (default), `project` or `semantic`, in the single `user` scope, with
+  `source_type="user_note"`, confidence 1.0, importance 0.5 and no expiry. At
+  most 2,000 memories.
+- **No secrets (INV-018).** A credential-shaped note (private-key blocks, cloud,
+  forge, chat and model API key shapes, JWTs, and `password:`/`api key=`
+  style assignments) is refused with `secret_rejected` before it is embedded or
+  stored. The same `MemoryWritePolicy` is PUDDING's admission policy. Uploads
+  with a credential-shaped chunk are refused the same way. The detector is a
+  heuristic and can miss or over-match.
+- **Visible and deletable.** `GET /memory` lists every memory with its text;
+  `GET /memory/search` searches memories and uploads and returns the matching
+  text (the user's own data); `DELETE /memory/{id}` removes a memory and its
+  vector.
+
+## ADR-133 — Upload to index wiring and the upload body cap
+
+Status: Accepted (as ADR-130)
+Date: 2026-10-21
+Ticket: PHX-110
+
+Decision:
+
+- `POST /files/upload?filename=...` takes the raw file as the request body, so
+  no multipart parser (and no new dependency) is needed. The PHX-072 parsers
+  route and parse it, PHX-032 ingests it (secret-bearing documents refused),
+  every chunk is embedded with `embeddinggemma:300m` through Ollama and stored
+  in the PHX-033 vector store. If embedding or storing fails, the document,
+  its chunks and vectors are removed: nothing half-indexed stays.
+  `GET /files` lists uploads; `DELETE /files/{id}` removes one with its chunks
+  and vectors.
+- Bounds: 8 MiB per upload, 200 documents, 2,000 chunks in total (the PHX-034
+  per-kind bound), 500 chunks per document, 1,000-character chunks with 150
+  overlapping; retrieval keeps up to 6 items and 6,000 characters above a 0.35
+  cosine floor. These are fixed in v1.
+- `body_limit.py` gives the exact path `/files/upload` its own 8 MiB cap; every
+  other route keeps 64 KiB.
+- **One lease (INV-023).** Every embedding (upload batches of 16, a memory, a
+  mission's query) holds the model lifecycle's heavy lease, so it never
+  overlaps a generation; an upload during a generation waits.
+- `ProviderSet` gains an optional `embedding` provider (the Ollama default
+  builds one); without it the knowledge base is read-only and missions are not
+  offered knowledge. `BackendServices` gains `knowledge`; every runtime gets it.
+- Ingestion and memory publish their events to a private bus, so `WS /events`
+  and its allowlist are unchanged.
+
+## ADR-134 — LEVI checks citations; `phoenix-prompts-v5`
+
+Status: Accepted for the checks (as ADR-130); the v5 prompt text awaits the
+owner's approval in the PR
+Date: 2026-10-21
+Ticket: PHX-110
+
+Decision:
+
+- **Knowledge step.** Deterministic checks first; a failure is final:
+  retrieval and permission evidence correlate with what PHOENIX issued;
+  plain text and size; every marker is a number issued for this step (at least
+  one), or the output is exactly the no-answer sentence; each citing sentence
+  shares a content term with its source or takes all its numbers from it, and
+  every number the step states comes from a cited source, the objective, the
+  request or an earlier verified output. Then the `knowledge_verifier` model
+  sees only the cited sources and judges support. The verdict stays
+  all-checks (INV-008).
+- **Final answer.** In a mission that ran a knowledge step, every marker in the
+  final answer must be a source a verified step cited, and its sentence must
+  be grounded in it, before the PHX-047 final verifier runs.
+- **Prompts.** `phoenix-prompts-v5` adds `KNOWLEDGE_ANSWER_SYSTEM`,
+  `KNOWLEDGE_VERIFICATION_SYSTEM`, `KNOWLEDGE_NO_ANSWER`, the knowledge
+  expected output, completion rule and task texts, and
+  `DOMAIN_DESCRIPTIONS["knowledge_rag"]`. Every v4 constant is unchanged; the
+  triage, planner and assignment prompts are not edited (optional v6 sentences
+  are listed in the ticket).
+
+Limitations: the deterministic support check is lexical (terms and numbers),
+so a reversed fact that keeps its terms reaches the model verifier; a final
+answer containing a bracketed number such as `[1]` is read as a citation when
+the mission ran a knowledge step. No new dependencies, event types or
+migrations.
+
+## ADR-135 — Web research steps in missions (URAHARA)
+
+Status: Proposed (PHX-111; recommended options applied under the owner's
+decisions of 2026-10-21; prompt text awaits the owner's approval)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Context: PHX-053/054 built the SearchProvider contracts, a P1 `WebSearchTool`
+and the advisory `UraharaResearchService`, but nothing let a PHOENIX mission
+search the web. The owner chose DuckDuckGo without an API key, a permission
+prompt before any query leaves the PC, untrusted fetched pages, cited answers
+checked deterministically by LEVI, and graceful rate-limit handling.
+
+Decision:
+
+- **Placement.** Logic lives in new modules: `phoenix/web/duckduckgo.py`
+  (provider), `phoenix/web/page_fetch.py` (page reader),
+  `phoenix/tools/web_research.py` (tool) and `phoenix/agents/research_steps.py`
+  (step runner, grants, LEVI responder). Shared files get small additive hooks:
+  `runtime.py` (optional `research_tool`, the `web_research` domain, a research
+  step branch, `MissionTrace.research_calls`, `rate_limited`), `prompts.py`
+  (v5 constants), `mission_events.py` (allowlist values), `api/missions.py`
+  and `api/routes/permissions.py` (research grants), `api/server.py` (wiring)
+  and `core/config.py` (`web_research_enabled`).
+- **A step mirrors PHX-046.** URAHARA proposes one query; PHOENIX builds the
+  call and permission request; the tool decides through ToolRegistry and
+  PermissionEngine (INV-004); the answer turn sees sources only as guarded
+  WEB_PAGE / WEB_SEARCH items (INV-017); grants come only from the caller
+  (INV-003). Research generations are not retried by MAHORAGA, as for
+  document steps (ADR-093), because a retry would repeat a network call.
+- **Why not WebSearchTool / UraharaResearchService.** `WebSearchTool`'s
+  resource hashes the exact query and timestamp, so a user's grant could never
+  match the re-run that follows an approval (the model proposes the query
+  again, at a new time). `UraharaResearchService` requires Playwright
+  BrowserTool evidence for every page and a separate synthesizer. Both stay
+  unchanged; the new tool reuses their PHX-053 contracts (`SearchProvider`,
+  `SearchRequest`/`SearchResponse`, public-URL admission).
+- **Capability flag.** Research steps exist only when `AppSettings.
+  web_research_enabled` is true (`PHOENIX_WEB_RESEARCH_ENABLED`); off by
+  default. PHX-108's capability endpoint is not on main, so it is not flipped
+  there yet. The research declaration is always registered so stored requests
+  can be shown and decided.
+
+## ADR-136 — DuckDuckGo over plain httpx; stdlib HTML extraction
+
+Status: Proposed (PHX-111)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Decision: the concrete provider posts the query to
+`https://html.duckduckgo.com/html/` with plain httpx and an honest
+User-Agent, and parses `result__a` / `result__snippet` anchors with the
+standard-library HTML parser. Sponsored (`y.js`) and non-public URLs are
+dropped by the PHX-053 admission. Pages are read with httpx and converted to
+text with the standard-library parser (scripts, styles and markup removed,
+block breaks kept). No dependency was added: `ddgs`/`duckduckgo-search` were
+pre-approved, but they impersonate browser TLS fingerprints to avoid bot
+detection and would add several transitive packages to the guarded lock.
+
+Page reading is bounded: public http(s) only, every hop re-admitted and its
+DNS answer required to be globally routable, at most 3 redirects, 1 MB per
+body, text/html or text/plain only, 10 s timeout, 4,000 characters per
+source, 3 sources per call. A page that cannot be read falls back, observably,
+to its search snippet (`page_failures`).
+
+Limitations: the HTML endpoint is unofficial and may change or block
+automated clients; DNS is resolved separately from httpx's connection, so a
+hostile resolver could rebind between them (as for BrowserTool).
+
+## ADR-137 — Research permission is scoped to the search provider (P1)
+
+Status: Proposed (PHX-111)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Decision: `web.research` is a P1 tool (docs/08: web search and page reading
+are "Observe", within a granted scope). Its permission resource is
+`search:<provider_id>` and its reason is the fixed `RESEARCH_TOOL_REASON`.
+Without a matching SESSION or PERSISTENT grant from the user, PermissionEngine
+answers APPROVAL_REQUIRED, nothing is sent, and the mission ends
+`waiting_permission` with the request; approving ("this session" or "always")
+through the existing API stores the grant and re-runs the mission. The user's
+approval therefore covers queries to that provider for the chosen duration and
+can be revoked at `/grants`. The approve route skips its workspace check for
+research requests only (they name no path); `MissionService.approve` still
+admits only document or research scopes (`mission_grants`).
+
+Limitations: the approval card shows the provider, not the query (the query is
+proposed again on the re-run). P1 research calls write no audit rows (INV-007
+covers P3/P4).
+
+## ADR-138 — Prompt set v5 and the `rate_limited` failure code
+
+Status: Proposed (PHX-111; exact prompt text awaits the owner's approval)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Decision:
+
+- `phoenix-prompts-v5` adds `RESEARCH_PLANNING_SYSTEM` (role
+  `research_planner`), `RESEARCH_SPECIALIST_SYSTEM`, `RESEARCH_ANSWER_SYSTEM`,
+  their task texts and step rules, and a `web_research` domain description.
+  Every v4 constant is byte-identical; `PLANNING_SYSTEM` is unchanged and still
+  used when research is disabled, so runs without the flag (including the FYP
+  configurations) see the v4 prompts.
+- A throttled search (HTTP 202/403/418/429 or an anomaly page) fails the
+  mission with the new closed `MissionFailureCode.RATE_LIMITED`
+  (`rate_limited`), with `tool.failed` code `rate_limited` and the research
+  record's `error_code`. MAHORAGA's classifier treats it as final (no
+  immediate retry against a rate limiter); other search failures are
+  `tool_failed`.
+
+## ADR-139 — LEVI checks research citations deterministically
+
+Status: Proposed (PHX-111)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Decision: the answer turn replies with claims, each citing a source URL and a
+quoted span. PHOENIX renders them (claim, title, URL, quote) as the step
+output. LEVI's research responder makes no model call and passes only if all
+checks pass:
+
+1. `research_evidence`: the result correlates with PHOENIX's call and request,
+   was ALLOWED by one of the caller's grants, and succeeded with sources;
+2. `citation_urls`: every cited URL is a fetched source (no fabricated URL);
+3. `citation_quotes`: every quote (at least 12 characters, compared after
+   case, whitespace and typographic-quote normalization) occurs in that
+   source's fetched content;
+4. `claim_numbers`: every number in a claim occurs in one of its quotes;
+5. `rendering`: the candidate equals PHOENIX's rendering of the parsed claims.
+
+After the final answer is verified, PHOENIX appends a deterministic
+`Sources:` list of the cited, fetched sources (title and URL).
+
+Limitations: the checks prove that quotes exist and numbers are quoted, not
+that a claim's wording is entailed by its quote; the final answer's own
+wording is judged by the existing final verifier.
+
+## ADR-140 — Opt-in permissioned media and document steps in missions
+
+Status: Accepted (recommended options applied under the owner's instruction,
+"recommended options"; R1–R12 in `tickets/PHX-113-media-documents.md` await the
+owner's review; the prompt text awaits explicit approval, ADR-144)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Context: missions could only read UTF-8 text through PHX-046. The parsers
+(PHX-072), the generator (PHX-073) and the Spotify/YouTube tools (PHX-070/071)
+existed but were unreachable from a mission. Other tickets edit `runtime.py`,
+`tool_steps.py` and `prompts.py` concurrently.
+
+Decision:
+
+- New modules carry the work: `phoenix/tools/document_files.py`,
+  `phoenix/agents/capability_steps.py` and `phoenix/agents/capability_prompts.py`.
+  `PhoenixRuntime` gains one opt-in argument, `capabilities: CapabilityTools`;
+  without it the runtime is unchanged. With it, a `documents` step runs on
+  `CapabilityStepRunner` (PHX-046's three read-only filesystem operations when a
+  FilesystemTool is also given, plus `read_document` and `create_document`) and a
+  `media` step offers Spotify and YouTube control.
+- The PHX-046 pattern is kept exactly: one proposal on the structured binding,
+  a closed allowlist, PHOENIX-built calls and requests, the tool's
+  PermissionEngine deciding, `waiting_permission` on APPROVAL_REQUIRED, the
+  result reaching models only as the guarded `tool_output` item (INV-017), one
+  call per step and no retries (PHX-109 R10).
+- LEVI checks the tool evidence deterministically before its model
+  (`deterministic.tool_evidence`: correlated call/request/resource/actor/tool,
+  ALLOWED by a caller grant, attempted success, effect matching the operation,
+  a verified create, an accepted P2 media command); the model check is grounded
+  in the same guarded item (INV-008). Filesystem operations keep PHX-046/047's
+  responders and `ToolCallRecord`s.
+- `MissionTrace.capability_calls` (additive, default empty; old traces load)
+  records IDs, statuses, hashes and lengths only. The PHX-103 allowlist gains
+  the PHX-113 tool IDs, their actions and the `media` agent role; the event
+  vocabulary stays at 32 types.
+- `media` is offered only when `prompts.DOMAIN_DESCRIPTIONS` describes it,
+  because the assignment prompt must describe every allowed domain.
+- The composition root is not wired; that follows prompt approval.
+- `runtime.py` and `mission_events.py` move from the PHX-109 pin to the PHX-113
+  implementation commit (`PHX_113_COMMIT`/`PHX_113_PATHS`) in a separate pin
+  commit; `prompts.py`, `tool_steps.py`, `responders.py` and every tool module
+  stay byte-identical. Merge with a merge commit.
+
+No new dependencies, event types, migrations or API changes.
+
+## ADR-141 — PHX-113 grants: exact scope, P2 for the session only
+
+Status: Accepted (recommended option; owner review pending)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Decision: grants come only from the runtime caller (INV-003). A PHX-113 grant
+names one closed tool, its own action, the exact resource PHOENIX builds (the
+absolute workspace path, or the Spotify/YouTube canonical resource including the
+query hash), the step's actor (`document_analyst` or `media`), a fixed reason
+(`CAPABILITY_DOCUMENT_REASON` or `MEDIA_TOOL_REASON`) and the tool's risk. P1
+grants may be SESSION or PERSISTENT, as in PHX-046; P2 grants (document create,
+media play/pause/open) are SESSION only, so approval to create a file or control
+playback never outlives the backend session. PHX-046 grants pass unchanged.
+Duplicate IDs or scopes, unknown tools and mismatched fields fail before the
+mission starts. No policy rule auto-approves P2.
+
+Consequence: the user approves a path or a media request, not generated
+content; a re-run regenerates content and a different query needs a new
+approval.
+
+## ADR-142 — Workspace documents: parse to text, create-only writes
+
+Status: Accepted (recommended option; owner review pending)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Decision:
+
+- `DocumentFileTool` reuses FilesystemTool's workspace rules (`_path`,
+  `_target`, `_checked_root`: no traversal, links or junctions; the root is
+  re-checked on every call; ADR-094) instead of re-implementing them.
+- `document.read` (P1) reads one `.pdf/.docx/.md/.markdown/.csv` file
+  (≤ 4 MiB) and parses it with the PHX-072 parsers and their bounds; text over
+  20,000 characters fails `limit_exceeded` and is never truncated.
+- `document.create` (P2, docs/08 "create new safe output") generates Markdown
+  or DOCX through the PHX-073 generator, or CSV through the standard library,
+  then creates the file with an exclusive open: an existing file is never
+  overwritten (`already_exists`, no effect) and missing folders are not
+  created. The file is read back and compared before `verified: true`
+  (docs/19). CSV cells that could run as spreadsheet formulas are prefixed with
+  `'` (plain numbers are kept).
+- No overwrite (P3), delete or mkdir operation and no PDF output in V1.
+- Dependencies: none added. pypdf 6.19.0, python-docx 1.2.0 and ReportLab
+  5.0.1 were already promoted and locked by PHX-072/073 (ADR-065, ADR-066), so
+  no per-dependency ADR is needed.
+
+Limitations: a create cancelled while its worker thread writes cannot be
+undone; the tool, like the parsers and generator it owns, serves one event loop.
+
+## ADR-143 — Spotify and YouTube in missions
+
+Status: Accepted (recommended option; owner review pending)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Decision: a `media` step (agent `media`, BROOK) may propose Spotify `search`
+(P1), `play` (optional track/album/artist/playlist URI) and `pause` (P2), and
+YouTube `search` (P1), `open` (the tool's `cue`: load a video without playing),
+`play` and `pause` (P2), through the unchanged PHX-070/071 tools. Transfer,
+volume, seek, queue operations and browser external-open are not offered.
+Credentials stay behind the PHX-045 SecretStore: Spotify tokens come from the
+owner's one-time PKCE link (`begin_authorization`/`complete_authorization`),
+the YouTube API key is stored as `youtube.api_key`; nothing is hardcoded and a
+missing setup fails `tool_failed`. Third-party titles are guarded tool output;
+command acceptance never proves audible or visible playback. Tests use only
+`httpx.MockTransport` and a fake player.
+
+## ADR-144 — PHX-113 prompt text stays a draft outside the approved set
+
+Status: Superseded by ADR-160 (the owner approved the text; PHX-120 moved it)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Decision: ADR-081 requires the owner to approve exact prompt text. The new
+role prompts (`document_capability`, `document_capability_answer`,
+`media_specialist`, `media_answer`, `capability_verifier`), the proposed
+`documents` and `media` domain descriptions and the proposed planner text live
+in `phoenix/agents/capability_prompts.py` as `phx-113-draft-1`, not in
+`prompts.py`, whose `PROMPT_SET_VERSION` stays `phoenix-prompts-v4`. The
+capability steps are opt-in and unwired, so no production mission uses
+unapproved text. On approval the text moves into `prompts.py` as
+`phoenix-prompts-v5` and the composition root is wired. Until then the planner
+does not plan writes or media and `media` cannot be assigned.
+
+## ADR-145 — Structured JSON logs with redaction and rotating files
+
+Status: Accepted (recommended option applied under the owner's instruction,
+"recommended options", for PHX-115; R1–R4 in
+`tickets/PHX-115-observability.md` await the owner's review)
+Date: 2026-10-21
+Ticket: PHX-115
+
+Context: the backend logged plain text to stderr (`basicConfig`), which the
+desktop shell writes to a log file truncated at each launch. docs/23 asks for
+structured logs with a correlation ID, task/step IDs, a safe message and an
+error type, and never secrets (RULES security 6, INV-018).
+
+Decision:
+
+- **Format.** `phoenix/api/structured_logging.py` writes one JSON object per
+  line with closed keys: `ts`, `level`, `subsystem`, `message`, and only the
+  correlation fields `correlation_id`, `mission_id`, `task_id`, `step_id`,
+  `agent_id`, `event_type`, each kept only when identifier-shaped. Any other
+  `extra` key is dropped, so a stray `extra={"prompt": ...}` never reaches a
+  log.
+- **Exceptions.** Only `error_type` (class name) and `error_frames`
+  (`file:line:function`, innermost 12). The exception message, arguments and
+  locals are never formatted, because PHOENIX's errors may carry model or tool
+  content.
+- **Redaction (defence in depth).** `redact()` removes bearer values,
+  `key=value` secrets (API keys, tokens, secrets, passwords, cookies,
+  authorization), private key blocks, `sk-`, GitHub, Slack and AWS key shapes,
+  and every registered secret; the launcher registers the per-launch API token
+  and forgets it on exit. Control characters are replaced and messages are
+  capped at 1,000 characters. PHOENIX code still logs IDs, codes and timings
+  only.
+- **Files.** `<data_dir>/logs/phoenix.jsonl`, rotated at 5 MiB with 5 backups
+  (stdlib `RotatingFileHandler`), plus the same JSON on stderr. Records go
+  through a `QueueHandler`/`QueueListener`, so the event loop never waits on
+  disk; the safe entry is built before the record is queued.
+  `LoggingHandle.close()` stops the listener and restores the root logger
+  exactly (tests and repeated launches leave no handlers behind).
+- **Mission events.** Every allowlisted event is logged once by the metrics
+  collector (ADR-146) as `phoenix.events`, warning for failures.
+
+Consequences: logs are machine-readable and greppable by mission ID; the
+shell's own `backend.log` now holds JSON lines too. No new dependency.
+Limitation: redaction is pattern-based and cannot recognise an arbitrary
+secret that is not registered; the guarantee rests on PHOENIX never logging
+content.
+
+## ADR-146 — Runtime metrics collector and authenticated `GET /metrics`
+
+Status: Accepted (recommended option applied under the owner's instruction,
+"recommended options", for PHX-115; R5–R8 await the owner's review)
+Date: 2026-10-21
+Ticket: PHX-115
+
+Context: docs/23 lists latency, provider/model, TTFT, tokens/sec, RAM/VRAM/CPU,
+tool success, verification, recovery and permission metrics. Content-free
+events (ADR-087) and stored `MissionTrace` evidence already hold most of them.
+The event vocabulary is frozen at 32 types.
+
+Decision:
+
+- **Placement.** `MetricsCollector` (`phoenix/api/observability.py`) wraps the
+  `EventStream` as the runtime's and mission service's `EventSink`. It
+  re-checks the PHX-103 allowlist, updates bounded aggregates (256 samples per
+  stage, 256 tracked missions, 16 models, 64 recent logs), logs the event and
+  forwards it unchanged. Observing is best effort: it never raises into,
+  blocks or alters a mission (INV-021, INV-022). No event type, payload field,
+  migration or runtime change is added; events are mapped, not extended.
+- **Trace evidence.** Tokens, generation durations, per-model usage and the
+  provider health a mission saw come from the stored trace of each mission that
+  ended (`completed`, `failed`, `cancelled`, `waiting_permission`), read
+  lazily through `MissionService.get_trace` when `/metrics` is requested, at
+  most 64 per request, each mission once. Tokens/sec is output tokens over
+  total generation latency, the PHX-091 reporting rule.
+- **TTFT.** Mission generations do not stream, and non-streaming TTFT is
+  unknown (ADR-011, ADR-016), so no per-generation TTFT is inferred from
+  Ollama's prompt-evaluation timings. The live TTFT metric is the mission's
+  time to first answer, queued to completed, named by `ttft_basis:
+  "mission_first_answer"`. Streaming generation would make it token-level; that
+  is a separate ticket.
+- **Resources.** Process working set and system RAM through `ctypes`
+  (`GlobalMemoryStatusEx`, `K32GetProcessMemoryInfo`) on Windows and `/proc`
+  elsewhere; process CPU % from `time.process_time` between snapshots. No
+  `psutil`, so no new dependency. VRAM is Ollama's own placement report,
+  `GET /api/ps` (`size_vram` per loaded model), one bounded request per
+  snapshot (probe timeout, no proxy, no redirects, 256 KiB cap, names
+  validated), only when an `OllamaProvider` is configured; otherwise, or on any
+  failure, `unavailable`.
+- **Permission decisions.** Requested (`permission.requested`), user-approved
+  (mission `superseded`), user-denied (mission failed `permission_denied`) and
+  policy-denied (`tool.failed` with `decision` `denied`/`blocked`).
+- **Route.** `GET /metrics` (`phoenix/api/routes/observability.py`), behind
+  the PHX-101 middleware like every route (token, bound Host, Origin). The
+  response schema is closed (`extra="forbid"`) and holds counts, timings,
+  sizes, IDs and closed values only.
+- **Wiring.** `server.py` builds the collector, passes it as `events=` to the
+  runtime and the mission service, binds the trace loader and the stream's
+  drop counters, and adds `BackendServices.observability`. `routes/__init__.py`
+  includes the router.
+
+Consequences: the numbers are per launch and in memory; disk I/O is not
+measured. A snapshot costs at most one `/api/ps` request and 64 trace reads.
+
+## ADR-147 — The desktop proxy admits `GET /metrics`
+
+Status: Accepted (recommended option applied under the owner's instruction for
+PHX-115; R9 awaits the owner's review)
+Date: 2026-10-21
+Ticket: PHX-115
+
+Decision: `proxy.rs` adds exactly `(GET, "/metrics", no query keys)` to the
+allowlist (19 routes). Any query, trailing segment, other method or nested path
+is refused before I/O, like every other route; Rust still adds the bearer token
+and the webview never sees it. Tests list it among the admitted routes and add
+`/metrics?verbose=1`, `/metrics/`, `/metrics/{id}`, `POST` and `PATCH` to the
+refused set.
+
+## ADR-148 — Live data in the Observability view through the existing port
+
+Status: Accepted (recommended option applied under the owner's instruction for
+PHX-115; R10 awaits the owner's review)
+Date: 2026-10-21
+Ticket: PHX-115
+
+Decision: `adapters/core.ts` fetches `GET /metrics` when the backend becomes
+ready, when the event stream (re)connects, when a mission settles or waits for
+permission, and every fifth poll tick (15 s). `toBackendDiagnostics` maps the
+snapshot into App's closed metric names (`task_step_latency`, `ttft`,
+`tokens_per_sec`, `provider_model`, `ram`, `vram`, `cpu`,
+`tool_success_failure`, `permission_decisions`, `verification_result`,
+`recovery_attempts`) with units and the snapshot time, at most 40 entries; the
+live event metrics fill the rest of App's 64. The backend's recent structured
+event logs fill the `logs` collection (at most 64), with correlation, task and
+step IDs. Malformed snapshots are ignored and the last good one stays. App.tsx
+is unchanged (ADR-092), so its captions still call the evidence
+caller-supplied; the copy update stays with PHX-108.
+
+## ADR-150 — Computer-control steps in PHOENIX missions
+
+Status: Accepted (owner decisions relayed for PHX-112 on 2026-10-21; the
+control prompts of ADR-152 approved by the owner the same day)
+Date: 2026-10-21
+Ticket: PHX-112
+
+PHX-050–052 and PHX-044 built the browser, Windows UI, screenshot/vision and
+terminal tools, but no mission could use them. ADR numbers 150–154 are reserved
+for PHX-112 (parallel tickets hold other ranges).
+
+Decision:
+
+- **A new step kind, owned by `computer_control` (KAKASHI).** A runtime built
+  with a `ControlStepRunner` (new `phoenix/agents/control_steps.py`) allowlists
+  the `computer_control` routing domain; without one nothing changes. The
+  runtime hook is additive: an optional constructor argument, an optional
+  `approvals` argument on `run()`, a `control_calls` trace field (IDs, codes,
+  hashes only) and a dispatch branch next to the document step.
+- **The model only proposes.** One `control_request` of at most four actions
+  per step. PHOENIX builds every call and `PermissionRequest` itself: it opens
+  and closes its own browser session (fixed session ID), uses the page URL the
+  browser actually reached (never a model URL) for later page actions, and
+  resolves a window title through one permissioned `list_windows` call, so the
+  model never supplies session IDs, window handles, process IDs or classes.
+- **PermissionEngine decides every action (INV-004).** PHOENIX first
+  pre-checks, with its own engine snapshot, every action whose resource is
+  already known; the first that needs approval ends the mission
+  `waiting_permission` before any effect. Each tool then decides again with its
+  own engine and writes the P3/P4 audit rows itself (INV-007). P0 and P5 are
+  rejected before any call (INV-006). Risk levels are the tools' canonical
+  ones (see `docs/08_PERMISSION_MATRIX.md`).
+- **LEVI checks the evidence first.** Every action must correlate with the
+  PHOENIX-issued call and request, be ALLOWED by a caller grant, PHOENIX's
+  teardown rule or the user's P4 decision, have succeeded, and carry both
+  audit IDs when P3/P4; only then does the grounded model check run (INV-008).
+- **One worker thread.** All tool calls run on the runner's single worker
+  thread, in order. Playwright's synchronous API stays on one thread, and a
+  hung call delays only later control actions (bounded by tool timeouts).
+- **PHOENIX's own browser.** BrowserTool already launches Playwright's bundled
+  Chromium with a fresh in-memory context: an isolated profile, never the
+  owner's Chrome/Edge profile. The Chromium binary lives in the PHOENIX-owned
+  folder `D:\Phoenix\browsers` (`PHOENIX_BROWSERS_PATH` overrides it), set for
+  the process by `phoenix/tools/browser_setup.py` and installed only by the
+  explicit, owner-run `scripts/install_control_browser.py --install`. Nothing
+  downloads at runtime; end users get the browser only through that step.
+- **Vision is advisory.** A screenshot step captures one resolved window (P1)
+  and asks the vision service one bounded question under the heavy-generation
+  lease (INV-023); only its text summary is rendered, never the frame.
+
+Limitations: control steps publish no `tool.*`/`permission.requested` events
+(the PHX-103 allowlist names filesystem tools only; extending it belongs to
+PHX-115); the step runs at most four actions per proposal and cannot observe a
+page before choosing its next action within one step; the backend composition
+root enables browser and Windows UI control steps only (ADR-152). No new
+dependencies, migrations, event types or API routes.
+
+## ADR-151 — Control approvals in the approve → re-run loop
+
+Status: Accepted (PHX-112, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-112
+
+There is no mid-mission resume (ADR-082): approving a request supersedes the
+waiting mission and queues a linked re-run, which issues new requests. A P2/P3
+grant can match a new request; a P4 action has no grant form (PermissionGrant
+allows P1–P3 only) and needs an explicit decision tied to one request.
+
+Decision:
+
+- **P1/P2:** the user's choice, a SESSION ("this session") or PERSISTENT
+  ("always") grant, as for documents.
+- **P3:** SESSION only; "always" is refused (PermissionEngine never matches a
+  persistent P3 grant, so storing one would only mislead).
+- **P4:** one explicit `UserPermissionDecision` on the exact stored request,
+  kept in the mission service's memory for the one linked re-run
+  (`MissionStore.approve_once` marks the request approved and queues the
+  re-run; no grant row). The re-run reuses that exact request when it proposes
+  the same action, so the decision correlates; any other action asks again. It
+  is used at most once, whatever duration the user picked (never broader than
+  asked), and a restart drops it with the interrupted re-run (fail-closed).
+- **At most one P4 action per mission.** A re-run repeats earlier actions, so
+  a second P4 would either loop forever or repeat the first effect; it is
+  rejected (`tool_rejected`) instead.
+- **Display-only approval summary (amended after review).** The stored
+  request names a window by handle/process/class and fill/set_text text by
+  hash only, and a window title can be spoofed by any program. When a control
+  request needs approval, PHOENIX records an `ApprovalSummary` built from the
+  call it issued and what it observed: the action in words, the page URL the
+  browser reached and the element selector, or the listed window title plus
+  the real process name, executable path and PID (`psutil`, read-only), the
+  terminal profile and arguments, and the exact text to be typed. Text that
+  looks like a password, key or token (known prefixes, password-shaped or long
+  token-shaped words; the heuristic errs toward hiding) is masked as
+  `[hidden: N characters]` with a note. `GET /permissions`,
+  `GET /permissions/{id}` and the mission detail return it as `summary` next to
+  the raw request. It is display only: approve and deny still take only the
+  request ID and duration, the grant or P4 decision binds to the stored
+  request's exact tool, action and resource, and the summary is never read by
+  PermissionEngine, the runner's correlation or the API's approval path; a
+  summary whose tool differs from the stored request's is not shown. Summaries
+  live in the runner's memory only (at most 256, so the typed text never
+  reaches the database); after a restart a pending request shows its raw
+  resource only.
+- **No workspace check for control requests.** The approve route's
+  `workspace_changed` check applies to document requests only; a control
+  request names no workspace path. MissionService still refuses any request
+  outside the canonical control scope.
+- One control step runs at a time, and a P3 action may not precede a deferred
+  P4 page action in one proposal (a re-run would repeat the P3 effect).
+- Stored grants pass to a run through `control_grants` only when the run's
+  runtime has control steps; grants, approvals and decisions never come from
+  model text (INV-003).
+
+## ADR-152 — The control prompts are a separate set; the backend enables control
+
+Status: Accepted (amended 2026-10-21: the owner approved the prompt texts)
+Date: 2026-10-21
+Ticket: PHX-112
+
+The approved `phoenix-prompts-v4` planner prompt forbids tool use other than
+workspace reads, and the assignment prompt describes only the existing domains,
+so control steps need new text. Parallel tickets edit `prompts.py`.
+
+Decision: the new texts live in `phoenix/agents/control_prompts.py` (planner
+variant, the `computer_control` domain description, specialist, answer and
+verifier prompts, step contract strings), hash-pinned in
+`tests/test_computer_control_steps.py`. `prompts.py` stays byte-identical; the
+runner swaps in the control planner and assignment responders only when it is
+configured. They were drafted as `phoenix-control-prompts-v1-draft`; the owner
+approved them unchanged on 2026-10-21, so the set is now
+`phoenix-control-prompts-v1` (only the version string changed).
+
+Amendment (enabling): the backend composition root (`phoenix/api/server.py`)
+now builds one `ControlStepRunner`, shared by every runtime it builds (the
+startup runtime and each workspace runtime), over PHOENIX's own isolated
+browser and the Windows UI tool. The one ToolRegistry holds the filesystem and
+the canonical control definitions; the policy is `control_permission_policy()`
+(its only rule is the browser teardown); Playwright is pointed at the
+PHOENIX-owned browser folder for the backend's lifetime (nothing downloads; a
+missing Chromium fails the action explicitly). The screenshot/vision and
+terminal control tools are not wired: they need a vision model binding and an
+owner-chosen terminal root and profile set. The PHX-108 capability flag
+`computer_control` is now enabled. The runner's worker is shut down with the
+backend.
+
+## ADR-153 — Kill switch and PHOENIX's browser teardown
+
+Status: Accepted (PHX-112, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-112
+
+The control tools are synchronous and declare no cancellation: an in-flight
+Playwright, UI Automation or child-process call cannot be pre-empted from
+outside without changing the frozen tools.
+
+Decision:
+
+- **Kill switch.** Each mission has a `ControlKillSwitch`. `PhoenixRuntime.cancel`
+  (and so the mission service's cancel and shutdown) trips it before cancelling
+  the task. The mission ends `cancelled` at once; no further control action
+  starts (the worker checks the switch right before each call); the in-flight
+  call finishes on its tool's own timeout (browser 30 s, Windows UI 10 s,
+  terminal profile ≤ 300 s), and its result is discarded, never shown to a
+  model.
+- **Teardown.** After a cancel, the browser session close is queued behind the
+  in-flight call on the same worker. Closing PHOENIX's own session is allowed
+  by the one standing policy rule `phx-112.browser-teardown` (P2
+  `browser.session_close`, fixed session resource) from
+  `control_permission_policy()`: teardown removes capability and has no
+  external effect, so it never waits for a user. It still goes through
+  PermissionEngine (MATCHING_POLICY). Opening the session needs a user grant.
+
+Limitations: a terminal child process or a hung UI Automation call runs until
+its own timeout after a cancel; real pre-emption needs tool-level cancellation
+(a later ticket).
+
+## ADR-154 — Page and screen content stay untrusted data
+
+Status: Accepted (PHX-112, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-112
+
+Decision: page text, element text, window and control text, vision summaries
+and command output reach models only as one guarded `TOOL_OUTPUT` item
+(INV-017), the same item for the answer turn and LEVI's model check; system
+prompts and the text outside the guarded block never contain them. The answer
+turn cannot act: a reply that repeats an injected action is plain model text,
+fails LEVI's plain-text check and runs nothing. Window-title resolution never
+renders the window list (other windows' titles stay private); a screenshot
+frame is never rendered or traced, only the advisory vision text; traces keep
+IDs, statuses, codes, hashes and lengths only. Password and file inputs stay
+blocked by the tools themselves.
+
 ## ADR-155 — KAIDO engages process-wide from the shared provider-health signal
 
 Status: Accepted (recommended defaults applied under the coordinator's PHX-119
@@ -4981,3 +6390,161 @@ Decision:
 
 Limitations: the thresholds are judgement for BLAZE-6 (24 GiB RAM, 6 GiB VRAM),
 not benchmarked; a live low-memory run is in the ticket's smoke steps.
+
+## ADR-160 — One owner-approved `phoenix-prompts-v5` set
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Context: PHX-110 and PHX-111 each introduced a `phoenix-prompts-v5` with
+different additions, PHX-113 kept its text as a draft (`phx-113-draft-1`,
+ADR-144) and PHX-118 proposed provenance sentences for
+`FINAL_VERIFICATION_SYSTEM`. The owner approved the whole batch.
+
+Decision: `phoenix/agents/prompts.py` holds one `phoenix-prompts-v5`:
+
+- every v4 constant byte-identical, except `FINAL_VERIFICATION_SYSTEM`, which
+  gains PHX-118's five provenance sentences exactly as written in its ticket;
+- PHX-110's knowledge texts and `DOMAIN_DESCRIPTIONS["knowledge_rag"]`;
+- PHX-111's research texts and `DOMAIN_DESCRIPTIONS["web_research"]`;
+- PHX-113's draft texts moved verbatim (role prompts, operation and service
+  lines, placeholders, tasks, expected outputs, completion rules) and
+  `DOMAIN_DESCRIPTIONS["media"]`. Its two proposed *replacements* of v4 text
+  become new constants instead, so v4 stays byte-identical:
+  `CAPABILITY_PLANNING_SYSTEM` (the draft planner) and
+  `CAPABILITY_DOCUMENTS_DESCRIPTION` (the draft documents description).
+  `capability_prompts.py` is deleted.
+
+Selection: AIZEN plans with `research_planner` when the runtime holds a web
+research tool, else with `CAPABILITY_PLANNING_SYSTEM` (`CapabilityPlanningResponder`,
+role marker `planner`) when it holds PHX-113 capability tools, else with the v4
+`PLANNING_SYSTEM`. With capability documents the assignment prompt describes
+`documents` with `CAPABILITY_DOCUMENTS_DESCRIPTION`
+(`ModelStepAssignmentResponder(descriptions=...)`).
+
+Evidence: `tests/test_phoenix_runtime.py` pins the first 128 bits of the
+sha256 of every v5 addition (`V5_PROMPT_SHA256`, `V5_DOMAIN_SHA256`,
+`V5_LINES_SHA256`) and of the changed `FINAL_VERIFICATION_SYSTEM`
+(`6a162b4e3195939d9b02b0ef209565b8`); every other v3/v4 hash is unchanged. The
+exact texts and hashes are listed in `tickets/PHX-120-capability-integration.md`.
+
+Consequences: research and capability planning are exclusive. With
+`PHOENIX_WEB_RESEARCH_ENABLED=true` AIZEN does not plan document writes or media
+steps; a combined planner needs new prompt text and a new owner approval
+(open issue). No new dependency, event type or migration.
+
+## ADR-161 — Capability flags enabled; web research keeps its launch opt-in
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Decision: `phoenix/api/capabilities.py` (ADR-112) enables `memory` (PHX-110),
+`web_research` (PHX-111), `media` and `document_generation` (PHX-113).
+`computer_control` and `voice` stay off. Web research also keeps
+`PHOENIX_WEB_RESEARCH_ENABLED` (default false): its queries leave the machine,
+so a launch must opt in. `GET /capabilities` reports `web_research` enabled
+only when the flag is on and the launch opted in, so the Research view never
+claims a tool the backend did not build. Every other flag is reported as is.
+
+Consequences: a flag still grants nothing (INV-004); every call needs the
+user's grant. The desktop needs no change.
+
+## ADR-162 — PHX-113 capabilities wired into the backend
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Decision: `phoenix/api/server.py` registers the PHX-113 `document.*` and
+`youtube.*` declarations and passes `capabilities=CapabilityTools(...)` to
+every runtime: a `DocumentFileTool` under the active workspace root (none
+without a root) and one `YouTubeTool` whose API key is read from the Windows
+credential store at call time (no player adapter exists, so open, play and
+pause fail `tool_failed`). Spotify is not wired: it needs an owner-registered
+client ID and redirect URI, which have no setting yet. With capability tools a
+documents step runs through the PHX-113 runner (`document_capability` roles),
+which keeps PHX-046's filesystem operations, grants, evidence and LEVI checks.
+
+The API grant store is widened as the PHX-113 ticket required:
+`research_steps.mission_grants(..., capabilities=True)` accepts research,
+PHX-046 document and PHX-113 grants (`capability_grants`: exact tool, action,
+actor, fixed reason and risk; P1 SESSION or PERSISTENT, P2 SESSION only).
+`MissionService` uses it for stored grants and approvals, so "always" for a P2
+request is refused (422). Media requests name no workspace path, so
+`POST /permissions/{id}/approve` skips the workspace check for them, as for
+research; document requests keep it.
+
+Consequences: no new dependency, route, event type or migration; the tool
+event allowlist is the union of PHX-046, PHX-111 and PHX-113 values.
+
+## ADR-163 — Merge resolution for PHX-110, PHX-111 and PHX-113
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Decision: the three branches merge in order (110, 111, 113) onto main with
+PHX-118 and PHX-108, with merge commits. In `runtime.py` a step is dispatched
+by the first match: PHX-113 capability, PHX-046 documents, PHX-110 knowledge,
+PHX-111 research, then text. LEVI's responder is the capability responder
+when the capability runner supplies one, else `_levi_responder` with PHX-118's
+final grounding and PHX-111's research evidence; PHX-110's knowledge wrapper
+applies on top. `MissionTrace` keeps every additive field (`retrievals`,
+`citations`, `research_calls`, `capability_calls`). `mission_events` allows the
+union of tool IDs, operations and agent roles. Docs and ADR lists are unions.
+
+## ADR-164 — One PHX-120 pin for files several tickets changed
+
+Status: Accepted
+Date: 2026-10-21
+Ticket: PHX-120
+
+Decision: in `tests/test_prompt_injection_defenses.py`, every protected path
+changed by more than one of PHX-108, PHX-109, PHX-110, PHX-111, PHX-113,
+PHX-118 and PHX-120 moves to `PHX_120_COMMIT`/`PHX_120_PATHS` at the PHX-120
+implementation commit (two commits: implementation, then pin), and leaves its
+older block, so each path has exactly one baseline. Paths only one ticket
+changed keep that ticket's pin. The PR must merge with a merge commit.
+
+## ADR-165 — Release train 2026-10-21: integration choices
+
+Status: Accepted (integration defaults; the owner reviews them with the train)
+Date: 2026-10-21
+Ticket: release train (PHX-114, PHX-117, PHX-116, PHX-115, PHX-092, PHX-120,
+PHX-112 on PHX-118b/PHX-119 main)
+
+The seven branches were merged in that order onto main with merge commits, so
+every pinned commit stays reachable. Where two tickets changed the same code,
+both behaviours are kept:
+
+- **Capability flags.** `workspace_documents`, `memory`, `media`,
+  `document_generation`, `computer_control` and `voice` are enabled;
+  `web_research` is enabled but still reported only with the launch opt-in
+  (ADR-161). This supersedes ADR-161's "`computer_control` and `voice` stay
+  off", which described PHX-120 before PHX-112 and PHX-114 landed.
+- **Planner choice.** The runtime keeps PHX-120's order (ADR-160): the
+  research planner with a WebResearchTool, else the capability planner with
+  capability tools; PHX-112's control planner replaces only the v4 planner
+  (its stated role, ADR-152), i.e. when neither is configured. No prompt text
+  was written or changed. Because the backend always wires capability tools,
+  the desktop backend plans with the capability planner; `computer_control`
+  stays an allowed assignment domain, described with the approved
+  `CONTROL_DOMAIN_DESCRIPTION`. A planner prompt that names both capability
+  and control steps needs owner-approved text (follow-up).
+- **Assignment.** One ModelStepAssignmentResponder gets the v5 descriptions
+  plus, with a ControlStepRunner, the control description (the same text
+  ControlAssignmentResponder used).
+- **Grants.** With control steps, grants whose actor is `computer_control`
+  pass `control_grants`; every other grant passes `mission_grants` (document,
+  research and PHX-113 capability scopes). MissionService and the approve
+  route do the same; control requests, like research and media requests, skip
+  the workspace check.
+- **Events.** KAIDO's and the voice pipeline's events go through PHX-115's
+  MetricsCollector, like every mission event, before the stream.
+- **Runtime.** KAIDO's capability-registry handle is `_capability_registry`, so
+  it no longer shadows PHX-120's `_capabilities` step runner.
+- **Pins.** Protected paths whose merged content matches no earlier pin move to
+  `PHX_TRAIN_COMMIT`/`PHX_TRAIN_PATHS` at the train's resolution commit (two
+  commits: resolution, then pin), and leave their older blocks.

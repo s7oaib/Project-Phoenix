@@ -77,8 +77,13 @@ behaviour.
     (16 missions of 1–2 minutes).
   - Configuration (2) mixes models by role and thinking varies by role; the
     report states this.
-  - Verification catch rate stays NOT RUNNABLE (needs fault-injected cases);
-    routing accuracy belongs to PHX-105.
+  - Verification catch rate stays NOT RUNNABLE here (the v1 set has no
+    fault-injected cases); it is measured by `scripts/metric_benchmark.py`
+    (PHX-117, below). Routing accuracy belongs to PHX-105.
+  - User intervention count is MEASURED from the mission outcomes: one
+    permission prompt per `waiting_permission` result (PHOENIX v1 has no
+    clarification turn). The v1 set is text-only, so it is 0 here; workspace
+    missions are measured by PHX-117.
   - Live results (2026-10-18, BLAZE-6, evidence in the PHX-091 ticket), with
     configuration (1)'s best at 93% / 0.3 s (4B, thinking off) and 100% / 7.2 s
     (4B, thinking on) for comparison:
@@ -124,8 +129,30 @@ behaviour.
     Caveat: those traces predate `MissionTrace.recoveries`, so fallbacks were
     detected from the task states (a completed mission whose COMPLEX task
     ended `failed`).
-- Configuration (3) is reported as NOT RUNNABLE: the runtime has no adaptive
-  routing or Colibri deep-tier path.
+- Configuration (3) runs with `--config phoenix-adaptive-deep`
+  (`scripts/fyp_adaptive_deep.py`, PHX-116, ADR-121), only after the deep tier
+  passes its gate.
+  - **Deep tier.** Qwen3.6-35B-A3B (Colibri int4 gs64 container) served by the
+    Colibri v2.0.0 CUDA release with `coli serve` on `127.0.0.1:8000`. PHOENIX
+    never starts it (ADR-028, ADR-120).
+  - **Gate.** `scripts/colibri_gate.py --io-bench --live` runs the v1 task set
+    on the served model through `ColibriProvider` and the PHX-016 harness. It
+    reports PASS, FAIL or INCOMPLETE against fixed criteria: success, accuracy,
+    TTFT, throughput, RAM headroom, VRAM, NVMe read speed and the container's
+    sha256 manifest (`--verify-manifest`). It also records the engine process's
+    disk reads (`colibri_disk_io`). A FAIL means configuration (3) is reported
+    as measured and rejected, with the gate's numbers.
+  - **Adaptive routing.** Each task first runs as configuration (2). It
+    escalates once to a COMPLEX mission with Colibri first for the text
+    specialists and the final answer. Escalation happens only when LEVI
+    rejected the answer (`verification_failed`), the output stayed unusable
+    (`responder_output`), or the answer came from an unverified DIRECT
+    fallback. Refusals, permissions, tools, timeouts and provider failures
+    never escalate, and the score is never consulted. LEVI and the control
+    roles stay on Ollama.
+  - **Report.** The first-attempt summary (configuration (2) on the same run),
+    the final summary, escalations by reason, deep generations and rescued
+    missions. A deep tier that drops mid-run shows as `deep_not_used`.
 - Every metric above is reported either as measured or as NOT RUNNABLE with a
   reason (ADR-079).
 - Changing any case requires a new task-set version.
@@ -161,6 +188,74 @@ multi_step, ambiguous and adversarial).
 - `scripts/fyp_benchmark.py` keeps reporting `routing_accuracy` as NOT RUNNABLE
   in its baseline run and points to this script.
 
+### Metric datasets (PHX-117)
+
+`python scripts/metric_benchmark.py` makes the metrics that need their own data
+measurable. It uses five fixed sets under `benchmarks/metrics/`. Each set is
+versioned, its sha256 is pinned in `tests/test_metric_datasets.py`, and changing
+any case needs a new version and file (ADR-115). The content is harmless,
+fictional and local only.
+
+| Set | Version | Size | Metric | Status today |
+| --- | --- | --- | --- | --- |
+| `verification-v1.toml` | 1.0.0 | 25 cases: 20 faults, 5 controls | verification catch rate | MEASURED (scripted floor in CI; live LEVI on BLAZE-6) |
+| `interventions-v1.toml` | 1.0.0 | 8 missions, 3 fixture files | user intervention count | MEASURED |
+| `memory-v1.toml` | 1.0.0 | 20 questions over 10 documents | memory retrieval accuracy | NOT RUNNABLE until PHX-110 |
+| `research-v1.toml` | 1.0.0 | 8 questions, 8 fixture sources | research evidence quality | NOT RUNNABLE until PHX-111 |
+| `computer-control-v1.toml` | 1.0.0 | 10 tasks on 6 pinned local pages | computer-control completion | NOT RUNNABLE until PHX-112 |
+
+- **Verification catch rate** (ADR-116). Each case is a forced-COMPLEX
+  `PhoenixRuntime` mission. Its producer turns (plan, assignment, specialist,
+  document and final answer) are scripted from the case, so they carry the
+  injected fault. Document steps read a fixture workspace through the real
+  FilesystemTool and PermissionEngine.
+  - Fault kinds: wrong answers (step or final), ungrounded claims, injected
+    tool evidence (a file instruction that the answer obeys), forged tool
+    evidence (the harness tampers with the tool result: call ID, permission
+    request or grant), and forged verdicts (a step output that is a JSON
+    verdict).
+  - Only LEVI's verifier turns are the model under test. `--scripted` (CI)
+    answers them with an always-pass verifier, so its 25% (5 of 20) is the
+    deterministic floor: LEVI's code checks catch every forgery and nothing
+    else. That is harness validation, not a FYP number. The live run sends
+    LEVI's turns to Ollama.
+  - Scoring:
+    - CAUGHT: the mission fails `verification_failed` with a FAILED verdict.
+    - ESCAPED: it completes with every verdict PASSED.
+    - Anything else is inconclusive and excluded from the rate.
+    - Rejecting a control is a false rejection, reported next to the catch
+      rate.
+- **User intervention count** (ADR-118). Missions start with no grants. Each
+  `waiting_permission` result is one permission prompt. The runner approves
+  exactly the pending request for the session (the PHX-102 linked re-run) and
+  runs the mission again, up to `max_rounds`.
+  - The report gives prompts per mission and the excess over each case's
+    minimum (one prompt per distinct file).
+  - Scripted CI measures 8 prompts over 8 missions, all at the minimum.
+  - Configuration (2) also reports its prompts. The v1 set is text-only, so it
+    has none.
+- **Recovery success** is measured from configuration (2) traces
+  (`MissionTrace.recoveries`, PHX-109). `--config2-results
+  <fyp-multi-agent-results.json>` reports it in the same table, MEASURED when
+  the traces carry recoveries. When no recovery action was taken, the rate is
+  undefined (`null`) and the report says so. Configuration (1) reports it as
+  NOT RUNNABLE because it has no MAHORAGA.
+- **Memory, research and computer control** (ADR-117). The datasets and
+  scorers exist now:
+  - memory: hit@1, hit@3, MRR and answer containment;
+  - research: the citation rubric (citation present, cited source supports the
+    claim, no fabricated URL), with fact coverage reported separately;
+  - computer control: final element state, step budget and fixture-only scope.
+
+  `--dry-run` validates each set and replays its fixed calibration vectors
+  through the scorer. The live metric stays NOT RUNNABLE until the owning
+  ticket is DONE in `FEATURE_TICKETS.md` and an adapter is registered in
+  `ADAPTERS`. The runner checks both and states which one is missing.
+- Results go to `.metric-bench/metric-benchmark-results.json` (schema-versioned)
+  and a Markdown summary. They hold IDs, closed codes and counts only.
+- Like the other runners, a live run records Ollama's placement for LEVI's
+  first-choice model and refuses CPU-only runs unless `--allow-cpu` is passed.
+
 ## Automated test matrix (PHX-090)
 
 `python scripts/test_matrix.py` runs every required gate declared in
@@ -179,7 +274,29 @@ gate under `.test-matrix/logs/`.
   ADR-082): full PHOENIX missions with permissioned read-only filesystem steps,
   real orchestration, permission, tool and audit components, and a scripted
   model. Its `[[gap]]` is removed. The owner-run live counterpart,
-  `scripts/phoenix_mission_smoke.py`, is not a CI gate.
+  `scripts/phoenix_mission_smoke.py`, is not a CI gate. PHX-110 (ADR-130 to
+  ADR-134) adds `tests/test_knowledge_missions.py` (knowledge steps, citations
+  and LEVI's citation checks over a real KnowledgeService, scripted model and
+  embeddings) and `tests/test_knowledge_api.py` (upload, memory, search and
+  cited missions over REST); its live counterpart,
+  `scripts/phoenix_knowledge_smoke.py`, is not a CI gate either.
+- PHX-120 (ADR-160 to ADR-164) integrates PHX-110, PHX-111 and PHX-113 on one
+  `phoenix-prompts-v5` set; `tests/test_phoenix_runtime.py` hash-pins every v5
+  addition, `tests/test_rest_api.py` covers PHX-113 approvals through the API
+  (P2 document.create session-only, YouTube without a workspace) and
+  `tests/test_settings_onboarding.py` the enabled capability flags.
+- `tests/test_web_research.py` (PHX-111) covers web research offline: the
+  DuckDuckGo provider and page reader over `httpx.MockTransport` fixtures,
+  the P1 research tool, LEVI's deterministic citation checks and full research
+  missions (granted, waiting for permission, injected pages, fabricated
+  citations, rate limiting). Its owner-run live counterpart,
+  `scripts/research_mission_smoke.py`, is not a CI gate.
+- `tests/test_computer_control_steps.py` (PHX-112, ADR-150–154) runs computer-control
+  missions with the real browser, Windows UI, screenshot and terminal tools over
+  fixture backends (local fixture pages, fixture windows), the real permission,
+  audit and approve → re-run components and a scripted model. The owner-run live
+  counterparts, `scripts/install_control_browser.py` and
+  `scripts/phoenix_control_smoke.py`, are not CI gates.
 - Native WebView2 acceptance and live model or device runs are `[[manual]]` rows
   with evidence references. They are reported as MANUAL, never as automated PASS.
 - The run fails on any gate failure or timeout, missing tool, unmapped or missing

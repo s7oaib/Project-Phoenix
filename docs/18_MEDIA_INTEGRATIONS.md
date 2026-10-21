@@ -38,6 +38,24 @@ the existing browser.navigate tool. No OAuth/private-account data, transcripts,
 downloads, stream extraction, media history or memory/RAG ingestion. See
 [the PHX-071 contract](../tickets/PHX-071-youtube-integration.md) and ADR-064.
 
+## Media steps in missions — PHX-113
+
+With `PhoenixRuntime(capabilities=CapabilityTools(spotify=..., youtube=...))` a
+`media` mission step (agent `media`) may propose one request: Spotify `search`
+(P1), `play` (optional URI) or `pause` (P2); YouTube `search` (P1), `open` (the
+tool's `cue`), `play` or `pause` (P2). PHOENIX builds the call, the tool's
+PermissionEngine decides on caller grants only (P1 SESSION/PERSISTENT, P2
+SESSION only, exact resource), results reach models only as guarded tool output
+and LEVI checks the evidence first. PHX-120 (ADR-160 to ADR-162) moved the
+approved prompts and the `media` domain description into `phoenix-prompts-v5`
+and wired the backend: YouTube is always offered (its API key is read from the
+Windows credential store at call time; without a key, or without a player
+adapter for open/play/pause, a granted call fails `tool_failed`); Spotify is not
+wired until an owner-registered client ID exists.
+Owner setup: Spotify app + PKCE link (tokens in the PHX-045 SecretStore), a
+YouTube API key and a concrete player adapter. See
+[the PHX-113 contract](../tickets/PHX-113-media-documents.md) and ADR-140–144.
+
 ## Rule
 
 BROOK reasons about media requests. Spotify and YouTube are tool integrations, not separate agents.

@@ -45,4 +45,8 @@ def test_distribution_has_foundation_runtime_dependencies() -> None:
         "sqlalchemy",
         "uvicorn",
         "websockets",  # PHX-103 (ADR-088)
+        "faster-whisper",  # PHX-114 (ADR-105)
+        "piper-tts",  # PHX-114 (ADR-106)
+        "sounddevice",  # PHX-114 (ADR-107)
+        "numpy",  # PHX-114 (ADR-107)
     }

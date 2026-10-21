@@ -1851,6 +1851,9 @@ def test_no_action_persistence_or_dependency_change() -> None:
             "phoenix/tools/terminal.py",
             ":(exclude)apps/desktop/src/App.tsx",
             ":(exclude)apps/desktop/src/styles.css",
+            # PHX-111 (ADR-135) adds web_research_enabled; config.py is
+            # hash-pinned (PHX_111_PATHS in test_prompt_injection_defenses.py).
+            ":(exclude)phoenix/core/config.py",
             # PHX-100 (ADR-084) adds these new modules; every file that existed
             # in phoenix/api stays protected.
             ":(exclude)phoenix/api/server.py",
@@ -1884,6 +1887,10 @@ def test_no_action_persistence_or_dependency_change() -> None:
             # missions.py, routes and schemas are excluded above and hash-pinned
             # in test_prompt_injection_defenses.py).
             ":(exclude)alembic/versions/0008_mission_triage.py",
+            # PHX-114 (ADR-108) adds the voice service and routes (server.py and
+            # routes/__init__.py are hash-pinned in test_prompt_injection_defenses.py).
+            ":(exclude)phoenix/api/voice.py",
+            ":(exclude)phoenix/api/routes/voice.py",
             # PHX-106/107 (ADR-091, ADR-092) change these desktop files (hash-pinned
             # in test_prompt_injection_defenses.py) and add the sidecar, proxy and
             # adapters.
@@ -1910,6 +1917,17 @@ def test_no_action_persistence_or_dependency_change() -> None:
             ":(exclude)phoenix/api/routes/setup.py",
             ":(exclude)alembic/versions/0009_default_mission_path.py",
             ":(exclude)apps/desktop/src/adapters/SetupViews.tsx",
+            # PHX-115 (ADR-145, ADR-146) adds the observability modules and route
+            # (server.py, launcher.py, routes/__init__.py, proxy.rs and core.ts are
+            # hash-pinned in test_prompt_injection_defenses.py).
+            ":(exclude)phoenix/api/observability.py",
+            ":(exclude)phoenix/api/structured_logging.py",
+            ":(exclude)phoenix/api/routes/observability.py",
+            # PHX-110 (ADR-130 to ADR-134) adds the knowledge service and routes
+            # (the changed server.py, routes and body cap are excluded above and
+            # hash-pinned in test_prompt_injection_defenses.py).
+            ":(exclude)phoenix/api/knowledge.py",
+            ":(exclude)phoenix/api/routes/knowledge.py",
         ],
         cwd=ROOT,
     )

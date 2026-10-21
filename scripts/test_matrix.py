@@ -241,6 +241,17 @@ def log_tail(log: Path, lines: int = 80) -> str:
     return "\n".join(f"matrix|  {line}" for line in text[-lines:])
 
 
+def console_safe(text: str, encoding: str | None) -> str:
+    """``text`` re-encoded so printing it to a console never raises.
+
+    A Windows runner console is cp1252: a log's U+FFFD or arrow would raise
+    UnicodeEncodeError and hide the failing gate's tail, so unencodable
+    characters become "?".
+    """
+    codec = encoding or "utf-8"
+    return text.encode(codec, errors="replace").decode(codec, errors="replace")
+
+
 def parse_node_spec(stdout: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     for key in ("tests", "pass", "fail", "skipped"):
@@ -406,7 +417,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"matrix: {gate.id} {result.status} ({result.duration_s}s)", flush=True)
         if result.status != "PASS":
             # CI consoles are often the only place a failure is visible.
-            print(log_tail(Path(result.log)), flush=True)
+            tail = log_tail(Path(result.log))
+            print(console_safe(tail, getattr(sys.stdout, "encoding", None)), flush=True)
         gate_results.append(result)
     status_after = _git("status", "--porcelain")
 

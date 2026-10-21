@@ -96,8 +96,8 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 
 ## Phase 9 — Validation & Release
 - PHX-090 Automated test matrix — DONE
-- PHX-091 FYP benchmark suite — DONE (configuration 1 GPU baselines; configuration 2 measured live, triage and forced COMPLEX); configuration 3 NOT RUNNABLE
-- PHX-092 Packaging/install workflow — TODO
+- PHX-091 FYP benchmark suite — DONE (configuration 1 GPU baselines; configuration 2 measured live, triage and forced COMPLEX); configuration 3 runnable behind the PHX-116 gate
+- PHX-092 Packaging/install workflow — DONE (unsigned per-user NSIS installer with the bundled backend; ADR-125 to ADR-129)
 - PHX-093 Final demo scenarios — TODO
 - PHX-094 Release evidence package — TODO
 
@@ -112,13 +112,14 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-107 Frontend port adapters — DONE (R1–R11 confirmed by the owner 2026-10-18)
 - PHX-108 Settings and onboarding — DONE (ADR-110–114; late Ollama start fixed; owner review in the PR)
 - PHX-109 MAHORAGA/KAIDO in missions — DONE (MAHORAGA bounded recovery, ADR-093; KAIDO deferred)
-- PHX-110 Memory and RAG in missions — TODO
-- PHX-111 Web research — TODO
-- PHX-112 Computer control steps — TODO
-- PHX-113 Media and documents steps — TODO
-- PHX-114 Voice pipeline — TODO
-- PHX-115 Observability — TODO
-- PHX-116 Colibri deep tier — TODO
-- PHX-117 Metric datasets — TODO
+- PHX-110 Memory and RAG in missions — DONE (knowledge steps with cited, LEVI-checked answers, ADR-130–134; v5 text approved and integrated by PHX-120; live smoke pending)
+- PHX-111 Web research — DONE (offline acceptance, ADR-135 to ADR-139; v5 text approved and integrated by PHX-120; live smoke awaits the owner)
+- PHX-112 Computer control steps — IN_PROGRESS (implemented and tested on a local branch; control prompts approved and browser/Windows UI control enabled in the backend with display-only approval summaries; awaiting PR review and the owner's live smoke, ADR-150–154)
+- PHX-113 Media and documents steps — DONE (ADR-140–144; prompts approved into v5 and backend wired by PHX-120; Spotify wiring and live smoke await owner setup)
+- PHX-114 Voice pipeline — DONE (backend: wake, STT, TTS, barge-in, /voice API, ADR-105–109; desktop mic toggle is a follow-up)
+- PHX-115 Observability — DONE (structured JSON logs, `GET /metrics`, Observability view live; ADR-145–148; R1–R10 applied under the owner's "recommended options" instruction, pending review)
+- PHX-116 Colibri deep tier — IN_PROGRESS (engine and model installed, gate and configuration (3) runner ready; live gate awaits a free GPU)
+- PHX-117 Metric datasets — DONE (datasets, scorers and runner; verification catch rate and intervention count measured in scripted CI; memory/research/computer control NOT RUNNABLE until PHX-110/111/112)
 - PHX-118 LEVI final-verifier reliability — DONE (deterministic grounding pre-check, ADR-100; PHX-118b narrowed it to label values the request names, 2026-10-21; proposed v5 prompt text awaits owner approval)
 - PHX-119 KAIDO fail-safe in missions — DONE (ADR-155–ADR-158; owner reviews R1–R14 and the KAIDO prompt text)
+- PHX-120 Capability integration — DONE (PHX-110/111/113 on one `phoenix-prompts-v5`, backend wiring, capability flags; ADR-160–164; live acceptance pending)

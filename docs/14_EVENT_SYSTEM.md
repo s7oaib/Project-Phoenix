@@ -70,3 +70,22 @@ output, file content, paths and secrets never appear.
 
 Publishing never blocks or fails a mission; refusals are counted, not reported
 in results. `WS /events` streams the events (`docs/13_API_CONTRACTS.md`).
+
+
+## Voice events (PHX-114, ADR-108)
+
+The voice service publishes `voice.listening`, `voice.speaking` and
+`voice.interrupted`. The payload may hold:
+
+- `state`: off, starting, sleeping, listening, thinking, speaking,
+  degraded_voice, text_only or unavailable;
+- `session_id`, `turn_id` and `mission_id`: UUIDs;
+- `code`: `models_missing`, `dependency_unavailable`,
+  `microphone_unavailable` or `voice_failure`.
+
+The correlation ID is the voice session, and `agent_id` is `voice` (UTA).
+`voice.speaking` marks playback starting, and `voice.interrupted` a barge-in
+(state `listening`). `voice.listening` carries every other voice state change,
+for example `thinking` with the request's `mission_id`, or `sleeping`. No
+transcript, answer or audio is ever published. The vocabulary stays at 32
+types.

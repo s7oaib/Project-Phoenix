@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: counter</title>
+</head>
+<body>
+<h1>Tally</h1>
+<button id="decrement" type="button" aria-label="Decrease">-</button>
+<span id="count" role="status">0</span>
+<button id="increment" type="button" aria-label="Increase">+</button>
+<button id="reset" type="button">Reset</button>
+<script>
+var value = 0;
+function show() {
+  document.getElementById("count").textContent = String(value);
+}
+document.getElementById("increment").addEventListener("click", function () {
+  value += 1;
+  show();
+});
+document.getElementById("decrement").addEventListener("click", function () {
+  value -= 1;
+  show();
+});
+document.getElementById("reset").addEventListener("click", function () {
+  value = 0;
+  show();
+});
+</script>
+</body>
+</html>

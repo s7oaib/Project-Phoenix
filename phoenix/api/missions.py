@@ -10,8 +10,10 @@ PermissionRequest stored. Only ``approve``, a user decision, creates a grant
 (INV-003): "this session" (SESSION, this launch's session ID) or "always"
 (PERSISTENT, until revoked). Approval supersedes the waiting mission and queues
 a linked re-run of the same request; there is no mid-mission resume (ADR-082).
-Each run receives the stored, unrevoked grants that pass ``document_grants``,
-plus this launch's session ID.
+Each run receives the stored, unrevoked grants that pass ``mission_grants``
+(document or, PHX-111, web research scope, and since PHX-120 the PHX-113
+document and media scopes: P1 "session" or "always", P2 "session" only), plus
+this launch's session ID.
 
 Lifecycle: ``start`` marks missions left queued or running by an earlier process
 ``failed/interrupted`` (nothing re-runs; ``run_again`` is the explicit path),
@@ -56,15 +58,21 @@ from uuid import uuid4
 
 from pydantic import JsonValue, ValidationError
 
+from phoenix.agents.control_steps import (
+    CONTROL_ACTOR_ID,
+    CONTROL_TOOL_RISKS,
+    ControlApproval,
+    control_grants,
+)
 from phoenix.agents.mission_events import EventPublisher, EventSink
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
+from phoenix.agents.research_steps import mission_grants
 from phoenix.agents.runtime import (
     MissionKind,
     MissionResult,
     MissionTrace,
     PhoenixRuntime,
 )
-from phoenix.agents.tool_steps import document_grants
 from phoenix.agents.triage import TriageOutcome
 from phoenix.core.events import EventType
 from phoenix.persistence.missions import (
@@ -84,8 +92,13 @@ from phoenix.persistence.missions import (
     RecordNotFoundError,
     Settlement,
 )
-from phoenix.security.permissions import GrantDuration, PermissionGrant
-from phoenix.tools.registry import ToolRegistry
+from phoenix.security.permissions import (
+    GrantDuration,
+    PermissionGrant,
+    UserDecision,
+    UserPermissionDecision,
+)
+from phoenix.tools.registry import ToolRegistry, ToolRiskLevel
 
 DEFAULT_RETENTION = timedelta(days=30)
 DEFAULT_PURGE_INTERVAL_SECONDS = 3600.0
@@ -185,6 +198,9 @@ class MissionService:
         self._skipped_grants = 0
         self._writers = 0  # submit/approve/run_again calls between check and enqueue
         self._events = EventPublisher(events)
+        # PHX-112 (ADR-151): one-time P4 approvals, by the re-run they belong to.
+        # Memory only: a restart interrupts that re-run and the approval is gone.
+        self._approvals: dict[str, ControlApproval] = {}
 
     @property
     def session_id(self) -> str:
@@ -393,7 +409,11 @@ class MissionService:
                     refused = await current.preflight()
                 found = await self._io(self._store.active_grants, self._session_id)
                 self._skipped_grants += found.skipped
-                grants = self._usable(found.grants)
+                control = current.runtime.control_enabled
+                grants = self._usable(found.grants, control=control)
+                # PHX-112: a one-time P4 approval belongs to this re-run only.
+                approval = self._approvals.pop(mission_id, None)
+                approvals = () if approval is None or not control else (approval,)
                 if current.cancel is not None:
                     outcome = self._cancelled(current, None)
                 elif refused is not None:
@@ -414,6 +434,7 @@ class MissionService:
                         grants=grants,
                         session_id=self._session_id,
                         decided_by=TriageOutcome(claimed.triage_outcome or "client"),
+                        approvals=approvals,
                     )
                     outcome = self._settlement(current, result)
             except Exception:
@@ -455,16 +476,28 @@ class MissionService:
             )
 
     @staticmethod
-    def _usable(stored: tuple[PermissionGrant, ...]) -> tuple[PermissionGrant, ...]:
-        """Stored grants that pass the document-step rules, one per scope."""
+    def _usable(
+        stored: tuple[PermissionGrant, ...], *, control: bool = False
+    ) -> tuple[PermissionGrant, ...]:
+        """Stored grants that pass the document, research or (PHX-120) PHX-113
+        capability step rules, one per scope.
+
+        PHX-112: with control steps enabled on the runtime, grants that pass
+        the control-step rules are passed too (also one per scope).
+        """
         accepted: list[PermissionGrant] = []
+        controlling: list[PermissionGrant] = []
         for grant in stored:
             try:
-                document_grants([*accepted, grant])
+                if control and grant.actor_id == CONTROL_ACTOR_ID:
+                    control_grants([*controlling, grant])
+                    controlling.append(grant)
+                    continue
+                mission_grants([*accepted, grant], capabilities=True)
             except ValueError:
-                continue  # outside the document scope, or a duplicate scope
+                continue  # outside the step scopes, or a duplicate scope
             accepted.append(grant)
-        return tuple(accepted)
+        return (*accepted, *controlling)
 
     @staticmethod
     def _cancelled(current: _Current, trace: MissionTrace | None) -> Settlement:
@@ -646,6 +679,15 @@ class MissionService:
         tool = self._tools.get(request.tool_id)
         if tool is None:
             raise InvalidRequestError("Request is outside the document grant scope")
+        control = request.actor_id == CONTROL_ACTOR_ID
+        if control:
+            # PHX-112 (ADR-151): the request's risk must be the canonical one.
+            if CONTROL_TOOL_RISKS.get(request.tool_id) != tool.risk_level:
+                raise InvalidRequestError("Request is outside the control grant scope")
+            if tool.risk_level == ToolRiskLevel.P4:
+                return await self._approve_once(record)
+            if tool.risk_level == ToolRiskLevel.P3 and choice != GrantDuration.SESSION:
+                raise InvalidRequestError("P3 control grants last for this session")
         try:
             grant = PermissionGrant(
                 grant_id=str(uuid4()),
@@ -662,15 +704,62 @@ class MissionService:
                 else None,
                 user_decision="approved",
             )
-            document_grants([grant])
+            if control:
+                control_grants([grant])
+            else:
+                # document, (PHX-111) research or (PHX-113, PHX-120) capability
+                mission_grants([grant], capabilities=True)
         except (ValueError, ValidationError):
             raise InvalidRequestError(
-                "Request is outside the document grant scope"
+                "Request is outside the control grant scope"
+                if control
+                else "Request is outside the document grant scope"
             ) from None
         new_id = str(uuid4())
         await self._write_and_enqueue(
             new_id, record.mission_id, self._store.approve, request_id, grant, new_id
         )
+        await self._status(record.mission_id, MissionStatus.SUPERSEDED)
+        return new_id
+
+    async def _approve_once(self, record: PermissionRequestRecord) -> str:
+        """PHX-112 (ADR-151): the user's explicit decision on one P4 request.
+
+        P4 has no grant form: the decision covers this exact request, is kept in
+        memory for the one linked re-run only, and is never broader than the
+        duration the user chose. P1/P2 control approvals become SESSION or
+        PERSISTENT grants and P3 ones SESSION grants (see approve).
+        """
+        request = record.request
+        now = self._now()
+        try:
+            approval = ControlApproval(
+                request=request,
+                decision=UserPermissionDecision(
+                    decision_id=str(uuid4()),
+                    request_id=request.request_id,
+                    decision=UserDecision.APPROVED,
+                    decided_at=max(now, request.requested_at),
+                ),
+            )
+        except (ValueError, ValidationError):
+            raise InvalidRequestError(
+                "Request is outside the control grant scope"
+            ) from None
+        new_id = str(uuid4())
+        self._approvals[new_id] = approval
+        try:
+            await self._write_and_enqueue(
+                new_id,
+                record.mission_id,
+                self._store.approve_once,
+                request.request_id,
+                new_id,
+                now,
+            )
+        except BaseException:
+            self._approvals.pop(new_id, None)
+            raise
         await self._status(record.mission_id, MissionStatus.SUPERSEDED)
         return new_id
 
