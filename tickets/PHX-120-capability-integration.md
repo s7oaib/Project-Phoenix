@@ -81,7 +81,13 @@ dependencies, events or migrations.
 
 ## Completion evidence
 
-(filled in by the pin commit)
+- **Branch:** `feature/PHX-120-capability-integration` from `origin/main` `07da218` (local commits only; not pushed).
+- **Merges:** PHX-110 `f7ffe4b`, PHX-111 `6a75b23`, PHX-113 `f46639b` (merge commits).
+- **Implementation:** `ea7ea165147317afd873f6e61c0a3782b5e37e47` (`PHX_120_COMMIT`); **pin:** `83140b5`; this evidence commit (docs only). The PR must merge with a merge commit.
+- **Conflicts resolved:** `runtime.py` (imports, trace fields, constructor, grants, step routing, dispatch, LEVI responder), `prompts.py` (docstring, domain descriptions, constants), `mission_events.py` (tool IDs, operations, roles), `server.py`, `routes/__init__.py`, `DECISIONS.md`, `FEATURE_TICKETS.md`, `docs/24`, `tests/matrix.toml`, `tests/test_phoenix_runtime.py`, `tests/test_prompt_injection_defenses.py`, `tests/test_screenshot_vision_loop.py`, `tests/test_windows_ui_automation.py`.
+- **Full matrix:** `uv run python scripts/test_matrix.py --allow-dirty` on `83140b5`: all 13 gates PASS; pytest 16,588 passed, 0 failed, 31 skipped.
+- **Capability e2e (scripted, no GPU/Ollama):** knowledge missions/API, web research, media/documents, final grounding, REST and settings suites: 291 passed, 1 skipped (POSIX-only symlink case).
+- **Invariants:** INV-003 (grants from user decisions only; P2 session-only), INV-004 (every call via ToolRegistry/PermissionEngine; flags grant nothing), INV-008 (LEVI evidence first), INV-017 (guarded tool output), INV-021/022 (explicit failures, closed event values) checked.
 
 ## Appendix — exact v5 texts and hashes
 
