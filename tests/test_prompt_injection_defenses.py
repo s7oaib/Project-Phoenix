@@ -1813,7 +1813,7 @@ PHX_108_PATHS = (
 # isolated bundled interpreter); both stay pinned, at the PHX-092 merge
 # resolution commit with PHX-108 (ModelRegistrar and /ready prerequisites
 # combined; the first implementation commit was 43c9c39).
-PHX_092_COMMIT = "43c9c398c5c0cbc5cae2bcd6ced92df977027fc9"
+PHX_092_COMMIT = "9d50200e39cee06cd045371149731c39b49a9909"
 PHX_092_PATHS = (
     "phoenix/api/server.py",
     "apps/desktop/src-tauri/src/backend.rs",

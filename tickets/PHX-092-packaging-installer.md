@@ -74,7 +74,10 @@ picked up from `uv.lock` automatically. ADR numbers 125–129.
   (previously pinned at PHX-104) move to `PHX_092_PATHS` in
   `tests/test_prompt_injection_defenses.py`, pinned at the implementation commit
   `43c9c398c5c0cbc5cae2bcd6ced92df977027fc9` in a separate pin commit (PHX-088/106
-  precedent). The PR must be merged with a merge
+  precedent). After merging PHX-108 (which also changed `server.py`; ADR-110/113),
+  `server.py` left `PHX_108_PATHS` and both PHX-092 paths were re-pinned to the merge
+  resolution commit `9d50200e39cee06cd045371149731c39b49a9909`; the `/ready`
+  prerequisites now reuse PHX-108's `onboarding.runtime_installed`. The PR must be merged with a merge
   commit so the pinned SHA stays reachable. The two `git diff origin/main` guards
   already exclude both files by name; no exclusion was added or removed.
 - `tests/workspace.test.mjs`: the installer config only bundles (exact object), the
