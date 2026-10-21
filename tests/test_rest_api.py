@@ -1228,8 +1228,10 @@ def test_web_research_request_is_approved_without_a_workspace(
         web_research_enabled=True,
         _env_file=None,  # type: ignore[call-arg]
     )
+    # PHX-121 (ADR-166): with web research, capability tools and control steps
+    # the backend plans with the combined planner (role marker "planner").
     backend.provider.replies |= {
-        "research_planner": json.dumps(
+        "planner": json.dumps(
             {"steps": [{"objective": "Search the web for the codename."}]}
         ),
         "assignment": json.dumps(
