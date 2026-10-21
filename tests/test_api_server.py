@@ -28,6 +28,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, inspect
 
 from alembic import command
+from phoenix.agents.control_steps import (
+    control_permission_policy,
+    control_tool_definitions,
+)
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
 from phoenix.agents.runtime import MissionKind, PhoenixRuntimeError
 from phoenix.api import launcher
@@ -250,8 +254,16 @@ def test_lifespan_builds_services_once_and_closes_them(settings: AppSettings) ->
         assert services.lifecycle.capacity == 1  # INV-023
         assert services.migration_heads == (HEAD,)
         assert services.event_bus.subscriber_count == 0
-        assert services.tool_registry.list_tools() == filesystem_tool_definitions()
-        assert services.permission_policy.rules == ()
+        # PHX-112 (ADR-152): control steps are enabled; the only standing
+        # rule is PHOENIX's own browser teardown.
+        assert services.tool_registry.list_tools() == (
+            *filesystem_tool_definitions(),
+            *control_tool_definitions(),
+        )
+        assert services.permission_policy == control_permission_policy()
+        assert services.control_steps is not None
+        assert services.control_steps.tool_kinds == ("browser", "windows")
+        assert services.runtime.control_enabled
         assert fakes.default.closed == fakes.structured.closed == 0
     assert get_services(app) is None
     assert fakes.default.closed == fakes.structured.closed == 1

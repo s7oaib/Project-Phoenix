@@ -1,10 +1,10 @@
-"""PHX-112 computer-control prompt texts: DRAFT, PENDING OWNER APPROVAL.
+"""PHX-112 computer-control prompt texts, approved by the owner (2026-10-21).
 
-These texts are reviewed by the owner in tickets/PHX-112-computer-control.md
-("Owner approval needed"). They live apart from prompts.py so the approved
-phoenix-prompts set stays byte-identical; nothing here is used unless a caller
-builds a PhoenixRuntime with a ControlStepRunner, and the backend composition
-root does not do that until the owner approves this set (ADR-152).
+The owner reviewed these texts in tickets/PHX-112-computer-control.md and
+approved them unchanged as ``phoenix-control-prompts-v1`` (ADR-152). They live
+apart from prompts.py so the approved phoenix-prompts set stays byte-identical;
+they are used only by a PhoenixRuntime built with a ControlStepRunner, which the
+backend composition root now builds.
 
 Every prompt keeps a ``PHOENIX ROLE:`` first line. Model output, page text,
 window text, screenshot descriptions and command output stay untrusted data
@@ -12,7 +12,7 @@ however these prompts are phrased: a model can only propose actions; PHOENIX,
 ToolRegistry and PermissionEngine decide, and the user approves (INV-003).
 """
 
-CONTROL_PROMPT_SET_VERSION = "phoenix-control-prompts-v1-draft"
+CONTROL_PROMPT_SET_VERSION = "phoenix-control-prompts-v1"
 
 # Replaces PLANNING_SYSTEM only when computer-control steps are enabled.
 CONTROL_PLANNING_SYSTEM = """PHOENIX ROLE: planner

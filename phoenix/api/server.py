@@ -25,10 +25,16 @@ mission (while a required model is missing), ``GET /ready`` and
 ``GET /onboarding`` register any tier model that is still missing once its
 provider answers, so starting Ollama after PHOENIX no longer leaves every
 mission failing ``no_eligible_model`` until a restart.
+PHX-112 (ADR-152) enables computer-control steps: one ControlStepRunner over
+PHOENIX's own isolated browser (Chromium from the PHOENIX-owned browser folder)
+and the Windows UI tool, shared by every runtime. Every action still goes
+through ToolRegistry and PermissionEngine and waits for the user's approval;
+the screenshot/vision and terminal control tools are not wired here.
 """
 
 import asyncio
 import contextlib
+import os
 import sys
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -48,6 +54,11 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from alembic import command
+from phoenix.agents.control_steps import (
+    ControlStepRunner,
+    control_permission_policy,
+    control_tool_definitions,
+)
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.runtime import ModelTierTable, PhoenixRuntime, default_tier_table
 from phoenix.api.app import create_app
@@ -89,8 +100,15 @@ from phoenix.persistence.missions import MissionStore
 from phoenix.persistence.settings import SettingsStore
 from phoenix.security.audit import AuditTrail
 from phoenix.security.permissions import PermissionPolicy
+from phoenix.tools.browser import BrowserTool
+from phoenix.tools.browser_setup import (
+    PLAYWRIGHT_ENV,
+    browsers_path,
+    use_phoenix_browsers,
+)
 from phoenix.tools.filesystem import FilesystemTool, filesystem_tool_definitions
 from phoenix.tools.registry import ToolRegistry
+from phoenix.tools.windows_ui import WindowsUITool
 
 if sys.platform == "win32":
     import msvcrt
@@ -234,6 +252,7 @@ class BackendServices:
     settings_store: SettingsStore
     workspace: WorkspaceService
     model_registrar: "ModelRegistrar"  # PHX-108: late provider start
+    control_steps: ControlStepRunner | None = None  # PHX-112 (ADR-152)
 
 
 class ReadinessStatus(StrEnum):
@@ -447,6 +466,13 @@ class ModelRegistrar:
                 await self.refresh()
 
 
+def _restore_env(name: str, value: str | None) -> None:
+    if value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = value
+
+
 async def _close_provider(provider: ModelProvider) -> None:
     close = getattr(provider, "aclose", None)
     if callable(close):
@@ -495,15 +521,28 @@ async def open_services(
             pass  # keep what registered; readiness reports the gap (INV-022)
         lifecycle = ModelLifecycleManager()
         session_factory = create_session_factory(engine)
-        tools = ToolRegistry(filesystem_tool_definitions())
+        tools = ToolRegistry(
+            (*filesystem_tool_definitions(), *control_tool_definitions())
+        )
         bus = EventBus(capacity=EVENT_BUS_CAPACITY)
         stream = EventStream(
             bus,
             client_buffer=config.event_client_buffer,
             max_connections=config.event_max_connections,
         )
-        policy = PermissionPolicy()
+        # PHX-112: the one standing rule lets PHOENIX close its own browser.
+        policy = control_permission_policy()
         audit = AuditTrail(session_factory, tools)
+        previous_browsers = os.environ.get(PLAYWRIGHT_ENV)
+        use_phoenix_browsers(browsers_path())  # never downloads (ADR-150)
+        stack.callback(_restore_env, PLAYWRIGHT_ENV, previous_browsers)
+        control = ControlStepRunner(
+            registry=tools,
+            policy=policy,
+            browser=BrowserTool(tools, policy, audit),
+            windows=WindowsUITool(tools, policy, audit),
+        )
+        stack.callback(control.close)
 
         def build_runtime(workspace_root: str | None = None) -> PhoenixRuntime:
             """PHX-104: one runtime per workspace root; None has no documents."""
@@ -518,6 +557,7 @@ async def open_services(
                 if workspace_root is None
                 else FilesystemTool(workspace_root, tools, policy, audit),
                 events=stream,
+                control=control,
             )
 
         runtime = build_runtime()
@@ -556,6 +596,7 @@ async def open_services(
                 data_dir=settings.data_dir,
             ),
             model_registrar=registrar,
+            control_steps=control,
         )
         refresher: asyncio.Task[None] | None = None
         try:

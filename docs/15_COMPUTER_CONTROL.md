@@ -52,5 +52,10 @@ a `ControlStepRunner` (`phoenix/agents/control_steps.py`, ADR-150–154):
   is closed after it.
 - Page, window, screenshot and command content is untrusted `TOOL_OUTPUT`
   data; LEVI checks the tool evidence before its model check.
-- The control prompts are a draft pending owner approval; the backend does not
-  enable control steps until then (ADR-152).
+- A pending control request carries a display-only `summary` in the
+  permissions API: the action in words, the page URL and element, or the
+  window title with its real process name and executable path, and the exact
+  text to be typed (masked when it looks like a secret). The approval binds to
+  the stored request only (ADR-151).
+- The owner approved the control prompts (`phoenix-control-prompts-v1`); the
+  backend enables browser and Windows UI control steps (ADR-152).

@@ -37,6 +37,7 @@ IDs, statuses, codes, hashes and lengths only.
 """
 
 import asyncio
+import contextlib
 import json
 import threading
 from collections.abc import Callable, Mapping, Sequence
@@ -48,6 +49,7 @@ from types import MappingProxyType
 from typing import Annotated, Literal, TypeVar, cast
 from uuid import uuid4
 
+import psutil
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -159,6 +161,8 @@ MAX_READ_CHARS = 8000
 MAX_STREAM_CHARS = 4000
 MAX_LISTED_WINDOWS = 100
 CLOSE_POLICY_RULE_ID = "phx-112.browser-teardown"
+# Display-only approval summaries kept for pending requests (newest kept).
+MAX_APPROVAL_SUMMARIES = 256
 
 _DEFINITIONS: tuple[ToolDefinition, ...] = (
     *browser_tool_definitions(),
@@ -323,6 +327,123 @@ class ControlCallRecord(_Value):
     output_sha256: str | None = Field(
         default=None, strict=True, pattern=r"^[0-9a-f]{64}$"
     )
+
+
+# What each control tool does, in words, for the approval summary.
+APPROVAL_ACTIONS: Mapping[str, str] = MappingProxyType(
+    {
+        "browser.session_open": "Open PHOENIX's own isolated browser",
+        "browser.navigate": "Open a web page in PHOENIX's browser",
+        "browser.read_page": "Read the text of the current page",
+        "browser.inspect_element": "Read one element of the current page",
+        "browser.click": "Click an element on the current page",
+        "browser.fill": "Type text into a field on the current page",
+        "browser.session_close": "Close PHOENIX's browser",
+        "windows.list_windows": "List the titles of open windows",
+        "windows.inspect_window": "Inspect a window",
+        "windows.focus_window": "Bring a window to the front",
+        "windows.inspect_control": "Read one control in a window",
+        "windows.invoke_control": "Press or activate a control in a window",
+        "windows.set_text": "Type text into a control in a window",
+        "windows.close_window": "Close a window",
+        "screen.capture_window": "Take a screenshot of a window",
+        "terminal.inspect": "Run a read-only terminal profile",
+        "terminal.project": "Run a project terminal profile",
+        "terminal.sensitive": "Run a sensitive terminal profile",
+    }
+)
+SECRET_TEXT_NOTE = (
+    "This text looks like a password, key or token, so it is hidden here."
+    " Approving types the exact text PHOENIX proposed."
+)
+_SECRET_PREFIXES = (
+    "sk-",
+    "sk_",
+    "pk_",
+    "rk_",
+    "ghp_",
+    "gho_",
+    "ghs_",
+    "github_pat_",
+    "glpat-",
+    "xox",
+    "AKIA",
+    "ASIA",
+    "AIza",
+    "eyJ",
+    "-----BEGIN",
+)
+
+
+def looks_like_secret(text: str) -> bool:
+    """A display heuristic that errs toward hiding; it authorizes nothing.
+
+    A word is secret-looking when it has a known key/token prefix, or is at
+    least 8 characters with lower case plus two of upper case, digits and
+    symbols (a password shape), or is a 24+ character token of mixed classes.
+    """
+    for word in text.split():
+        if word.startswith(_SECRET_PREFIXES):
+            return True
+        if len(word) < 8:
+            continue
+        lower = any(c.islower() for c in word)
+        classes = sum(
+            (
+                lower,
+                any(c.isupper() for c in word),
+                any(c.isdigit() for c in word),
+                any(not c.isalnum() for c in word),
+            )
+        )
+        if (lower and classes >= 3) or (len(word) >= 24 and classes >= 2):
+            return True
+    return False
+
+
+def _process_info(process_id: int) -> tuple[str | None, str | None]:
+    """The real process name and executable path behind a window (read-only).
+
+    A window title is set by the window's own program and can claim anything;
+    the process and executable show which program the user would act on.
+    """
+    try:
+        process = psutil.Process(process_id)
+    except (psutil.Error, ValueError, OverflowError):
+        return None, None
+    name = path = None
+    with contextlib.suppress(psutil.Error, OSError):
+        name = process.name() or None
+    with contextlib.suppress(psutil.Error, OSError):
+        path = process.exe() or None
+    return name, path
+
+
+class ApprovalSummary(_Value):
+    """What a pending control request would do, in words (display only).
+
+    Built by PHOENIX from the call it issued and what it observed (the page URL
+    the browser reached, the listed window and its real process), never from
+    model text alone. It is shown next to the stored request and is never used
+    for authorization: PermissionEngine decides on the request's exact tool,
+    action and resource, and an approval binds to that request only (ADR-151).
+    Unknown fields are None.
+    """
+
+    request_id: Identifier
+    tool_id: Identifier
+    risk_level: ToolRiskLevel
+    action: str
+    page_url: str | None = None
+    element: str | None = None
+    window_title: str | None = None
+    process_name: str | None = None
+    executable_path: str | None = None
+    process_id: NonnegativeInt | None = None
+    command: str | None = None
+    text: str | None = None
+    text_masked: bool = Field(default=False, strict=True)
+    note: str | None = None
 
 
 class ControlKillSwitch:
@@ -557,10 +678,19 @@ class ControlStepRunner:
         self._vision_provider = vision_provider_id
         self._vision_model = vision_model_id
         self._worker: ThreadPoolExecutor | None = None
+        self._summaries: dict[str, ApprovalSummary] = {}
 
     @property
     def tool_kinds(self) -> tuple[str, ...]:
         return tuple(self._tools)
+
+    def approval_summary(self, request_id: str) -> ApprovalSummary | None:
+        """The display-only summary of a pending request this runner raised.
+
+        Kept in memory only (the typed text never reaches the database); after
+        a restart the summary is gone and the request shows its raw resource.
+        """
+        return self._summaries.get(request_id)
 
     def mission(self, approvals: Sequence[ControlApproval] = ()) -> ControlMission:
         return ControlMission(approvals=list(control_approvals(approvals)))
@@ -735,7 +865,10 @@ class ControlStepRunner:
             )
         navigated = False
         for index, action in enumerate(actions, start=1):
-            planned.append(self._build(step, action, windows, navigated, index))
+            item = self._build(step, action, windows, navigated, index)
+            if action.window_title is not None:
+                item.window = _resolve(windows, action.window_title)
+            planned.append(item)
             navigated = navigated or (action.tool, action.operation) == (
                 "browser",
                 "navigate",
@@ -922,9 +1055,19 @@ class ControlStepRunner:
             user_decision=None if item.approval is None else item.approval.decision,
         )
         if decision.status == PermissionStatus.APPROVAL_REQUIRED:
-            raise ToolPermissionRequired(item.request)
+            raise self._pending(item)
         if decision.status != PermissionStatus.ALLOWED:
             raise ToolStepRejected("Permission was not granted")
+
+    def _pending(self, item: "_Planned") -> ToolPermissionRequired:
+        """Record the display-only summary, then ask for approval."""
+        assert item.request is not None
+        summary = _summarize(item)
+        self._summaries.pop(summary.request_id, None)
+        self._summaries[summary.request_id] = summary
+        while len(self._summaries) > MAX_APPROVAL_SUMMARIES:
+            del self._summaries[next(iter(self._summaries))]
+        return ToolPermissionRequired(item.request)
 
     def _closing(self, step: _Step) -> "_Planned":
         return self._planned(
@@ -1064,7 +1207,7 @@ class ControlStepRunner:
             )
         )
         if status == PermissionStatus.APPROVAL_REQUIRED:
-            raise ToolPermissionRequired(request)
+            raise self._pending(item)
         if status != PermissionStatus.ALLOWED:
             raise ToolStepRejected("Permission was not granted")
         if not success:
@@ -1168,10 +1311,60 @@ class _Planned:
     query: str | None = None
     request: PermissionRequest | None = None
     approval: ControlApproval | None = None
+    # Display-only context for the approval summary (never for authorization).
+    window: _Window | None = None
 
     @property
     def risk(self) -> ToolRiskLevel:
         return CONTROL_TOOL_RISKS[self.tool_id]
+
+
+def _summarize(item: _Planned) -> ApprovalSummary:
+    request, call, window = item.request, item.call, item.window
+    assert request is not None
+    fields: dict[str, object] = {
+        "request_id": request.request_id,
+        "tool_id": request.tool_id,
+        "risk_level": CONTROL_TOOL_RISKS[request.tool_id],
+        "action": APPROVAL_ACTIONS[request.tool_id],
+    }
+    text: str | None = None
+    if isinstance(call, BrowserCall):
+        fields["page_url"] = call.url or call.expected_url
+        fields["element"] = call.selector
+        text = call.text
+    elif isinstance(call, WindowsUICall):
+        selector = call.selector
+        if selector is not None:
+            parts = (
+                ("automation ID", selector.automation_id),
+                ("name", selector.name),
+                ("type", selector.control_type),
+            )
+            fields["element"] = ", ".join(
+                f"{label} {value!r}" for label, value in parts if value
+            )
+        text = call.text
+    elif isinstance(call, TerminalCall):
+        fields["command"] = " ".join((call.profile_id, *call.arguments))
+    if window is not None:
+        name, path = _process_info(window.process_id)
+        fields.update(
+            window_title=window.title,
+            process_id=window.process_id,
+            process_name=name,
+            executable_path=path,
+        )
+    if text is not None:
+        if looks_like_secret(text):
+            fields.update(
+                text=f"[hidden: {len(text)} characters]",
+                text_masked=True,
+                note=SECRET_TEXT_NOTE,
+            )
+        else:
+            fields["text"] = text
+    return ApprovalSummary.model_validate(fields)
 
 
 def _list_call() -> WindowsUICall:
@@ -1312,7 +1505,7 @@ def _output_item(evidence: ControlEvidence) -> _Item:
 
 
 class ControlPlanningResponder:
-    """AIZEN's planner with the control-enabled planning prompt (draft, ADR-152)."""
+    """AIZEN's planner with the control-enabled planning prompt (ADR-152)."""
 
     def __init__(self, binding: ModelBinding, *, max_steps: int) -> None:
         self._binding = binding

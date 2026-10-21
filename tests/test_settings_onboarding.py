@@ -430,7 +430,7 @@ EXPECTED_FLAGS = [
     ("workspace_documents", True, "PHX-046", "document_analyst"),
     ("memory", False, "PHX-110", "memory"),
     ("web_research", False, "PHX-111", "web_research"),
-    ("computer_control", False, "PHX-112", "computer_control"),
+    ("computer_control", True, "PHX-112", "computer_control"),
     ("media", False, "PHX-113", "media"),
     ("document_generation", False, "PHX-113", "document_analyst"),
     ("voice", False, "PHX-114", "voice"),
@@ -481,7 +481,7 @@ def test_a_later_ticket_only_flips_a_flag(
             for item in client.get("/capabilities").json()["capabilities"]
         }
     assert flags["web_research"] is True
-    assert flags["computer_control"] is False
+    assert flags["media"] is False
 
 
 def test_new_routes_require_the_token(backend: Backend) -> None:

@@ -64,6 +64,7 @@ from phoenix.models.provider import (
     ProviderHealthStatus,
     TokenUsage,
 )
+from phoenix.tools import browser as browser_module
 from phoenix.tools.filesystem import FilesystemInputError
 
 TOKEN = secrets.token_urlsafe(32)
@@ -1188,6 +1189,61 @@ def test_approval_outside_the_active_root_is_refused(
     assert client.post(f"/permissions/{request_id}/deny").status_code == 200
     assert client.get(f"/missions/{mission_id}").json()["failure_code"] == (
         "permission_denied"
+    )
+
+
+def test_control_request_shows_a_summary_and_needs_no_workspace(
+    backend: Backend, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PHX-112: a control request names no path; its summary is display only."""
+
+    def no_browser() -> None:
+        raise AssertionError("the browser must not start before approval")
+
+    monkeypatch.setattr(browser_module, "_start_playwright", no_browser)
+    backend.provider.replies.update(
+        planner=json.dumps({"steps": [{"objective": "Open the fixture page."}]}),
+        assignment=json.dumps(
+            {"assignments": [{"step_id": "s1", "domain": "computer_control"}]}
+        ),
+        control_specialist=json.dumps(
+            {
+                "control_request": {
+                    "actions": [
+                        {
+                            "tool": "browser",
+                            "operation": "navigate",
+                            "url": "https://fixture.phoenix.test/notes",
+                        }
+                    ]
+                }
+            }
+        ),
+    )
+    accepted = chat(client, QUESTION, path="complex")
+    body = wait_for(client, accepted["mission_id"])
+    assert body["status"] == "waiting_permission", body
+    pending = body["permission_request"]
+    assert pending["tool_id"] == "browser.session_open"
+    request_id = pending["request_id"]
+    shown = client.get(f"/permissions/{request_id}").json()
+    assert shown["summary"]["action"] == "Open PHOENIX's own isolated browser"
+    assert shown["summary"] == pending["summary"]
+    assert shown["resource"] == pending["resource"]  # the raw, exact resource
+    # No workspace is set: a control request is not a workspace path (no 409).
+    response = client.post(
+        f"/permissions/{request_id}/approve", json={"duration": "session"}
+    )
+    assert response.status_code == 202, response.text
+    grants = client.get("/grants").json()["items"]
+    assert [(g["tool_id"], g["resource"]) for g in grants] == [
+        ("browser.session_open", shown["resource"])
+    ]
+    rerun = wait_for(client, response.json()["mission_id"])
+    assert rerun["status"] == "waiting_permission"
+    assert rerun["permission_request"]["tool_id"] == "browser.navigate"
+    assert rerun["permission_request"]["summary"]["page_url"] == (
+        "https://fixture.phoenix.test/notes"
     )
 
 

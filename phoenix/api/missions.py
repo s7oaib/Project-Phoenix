@@ -755,7 +755,6 @@ class MissionService:
             raise
         await self._status(record.mission_id, MissionStatus.SUPERSEDED)
         return new_id
-        return new_id
 
     async def deny(self, request_id: str) -> None:
         """The user denied: the mission fails ``permission_denied``."""

@@ -37,9 +37,12 @@ from phoenix.agents.control_steps import (
     BROWSER_SESSION_ID,
     CLOSE_POLICY_RULE_ID,
     CONTROL_ACTOR_ID,
+    CONTROL_TOOL_IDS,
     CONTROL_TOOL_REASON,
     CONTROL_TOOL_RISKS,
     MAX_READ_CHARS,
+    SECRET_TEXT_NOTE,
+    ApprovalSummary,
     ControlApproval,
     ControlKillSwitch,
     ControlStepRunner,
@@ -56,6 +59,7 @@ from phoenix.agents.runtime import (
     PhoenixRuntimeError,
 )
 from phoenix.api.missions import InvalidRequestError, MissionService
+from phoenix.api.routes.missions import permission_out
 from phoenix.models.lifecycle import ModelLifecycleManager
 from phoenix.models.provider import (
     CancellationResult,
@@ -77,7 +81,13 @@ from phoenix.models.vision import (
     VisionInterpretResponse,
     VisionLoopService,
 )
-from phoenix.persistence.missions import MissionRecord, MissionStatus, MissionStore
+from phoenix.persistence.missions import (
+    MissionRecord,
+    MissionStatus,
+    MissionStore,
+    PermissionRequestRecord,
+    RequestStatus,
+)
 from phoenix.security.audit import AuditTrail
 from phoenix.security.permissions import (
     DecisionReason,
@@ -679,6 +689,20 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(httpx.AsyncClient, "send", refuse_send)
     monkeypatch.setattr(socket, "create_connection", refuse_connect)
+
+
+# The real process behind each fixture window (never a lookup on this machine).
+PROCESSES = {
+    501: ("fixture.exe", "C:\\Fixture\\fixture.exe"),
+    777: ("stealer.exe", "C:\\Users\\Public\\stealer.exe"),
+}
+
+
+@pytest.fixture(autouse=True)
+def fixture_processes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        control_steps, "_process_info", lambda pid: PROCESSES.get(pid, (None, None))
+    )
 
 
 @pytest.fixture
@@ -1442,9 +1466,208 @@ def test_sensitive_terminal_profile_needs_an_explicit_decision(rig: Rig) -> None
     pending = waiting.pending_permission
     assert pending is not None and pending.tool_id == "terminal.sensitive"
     assert rig.audit_rows() == 0  # pre-checked; the tool never ran
+    summary = runner.approval_summary(pending.request_id)
+    assert summary is not None and summary.command == "publish"
+    assert summary.action == "Run a sensitive terminal profile"
     done = mission(rig, approvals=(approve(pending),), runtime=rig.runtime(runner))
     assert done.kind == MissionKind.COMPLETED, done
     assert rig.audit_rows() == 2
+    runner.close()
+
+
+# ---- display-only approval summaries (ADR-151)
+
+
+def summary_of(runner: ControlStepRunner, result: MissionResult) -> ApprovalSummary:
+    pending = result.pending_permission
+    assert pending is not None
+    summary = runner.approval_summary(pending.request_id)
+    assert summary is not None
+    assert (summary.request_id, summary.tool_id) == (
+        pending.request_id,
+        pending.tool_id,
+    )
+    return summary
+
+
+def test_spoofed_window_title_shows_the_real_process_and_executable(
+    rig: Rig,
+) -> None:
+    spoof = "Online Banking - Microsoft Edge"
+    rig.desktop.target.title = spoof
+    for node in (rig.desktop.target, *rig.desktop.target.children):
+        node.pid = 777
+    rig.provider.replies["control_specialist"] = actions(
+        {
+            "tool": "windows",
+            "operation": "set_text",
+            "window_title": spoof,
+            "automation_id": "codename",
+            "text": "Meeting moved to 3 pm",
+        }
+    )
+    runner = rig.runner()
+    grants = (rig.windows_grant(listing()),)
+    waiting = mission(rig, grants, runtime=rig.runtime(runner))
+    summary = summary_of(runner, waiting)
+    assert summary.tool_id == "windows.set_text"
+    assert summary.risk_level == ToolRiskLevel.P4
+    assert summary.action == "Type text into a control in a window"
+    assert summary.window_title == spoof  # what the window claims ...
+    # ... and the program the user would really act on.
+    assert (summary.process_name, summary.executable_path, summary.process_id) == (
+        "stealer.exe",
+        "C:\\Users\\Public\\stealer.exe",
+        777,
+    )
+    assert summary.element == "automation ID 'codename'"
+    assert summary.text == "Meeting moved to 3 pm" and not summary.text_masked
+    assert summary.note is None
+    # The request itself still names the exact window handle and process.
+    pending = waiting.pending_permission
+    assert pending is not None and '"hwnd":101' in pending.resource.replace(" ", "")
+    assert rig.desktop.effects == []
+    runner.close()
+
+
+@pytest.mark.parametrize(
+    "secret",
+    ["Sup3r$ecretPass", "ghp_0123456789abcdefghijklmnopqrstuv", "my key is sk-live-x"],
+)
+def test_secret_looking_text_is_masked_with_a_note(rig: Rig, secret: str) -> None:
+    fill: dict[str, object] = {
+        "tool": "browser",
+        "operation": "fill",
+        "selector": "#q",
+        "text": secret,
+    }
+    rig.provider.replies["control_specialist"] = actions(navigate(), fill)
+    runner = rig.runner()
+    waiting = mission(rig, rig.browser_grants(read=False), runtime=rig.runtime(runner))
+    summary = summary_of(runner, waiting)
+    assert summary.tool_id == "browser.fill"
+    assert summary.page_url == NOTES_URL  # the page the browser reached
+    assert summary.element is not None and "#q" in summary.element
+    assert summary.text_masked is True
+    assert summary.text == f"[hidden: {len(secret)} characters]"
+    assert summary.note == SECRET_TEXT_NOTE
+    assert secret not in summary.model_dump_json()
+    assert called(rig, "fill") == []
+    runner.close()
+
+
+@pytest.mark.parametrize("plain", ["FALCON-2", "Meeting moved to 3 pm", "hello world"])
+def test_ordinary_text_is_shown_in_full(rig: Rig, plain: str) -> None:
+    fill: dict[str, object] = {
+        "tool": "browser",
+        "operation": "fill",
+        "selector": "#q",
+        "text": plain,
+    }
+    rig.provider.replies["control_specialist"] = actions(navigate(), fill)
+    runner = rig.runner()
+    waiting = mission(rig, rig.browser_grants(read=False), runtime=rig.runtime(runner))
+    summary = summary_of(runner, waiting)
+    assert (summary.text, summary.text_masked, summary.note) == (plain, False, None)
+    runner.close()
+
+
+def test_the_summary_never_changes_what_an_approval_authorizes(rig: Rig) -> None:
+    rig.provider.replies["control_specialist"] = actions(navigate(), CLICK)
+    runner = rig.runner()
+
+    async def scenario() -> tuple[list[str], MissionRecord, list[object]]:
+        service = MissionService(
+            runtime=rig.runtime(runner),
+            store=MissionStore(rig.sessions),
+            tool_registry=rig.registry,
+            session_id=SESSION,
+        )
+        await service.start()
+        conversation = await service.create_conversation()
+        record = await settled(
+            service, await service.submit(conversation, "Buy it.", "complex")
+        )
+        asked: list[str] = []
+        shown: list[object] = []
+        while record.status == MissionStatus.WAITING_PERMISSION:
+            stored = record.permission_request
+            assert stored is not None
+            request = stored.request
+            asked.append(request.tool_id)
+            assert len(asked) <= 4
+            out = permission_out(stored, rig.registry, runner)
+            assert out.summary is not None and out.resource == request.resource
+            shown.append(out.summary)
+            # A forged or stale summary (another page and element) is display
+            # data only: the approval still covers the stored request alone.
+            forged = runner.approval_summary(request.request_id)
+            assert forged is not None
+            runner._summaries[request.request_id] = forged.model_copy(
+                update={"page_url": EVIL_URL, "element": "#delete-account"}
+            )
+            record = await settled(
+                service, await service.approve(request.request_id, "session")
+            )
+        await service.stop()
+        return asked, record, shown
+
+    asked, record, shown = run(scenario(), timeout=60)
+    assert asked == ["browser.session_open", "browser.navigate", "browser.click"]
+    assert record.status == MissionStatus.COMPLETED
+    # Only the exact stored click ran, on the page the browser reached.
+    assert called(rig, "click") == [("click", "css=#buy")]
+    assert set(called(rig, "goto")) == {("goto", NOTES_URL)}
+    with rig.engine.connect() as connection:
+        rows = connection.execute(
+            text("SELECT tool_id, resource FROM permission_grants ORDER BY tool_id")
+        ).all()
+    assert [row[0] for row in rows] == ["browser.navigate", "browser.session_open"]
+    assert all("delete-account" not in row[1] for row in rows)
+    runner.close()
+
+
+def test_summaries_cover_every_control_tool_and_are_bounded(rig: Rig) -> None:
+    assert set(control_steps.APPROVAL_ACTIONS) == set(CONTROL_TOOL_IDS)
+    runner = rig.runner()
+    assert runner.approval_summary("unknown") is None
+    tool = rig.registry
+    request = PermissionRequest(
+        request_id=str(uuid4()),
+        actor_id=CONTROL_ACTOR_ID,
+        tool_id="browser.session_open",
+        action="session_open",
+        resource="fixture-resource",
+        reason=CONTROL_TOOL_REASON,
+        requested_at=datetime.now(UTC),
+    )
+    stored = PermissionRequestRecord(
+        mission_id=str(uuid4()),
+        status=RequestStatus.PENDING,
+        decided_at=None,
+        request=request,
+    )
+    # A summary recorded for another tool is never shown for this request.
+    runner._summaries[stored.request.request_id] = ApprovalSummary(
+        request_id=stored.request.request_id,
+        tool_id="browser.click",
+        risk_level=ToolRiskLevel.P4,
+        action="Click an element on the current page",
+    )
+    assert permission_out(stored, tool, runner).summary is None
+    assert permission_out(stored, tool, None).summary is None
+    for index in range(control_steps.MAX_APPROVAL_SUMMARIES + 5):
+        runner._summaries[str(index)] = ApprovalSummary(
+            request_id=str(index),
+            tool_id="browser.session_open",
+            risk_level=ToolRiskLevel.P2,
+            action="x",
+        )
+    item = control_steps._Planned(kind="browser", tool_id="", observation={})
+    item.request = stored.request
+    runner._pending(item)
+    assert len(runner._summaries) == control_steps.MAX_APPROVAL_SUMMARIES
+    assert runner.approval_summary(stored.request.request_id) is not None
     runner.close()
 
 
@@ -1575,7 +1798,7 @@ CONTROL_PROMPT_SHA256 = {
     "CONTROL_CANDIDATE_TASK": "2830fab9c04feae3e60ddcd47490adb4",
     "CONTROL_DOMAIN_DESCRIPTION": "5f72e5536e2c7f9fabd1e4e99b8e88ad",
     "CONTROL_PLANNING_SYSTEM": "d696a0d84e25f614a6c67da04203e952",
-    "CONTROL_PROMPT_SET_VERSION": "abec4c9f2bda8f5fdff659465357bf23",
+    "CONTROL_PROMPT_SET_VERSION": "4ef69a6497d364f56d77546cf2db05cb",
     "CONTROL_SPECIALIST_SYSTEM": "1819a0157188a6e6094f793cb987f4fe",
     "CONTROL_STEP_COMPLETION_RULE": "200955a655929636695448daf9606519",
     "CONTROL_STEP_EXPECTED_OUTPUT": "191c166d72ed62f7e92aa8cc1a009712",
@@ -1584,8 +1807,8 @@ CONTROL_PROMPT_SHA256 = {
 }
 
 
-def test_draft_control_prompts_are_separate_and_role_marked() -> None:
-    assert control_prompts.CONTROL_PROMPT_SET_VERSION.endswith("-draft")
+def test_approved_control_prompts_are_separate_and_role_marked() -> None:
+    assert control_prompts.CONTROL_PROMPT_SET_VERSION == "phoenix-control-prompts-v1"
     roles = {
         "CONTROL_PLANNING_SYSTEM": "planner",
         "CONTROL_SPECIALIST_SYSTEM": "control_specialist",

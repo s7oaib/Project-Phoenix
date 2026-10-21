@@ -4653,8 +4653,8 @@ types, migrations or API changes.
 
 ## ADR-150 — Computer-control steps in PHOENIX missions
 
-Status: Accepted (owner decisions relayed for PHX-112 on 2026-10-21; the draft
-control prompts of ADR-152 await the owner's approval)
+Status: Accepted (owner decisions relayed for PHX-112 on 2026-10-21; the
+control prompts of ADR-152 approved by the owner the same day)
 Date: 2026-10-21
 Ticket: PHX-112
 
@@ -4705,8 +4705,8 @@ Limitations: control steps publish no `tool.*`/`permission.requested` events
 (the PHX-103 allowlist names filesystem tools only; extending it belongs to
 PHX-115); the step runs at most four actions per proposal and cannot observe a
 page before choosing its next action within one step; the backend composition
-root does not enable control steps yet (ADR-152). No new dependencies,
-migrations, event types or API routes.
+root enables browser and Windows UI control steps only (ADR-152). No new
+dependencies, migrations, event types or API routes.
 
 ## ADR-151 — Control approvals in the approve → re-run loop
 
@@ -4735,18 +4735,39 @@ Decision:
 - **At most one P4 action per mission.** A re-run repeats earlier actions, so
   a second P4 would either loop forever or repeat the first effect; it is
   rejected (`tool_rejected`) instead.
-- **Known gap:** the stored request shows a window by handle/process/class and
-  fill/set_text text by hash only; a display-only summary for the approval UI
-  must land before the backend enables control steps.
+- **Display-only approval summary (amended after review).** The stored
+  request names a window by handle/process/class and fill/set_text text by
+  hash only, and a window title can be spoofed by any program. When a control
+  request needs approval, PHOENIX records an `ApprovalSummary` built from the
+  call it issued and what it observed: the action in words, the page URL the
+  browser reached and the element selector, or the listed window title plus
+  the real process name, executable path and PID (`psutil`, read-only), the
+  terminal profile and arguments, and the exact text to be typed. Text that
+  looks like a password, key or token (known prefixes, password-shaped or long
+  token-shaped words; the heuristic errs toward hiding) is masked as
+  `[hidden: N characters]` with a note. `GET /permissions`,
+  `GET /permissions/{id}` and the mission detail return it as `summary` next to
+  the raw request. It is display only: approve and deny still take only the
+  request ID and duration, the grant or P4 decision binds to the stored
+  request's exact tool, action and resource, and the summary is never read by
+  PermissionEngine, the runner's correlation or the API's approval path; a
+  summary whose tool differs from the stored request's is not shown. Summaries
+  live in the runner's memory only (at most 256, so the typed text never
+  reaches the database); after a restart a pending request shows its raw
+  resource only.
+- **No workspace check for control requests.** The approve route's
+  `workspace_changed` check applies to document requests only; a control
+  request names no workspace path. MissionService still refuses any request
+  outside the canonical control scope.
 - One control step runs at a time, and a P3 action may not precede a deferred
   P4 page action in one proposal (a re-run would repeat the P3 effect).
 - Stored grants pass to a run through `control_grants` only when the run's
   runtime has control steps; grants, approvals and decisions never come from
   model text (INV-003).
 
-## ADR-152 — The control prompts are a separate draft set
+## ADR-152 — The control prompts are a separate set; the backend enables control
 
-Status: Accepted (the prompt texts themselves await the owner's approval)
+Status: Accepted (amended 2026-10-21: the owner approved the prompt texts)
 Date: 2026-10-21
 Ticket: PHX-112
 
@@ -4754,16 +4775,27 @@ The approved `phoenix-prompts-v4` planner prompt forbids tool use other than
 workspace reads, and the assignment prompt describes only the existing domains,
 so control steps need new text. Parallel tickets edit `prompts.py`.
 
-Decision: the new texts live in `phoenix/agents/control_prompts.py` as
-`phoenix-control-prompts-v1-draft` (planner variant, the `computer_control`
-domain description, specialist, answer and verifier prompts, step contract
-strings), hash-pinned in `tests/test_computer_control_steps.py`. `prompts.py`
-stays byte-identical; the runner swaps in the control planner and assignment
-responders only when it is configured. The backend composition root
-(`phoenix/api/server.py`) does not build a runner until the owner approves the
-texts in `tickets/PHX-112-computer-control.md` ("Owner approval needed"); after
-approval, enabling it is a small wiring change (tools, the control registry and
-policy, and the browser folder) plus a version without the `-draft` suffix.
+Decision: the new texts live in `phoenix/agents/control_prompts.py` (planner
+variant, the `computer_control` domain description, specialist, answer and
+verifier prompts, step contract strings), hash-pinned in
+`tests/test_computer_control_steps.py`. `prompts.py` stays byte-identical; the
+runner swaps in the control planner and assignment responders only when it is
+configured. They were drafted as `phoenix-control-prompts-v1-draft`; the owner
+approved them unchanged on 2026-10-21, so the set is now
+`phoenix-control-prompts-v1` (only the version string changed).
+
+Amendment (enabling): the backend composition root (`phoenix/api/server.py`)
+now builds one `ControlStepRunner`, shared by every runtime it builds (the
+startup runtime and each workspace runtime), over PHOENIX's own isolated
+browser and the Windows UI tool. The one ToolRegistry holds the filesystem and
+the canonical control definitions; the policy is `control_permission_policy()`
+(its only rule is the browser teardown); Playwright is pointed at the
+PHOENIX-owned browser folder for the backend's lifetime (nothing downloads; a
+missing Chromium fails the action explicitly). The screenshot/vision and
+terminal control tools are not wired: they need a vision model binding and an
+owner-chosen terminal root and profile set. The PHX-108 capability flag
+`computer_control` is now enabled. The runner's worker is shut down with the
+backend.
 
 ## ADR-153 — Kill switch and PHOENIX's browser teardown
 

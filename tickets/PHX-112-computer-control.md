@@ -1,9 +1,11 @@
 # PHX-112 — Computer control steps in PHOENIX missions
 
 Status: IN_PROGRESS — implemented and tested on the local branch
-`feature/PHX-112-computer-control`; the draft control prompts below await the
-owner's approval, after which the backend composition root enables control
-steps (ADR-152).
+`feature/PHX-112-computer-control`; the owner approved the control prompts
+(`phoenix-control-prompts-v1`), the backend composition root enables browser
+and Windows UI control steps (ADR-152), and pending control requests carry a
+display-only approval summary (ADR-151). Awaiting PR review and the owner's
+live smoke.
 Phase: 10 — Product Integration
 Base: `origin/main` `ac86366` (started on `5722431`; rebased after PHX-118 merged)
 
@@ -47,7 +49,7 @@ existing per-user Chromium in `%LOCALAPPDATA%\ms-playwright` is not used.
 ## Design (ADR-150 to ADR-154)
 
 - **New module** `phoenix/agents/control_steps.py` (`ControlStepRunner`) and
-  `phoenix/agents/control_prompts.py` (draft texts). Shared-file edits are
+  `phoenix/agents/control_prompts.py` (approved texts). Shared-file edits are
   additive: `runtime.py` (optional `control=` runner, optional `approvals=` on
   `run()`, `MissionTrace.control_calls`, a dispatch branch, kill switch in
   `cancel()`), `api/missions.py` (control grants/approvals in the loop) and
@@ -97,18 +99,18 @@ existing per-user Chromium in `%LOCALAPPDATA%\ms-playwright` is not used.
 P3/P4: durable permission-decision and outcome audit rows (INV-007), checked by
 LEVI. At most one P4 action per mission (ADR-151).
 
-## Owner approval needed — draft control prompts (`phoenix-control-prompts-v1-draft`)
+## Control prompts — APPROVED by the owner (2026-10-21) as `phoenix-control-prompts-v1`
 
-These texts are in `phoenix/agents/control_prompts.py`, hash-pinned in
+Approved unchanged; only the version string lost its `-draft` suffix. These
+texts are in `phoenix/agents/control_prompts.py`, hash-pinned in
 `tests/test_computer_control_steps.py`. They are used only by a runtime built
-with a `ControlStepRunner`; the backend does not build one until you approve
-them. `{max_steps}`, `{max_actions}` and `{max_checks}` are filled at run time;
+with a `ControlStepRunner`, which the backend now builds. `{max_steps}`, `{max_actions}` and `{max_checks}` are filled at run time;
 doubled braces render as single braces.
 
 ### `CONTROL_PROMPT_SET_VERSION`
 
 ```text
-phoenix-control-prompts-v1-draft
+phoenix-control-prompts-v1
 ```
 
 ### `CONTROL_PLANNING_SYSTEM`
@@ -279,7 +281,7 @@ arguments. An autouse guard fails any network connection.
   trusted profile → `tool_rejected`; P4 profile needs a decision.
 - MissionService loop: P2/P1 approvals to completion; P4 approval is one-time,
   never a grant row, and the next mission asks again; P3 "always" refused.
-- Static: draft prompts role-marked and hash-pinned; `prompts.py` unchanged;
+- Static: approved prompts role-marked and hash-pinned; `prompts.py` unchanged;
   control modules provider-neutral; the teardown rule is the only standing
   rule; the browser folder helper; a fresh browser context per session.
 
@@ -295,7 +297,7 @@ uv run python scripts/install_control_browser.py --install  # explicit setup ste
 uv run python scripts/phoenix_control_smoke.py --dry-run
 uv run python scripts/phoenix_control_smoke.py --tools
 
-# 3. One live mission on local Ollama (draft control prompts; start Ollama first).
+# 3. One live mission on local Ollama (approved control prompts; start Ollama first).
 #    The script approves only P1/P2 browser requests on https://example.com; it
 #    stops at anything else, including every P4.
 uv run python scripts/phoenix_control_smoke.py --mission
@@ -335,20 +337,21 @@ and hashes/lengths only.
 
 ## Limitations
 
-1. **P4 approvals show raw resources.** The stored request's resource names a
-   window by handle/process/class and fill/set_text text by its sha256; the
-   window was chosen by an exact (spoofable) title. The user cannot see the
-   window title or the text before approving. A display-only summary next to the
-   pending request (resolved title, text preview, URL) needs an API/UI change and
-   should land before control steps are enabled in the backend.
+1. **Approval summary (resolved after review).** Pending control requests now
+   carry a display-only `summary` in the permissions API (action, page URL and
+   element, window title plus real process name/executable/PID, exact text or
+   a masked secret with a note). It is kept in memory only, so after a restart
+   a pending request shows its raw resource; the desktop approval card does not
+   render it yet (API only).
 2. Control steps publish no `tool.*`/`permission.requested` events (PHX-115).
-3. The backend composition root does not enable control steps until the draft
-   prompts are approved (ADR-152).
+3. The backend enables the browser and Windows UI control tools only; the
+   screenshot/vision and terminal control tools need a vision model binding
+   and an owner-chosen terminal root and profiles (ADR-152).
 4. An in-flight synchronous call cannot be pre-empted; it ends on its tool's
    own timeout after a cancel (ADR-153).
 5. A step cannot observe a page before choosing its next action; multi-page
    tasks need several steps, and each re-run repeats earlier P1/P2 actions.
 6. Window titles are resolved from at most 100 listed windows.
 7. `approve` ignores the chosen duration for a P4 request (one-time, never
-   broader); `api/missions.py` keeps one unreachable `return new_id` line
-   (left to avoid another re-pin).
+   broader). (The unreachable duplicate `return new_id` in `api/missions.py`
+   was removed.)

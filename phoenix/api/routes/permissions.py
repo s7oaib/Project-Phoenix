@@ -6,11 +6,14 @@ stored request and the body only the duration ("session" or "always"): the
 tool, action, resource and actor of the grant always come from the stored
 request, and a body naming any of them is refused (422). A request whose
 resource is outside the active workspace root cannot be approved (409
-``workspace_changed``); deny it instead.
+``workspace_changed``); deny it instead. PHX-112: a computer-control request
+names no workspace path, so that check does not apply to it; its pending view
+carries a display-only summary (ADR-151) that is never used to authorize.
 """
 
 from fastapi import APIRouter, Request
 
+from phoenix.agents.control_steps import CONTROL_ACTOR_ID
 from phoenix.api.routes.common import (
     DEFAULT_PAGE,
     ApiError,
@@ -60,7 +63,10 @@ async def list_pending(
 ) -> Page[PermissionRequestOut]:
     services = backend(request)
     records = await services.missions.list_pending_permissions()
-    items = [permission_out(record, services.tool_registry) for record in records]
+    items = [
+        permission_out(record, services.tool_registry, services.control_steps)
+        for record in records
+    ]
     return page(items, limit, offset)
 
 
@@ -68,7 +74,7 @@ async def list_pending(
 async def get_request(request_id: Uuid, request: Request) -> PermissionRequestOut:
     services = backend(request)
     record = await services.missions.get_permission_request(request_id)
-    return permission_out(record, services.tool_registry)
+    return permission_out(record, services.tool_registry, services.control_steps)
 
 
 @router.post(
@@ -82,7 +88,9 @@ async def approve(
     record = await missions.get_permission_request(request_id)
     # A request made under another (or no longer valid) workspace would store a
     # grant outside the active root; it can only be denied.
-    if not services.workspace.covers(record.request.resource):
+    if record.request.actor_id != CONTROL_ACTOR_ID and not services.workspace.covers(
+        record.request.resource
+    ):
         raise ApiError(409, "workspace_changed")
     rerun = await missions.approve(request_id, _DURATIONS[body.duration])
     return ApproveResult(
