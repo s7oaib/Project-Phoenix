@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import sys
 from pathlib import Path
@@ -227,6 +228,30 @@ def test_failing_gate_output_reaches_console(
     args = ["--manifest", str(manifest), "--out", str(tmp_path / "o"), "--allow-dirty"]
     assert tm.main(args) == 1
     assert "matrix|  FAILED tests/x.py::t - boom" in capsys.readouterr().out
+
+
+def test_failing_gate_tail_prints_on_a_cp1252_console(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # PHX-117 CI finding: the Windows runner console is cp1252, and a pytest
+    # log holding U+FFFD crashed the matrix while printing the failing tail.
+    assert tm.console_safe("a � → b", "cp1252") == "a ? ? b"
+    assert tm.console_safe("a → b", None) == "a → b"
+    py = sys.executable.replace("\\", "/")
+    # The gate writes "FAILED <U+FFFD as UTF-8> x" to its log.
+    code = (
+        "import sys; sys.stdout.buffer.write(b'FAILED \\\\xef\\\\xbf\\\\xbd x'); "
+        "sys.exit(1)"
+    )
+    gate = f'[[gate]]\nid = "bad"\ncommand = ["{py}", "-c", "{code}"]\n'
+    manifest = _manifest(tmp_path, gate + _covering_real())
+    raw = io.BytesIO()
+    console = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
+    monkeypatch.setattr(sys, "stdout", console)
+    args = ["--manifest", str(manifest), "--out", str(tmp_path / "o"), "--allow-dirty"]
+    assert tm.main(args) == 1
+    console.flush()
+    assert "matrix|  FAILED ? x" in raw.getvalue().decode("cp1252")
 
 
 def _covering_real() -> str:

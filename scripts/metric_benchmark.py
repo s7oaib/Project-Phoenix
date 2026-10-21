@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import platform
 import re
 import sys
@@ -348,7 +349,11 @@ def tier_models() -> tuple[str, ...]:
 def _workspace_tool() -> Iterator[tuple[FilesystemTool, Path]]:
     """A FilesystemTool over a temporary workspace with a migrated audit DB."""
     with tempfile.TemporaryDirectory(prefix="phoenix-metric-") as temp:
-        base = Path(temp)
+        # FilesystemTool refuses a root that is not its own real path
+        # (ADR-094). On GitHub's Windows runner the temp dir is an 8.3 short
+        # name (RUNNER~1), so every document step failed there; use the
+        # canonical spelling.
+        base = Path(os.path.realpath(temp))
         root = base / "workspace"
         root.mkdir()
         db = base / "audit.db"

@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import socket
 import sys
+import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -292,6 +294,38 @@ def test_live_mode_sends_only_levi_turns_to_the_model(tmp_path: Path) -> None:
     rows = _rows(results)
     assert rows["user_intervention_count"]["status"] == "NOT_RUNNABLE"
     assert "not a FYP number" not in rows["verification_catch_rate"]["source"]
+
+
+def _link(link: Path, target: Path) -> None:
+    if sys.platform == "win32":
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+def test_temp_dir_with_a_non_canonical_spelling_still_measures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # PHX-117 CI finding: GitHub's Windows temp dir is an 8.3 short name
+    # (RUNNER~1). FilesystemTool refuses a root that is not its real path
+    # (ADR-094), so every document step failed and the run measured nothing
+    # for them. A junction (or symlink) reproduces the same mismatch here.
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    _link(link, real)
+    monkeypatch.setattr(tempfile, "tempdir", str(link))
+    with mb._workspace_tool() as (_, root):
+        assert str(root) == os.path.realpath(root)
+        assert str(root).startswith(str(real.resolve()))
+    out = tmp_path / "out"
+    assert mb.main(["--scripted", "--out", str(out)]) == 0
+    results = _results(out)
+    assert results["verification"]["summary"]["outcomes"]["caught"] == 5
+    assert results["verification"]["summary"]["outcomes"]["inconclusive"] == 0
+    assert results["interventions"]["summary"]["completed"] == 8
 
 
 def test_cpu_only_placement_is_refused_before_any_mission(tmp_path: Path) -> None:
