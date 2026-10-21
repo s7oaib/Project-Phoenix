@@ -117,7 +117,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-112 Computer control steps — TODO
 - PHX-113 Media and documents steps — TODO
 - PHX-114 Voice pipeline — DONE (backend: wake, STT, TTS, barge-in, /voice API, ADR-105–109; desktop mic toggle is a follow-up)
-- PHX-115 Observability — TODO
+- PHX-115 Observability — DONE (structured JSON logs, `GET /metrics`, Observability view live; ADR-145–148; R1–R10 applied under the owner's "recommended options" instruction, pending review)
 - PHX-116 Colibri deep tier — IN_PROGRESS (engine and model installed, gate and configuration (3) runner ready; live gate awaits a free GPU)
 - PHX-117 Metric datasets — DONE (datasets, scorers and runner; verification catch rate and intervention count measured in scripted CI; memory/research/computer control NOT RUNNABLE until PHX-110/111/112)
 - PHX-118 LEVI final-verifier reliability — DONE (deterministic grounding pre-check, ADR-100; PHX-118b narrowed it to label values the request names, 2026-10-21; proposed v5 prompt text awaits owner approval)

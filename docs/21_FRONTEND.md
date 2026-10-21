@@ -621,7 +621,8 @@ latest 64 transcript entries, long answers in ordered parts), Permissions (pendi
 requests, P1–P4 `approval_required` evidence, approve with `session` or deny; the
 linked re-run is followed), Task Graph and Agent Network (live step and agent states
 from events; objectives and dependencies are not published), Models and Observability
-(recent events and timings). Memory, Files and Voice stay unconnected. `main.tsx`
+(recent events and timings, plus the backend's `GET /metrics` snapshot and recent
+structured event logs since PHX-115, ADR-148). Memory, Files and Voice stay unconnected. `main.tsx`
 renders `ConnectedApp` only inside the native shell; a plain browser keeps the honest
 unconnected App. App.tsx is unchanged by PHX-107, so its captions still describe ports as
 caller-supplied; PHX-108 adds only the header status line (below).

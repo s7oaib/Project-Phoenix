@@ -379,6 +379,7 @@ def test_route_table_is_exact_and_deferred_routes_do_not_exist(
         ("GET", "/voice/status"),
         ("POST", "/voice/start"),
         ("POST", "/voice/stop"),
+        ("GET", "/metrics"),  # PHX-115 (ADR-146), tests/test_observability.py
     }
     # PHX-110 owns these; they are not even stubs.
     for method, path in (

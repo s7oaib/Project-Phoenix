@@ -315,6 +315,14 @@ categories = ["unit", "integration"]
 # integration: test_ollama_refresh_uses_neutral_contract (registry + OllamaProvider)
 
 [[file]]
+path = "tests/test_observability.py"
+categories = ["unit", "integration", "api_contract", "permission_bypass", "secret_leakage"]
+# integration: test_metrics_route_requires_the_token_and_reports_a_real_mission (REST + composition root + MissionService + PhoenixRuntime + SQLite)
+# api_contract: test_metrics_route_requires_the_token_and_reports_a_real_mission
+# permission_bypass: test_metrics_route_requires_the_token_and_reports_a_real_mission (401/403 without the token or bound Host)
+# secret_leakage: test_redact_removes_credential_shapes, test_log_entry_keeps_only_safe_fields_and_never_exception_text, test_launcher_logs_json_to_the_data_directory_and_redacts_the_token
+
+[[file]]
 path = "tests/test_ollama_provider.py"
 categories = ["unit", "model_provider_contracts", "secret_leakage"]
 # secret_leakage: test_invalid_base_url_is_safe

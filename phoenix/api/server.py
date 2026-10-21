@@ -31,7 +31,10 @@ mission failing ``no_eligible_model`` until a restart. PHX-114 (ADR-108) adds
 the voice service (``/voice`` routes): off until requested (``POST
 /voice/start`` or ``PHOENIX_VOICE_AUTOSTART=1``), it submits spoken requests
 through MissionService like ``POST /chat``, and it stops first at shutdown; a
-voice failure never stops the backend (INV-016).
+voice failure never stops the backend (INV-016). PHX-115
+(ADR-145, ADR-146) puts a ``MetricsCollector`` between the publishers and the
+stream: it logs and aggregates each content-free event, then forwards it, and
+serves ``GET /metrics``.
 """
 
 import asyncio
@@ -75,6 +78,11 @@ from phoenix.api.event_stream import (
     EventStream,
 )
 from phoenix.api.missions import MissionService
+from phoenix.api.observability import (
+    MetricsCollector,
+    VramReport,
+    probe_ollama_vram,
+)
 from phoenix.api.onboarding import REQUIRED_MODELS
 from phoenix.api.security import (
     LocalApiSecurity,
@@ -280,6 +288,7 @@ class _BackendHealth:
         return bool(statuses) and all(
             status == ProviderHealthStatus.HEALTHY for status in statuses
         )
+    observability: MetricsCollector | None = None  # PHX-115
 
 
 class ReadinessStatus(StrEnum):
@@ -556,10 +565,28 @@ async def open_services(
         )
         policy = PermissionPolicy()
         audit = AuditTrail(session_factory, tools)
+        # PHX-115: VRAM comes from Ollama's placement report, only when the
+        # configured providers include Ollama.
+        uses_ollama = any(
+            isinstance(provider, OllamaProvider) for provider in provider_set.providers
+        )
+
+        async def vram() -> VramReport:
+            if not uses_ollama:
+                return VramReport(status="unavailable")
+            return await probe_ollama_vram(
+                config.ollama_base_url, config.probe_timeout_seconds
+            )
+
+        observer = MetricsCollector(stream, vram_probe=vram)
+        observer.bind_stream_counters(
+            lambda: (stream.dropped_events, stream.rejected_events)
+        )
+        # KAIDO's and the voice pipeline's events go through the collector too.
         kaido = KaidoMonitor(
             policy=config.kaido_policy,
             resource_probe=system_ram_sample if config.kaido_ram_probe else None,
-            events=stream,
+            events=observer,
         )
 
         def build_runtime(workspace_root: str | None = None) -> PhoenixRuntime:
@@ -574,7 +601,7 @@ async def open_services(
                 filesystem_tool=None
                 if workspace_root is None
                 else FilesystemTool(workspace_root, tools, policy, audit),
-                events=stream,
+                events=observer,
                 kaido=kaido,
             )
 
@@ -583,14 +610,15 @@ async def open_services(
             runtime=runtime,
             store=MissionStore(session_factory),
             tool_registry=tools,
-            events=stream,
+            events=observer,
             before_run=registrar.refresh_required,
         )
+        observer.bind_traces(missions.get_trace)
         settings_store = SettingsStore(session_factory)
         database_probe = DatabaseProbe(engine, heads)
         voice = VoiceService(
             missions,
-            stream,
+            observer,
             probes=health_probes(
                 _BackendHealth(
                     database_probe,
@@ -632,6 +660,7 @@ async def open_services(
             kaido=kaido,
             model_registrar=registrar,
             voice=voice,
+            observability=observer,
         )
         refresher: asyncio.Task[None] | None = None
         try:

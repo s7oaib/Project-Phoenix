@@ -5455,3 +5455,139 @@ latency is the sum of both attempts.
 existing `PhoenixRuntime` multi-provider and `tier_table` parameters. Product
 escalation inside PHOENIX is a later ticket, if the gate passes and the owner
 wants it.
+## ADR-145 — Structured JSON logs with redaction and rotating files
+
+Status: Accepted (recommended option applied under the owner's instruction,
+"recommended options", for PHX-115; R1–R4 in
+`tickets/PHX-115-observability.md` await the owner's review)
+Date: 2026-10-21
+Ticket: PHX-115
+
+Context: the backend logged plain text to stderr (`basicConfig`), which the
+desktop shell writes to a log file truncated at each launch. docs/23 asks for
+structured logs with a correlation ID, task/step IDs, a safe message and an
+error type, and never secrets (RULES security 6, INV-018).
+
+Decision:
+
+- **Format.** `phoenix/api/structured_logging.py` writes one JSON object per
+  line with closed keys: `ts`, `level`, `subsystem`, `message`, and only the
+  correlation fields `correlation_id`, `mission_id`, `task_id`, `step_id`,
+  `agent_id`, `event_type`, each kept only when identifier-shaped. Any other
+  `extra` key is dropped, so a stray `extra={"prompt": ...}` never reaches a
+  log.
+- **Exceptions.** Only `error_type` (class name) and `error_frames`
+  (`file:line:function`, innermost 12). The exception message, arguments and
+  locals are never formatted, because PHOENIX's errors may carry model or tool
+  content.
+- **Redaction (defence in depth).** `redact()` removes bearer values,
+  `key=value` secrets (API keys, tokens, secrets, passwords, cookies,
+  authorization), private key blocks, `sk-`, GitHub, Slack and AWS key shapes,
+  and every registered secret; the launcher registers the per-launch API token
+  and forgets it on exit. Control characters are replaced and messages are
+  capped at 1,000 characters. PHOENIX code still logs IDs, codes and timings
+  only.
+- **Files.** `<data_dir>/logs/phoenix.jsonl`, rotated at 5 MiB with 5 backups
+  (stdlib `RotatingFileHandler`), plus the same JSON on stderr. Records go
+  through a `QueueHandler`/`QueueListener`, so the event loop never waits on
+  disk; the safe entry is built before the record is queued.
+  `LoggingHandle.close()` stops the listener and restores the root logger
+  exactly (tests and repeated launches leave no handlers behind).
+- **Mission events.** Every allowlisted event is logged once by the metrics
+  collector (ADR-146) as `phoenix.events`, warning for failures.
+
+Consequences: logs are machine-readable and greppable by mission ID; the
+shell's own `backend.log` now holds JSON lines too. No new dependency.
+Limitation: redaction is pattern-based and cannot recognise an arbitrary
+secret that is not registered; the guarantee rests on PHOENIX never logging
+content.
+
+## ADR-146 — Runtime metrics collector and authenticated `GET /metrics`
+
+Status: Accepted (recommended option applied under the owner's instruction,
+"recommended options", for PHX-115; R5–R8 await the owner's review)
+Date: 2026-10-21
+Ticket: PHX-115
+
+Context: docs/23 lists latency, provider/model, TTFT, tokens/sec, RAM/VRAM/CPU,
+tool success, verification, recovery and permission metrics. Content-free
+events (ADR-087) and stored `MissionTrace` evidence already hold most of them.
+The event vocabulary is frozen at 32 types.
+
+Decision:
+
+- **Placement.** `MetricsCollector` (`phoenix/api/observability.py`) wraps the
+  `EventStream` as the runtime's and mission service's `EventSink`. It
+  re-checks the PHX-103 allowlist, updates bounded aggregates (256 samples per
+  stage, 256 tracked missions, 16 models, 64 recent logs), logs the event and
+  forwards it unchanged. Observing is best effort: it never raises into,
+  blocks or alters a mission (INV-021, INV-022). No event type, payload field,
+  migration or runtime change is added; events are mapped, not extended.
+- **Trace evidence.** Tokens, generation durations, per-model usage and the
+  provider health a mission saw come from the stored trace of each mission that
+  ended (`completed`, `failed`, `cancelled`, `waiting_permission`), read
+  lazily through `MissionService.get_trace` when `/metrics` is requested, at
+  most 64 per request, each mission once. Tokens/sec is output tokens over
+  total generation latency, the PHX-091 reporting rule.
+- **TTFT.** Mission generations do not stream, and non-streaming TTFT is
+  unknown (ADR-011, ADR-016), so no per-generation TTFT is inferred from
+  Ollama's prompt-evaluation timings. The live TTFT metric is the mission's
+  time to first answer, queued to completed, named by `ttft_basis:
+  "mission_first_answer"`. Streaming generation would make it token-level; that
+  is a separate ticket.
+- **Resources.** Process working set and system RAM through `ctypes`
+  (`GlobalMemoryStatusEx`, `K32GetProcessMemoryInfo`) on Windows and `/proc`
+  elsewhere; process CPU % from `time.process_time` between snapshots. No
+  `psutil`, so no new dependency. VRAM is Ollama's own placement report,
+  `GET /api/ps` (`size_vram` per loaded model), one bounded request per
+  snapshot (probe timeout, no proxy, no redirects, 256 KiB cap, names
+  validated), only when an `OllamaProvider` is configured; otherwise, or on any
+  failure, `unavailable`.
+- **Permission decisions.** Requested (`permission.requested`), user-approved
+  (mission `superseded`), user-denied (mission failed `permission_denied`) and
+  policy-denied (`tool.failed` with `decision` `denied`/`blocked`).
+- **Route.** `GET /metrics` (`phoenix/api/routes/observability.py`), behind
+  the PHX-101 middleware like every route (token, bound Host, Origin). The
+  response schema is closed (`extra="forbid"`) and holds counts, timings,
+  sizes, IDs and closed values only.
+- **Wiring.** `server.py` builds the collector, passes it as `events=` to the
+  runtime and the mission service, binds the trace loader and the stream's
+  drop counters, and adds `BackendServices.observability`. `routes/__init__.py`
+  includes the router.
+
+Consequences: the numbers are per launch and in memory; disk I/O is not
+measured. A snapshot costs at most one `/api/ps` request and 64 trace reads.
+
+## ADR-147 — The desktop proxy admits `GET /metrics`
+
+Status: Accepted (recommended option applied under the owner's instruction for
+PHX-115; R9 awaits the owner's review)
+Date: 2026-10-21
+Ticket: PHX-115
+
+Decision: `proxy.rs` adds exactly `(GET, "/metrics", no query keys)` to the
+allowlist (19 routes). Any query, trailing segment, other method or nested path
+is refused before I/O, like every other route; Rust still adds the bearer token
+and the webview never sees it. Tests list it among the admitted routes and add
+`/metrics?verbose=1`, `/metrics/`, `/metrics/{id}`, `POST` and `PATCH` to the
+refused set.
+
+## ADR-148 — Live data in the Observability view through the existing port
+
+Status: Accepted (recommended option applied under the owner's instruction for
+PHX-115; R10 awaits the owner's review)
+Date: 2026-10-21
+Ticket: PHX-115
+
+Decision: `adapters/core.ts` fetches `GET /metrics` when the backend becomes
+ready, when the event stream (re)connects, when a mission settles or waits for
+permission, and every fifth poll tick (15 s). `toBackendDiagnostics` maps the
+snapshot into App's closed metric names (`task_step_latency`, `ttft`,
+`tokens_per_sec`, `provider_model`, `ram`, `vram`, `cpu`,
+`tool_success_failure`, `permission_decisions`, `verification_result`,
+`recovery_attempts`) with units and the snapshot time, at most 40 entries; the
+live event metrics fill the rest of App's 64. The backend's recent structured
+event logs fill the `logs` collection (at most 64), with correlation, task and
+step IDs. Malformed snapshots are ignored and the last good one stays. App.tsx
+is unchanged (ADR-092), so its captions still call the evidence
+caller-supplied; the copy update stays with PHX-108.

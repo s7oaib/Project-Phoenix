@@ -2062,7 +2062,7 @@ test('PHX-087 suppressed sources report counts unavailable rather than claiming 
   assert.doesNotMatch(empty, /Diagnostic counts unavailable/);
 });
 
-test('PHX-108 the native proxy allowlist is exactly the twenty documented REST routes', () => {
+test('PHX-108/115 the native proxy allowlist is exactly the twenty-one documented REST routes', () => {
   const proxy = readFileSync(new URL('../apps/desktop/src-tauri/src/proxy.rs', import.meta.url), 'utf8');
   const table = proxy.slice(proxy.indexOf('pub const ROUTES'), proxy.indexOf('];', proxy.indexOf('pub const ROUTES')));
   const routes = [...table.matchAll(/Method::(Get|Post|Patch),\s*"([^"]+)",\s*&\[([^\]]*)\]/g)]
@@ -2075,6 +2075,8 @@ test('PHX-108 the native proxy allowlist is exactly the twenty documented REST r
     'GET /settings []', 'PATCH /settings []',
     // PHX-108 (ADR-110, ADR-112): read-only setup routes, no query and no body.
     'GET /onboarding []', 'GET /capabilities []',
+    // PHX-115 (ADR-147): read-only runtime metrics, no query.
+    'GET /metrics []',
   ]);
   // Every fixed route the adapters name is on the allowlist (destructive routes stay absent).
   const core = readFileSync(new URL('../apps/desktop/src/adapters/core.ts', import.meta.url), 'utf8');

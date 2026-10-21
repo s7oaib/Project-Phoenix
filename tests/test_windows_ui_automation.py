@@ -1542,6 +1542,12 @@ def test_source_architecture_and_immutability() -> None:
         ":(exclude)phoenix/api/routes/setup.py",
         ":(exclude)alembic/versions/0009_default_mission_path.py",
         ":(exclude)apps/desktop/src/adapters/SetupViews.tsx",
+        # PHX-115 (ADR-145, ADR-146) adds the observability modules and route
+        # (server.py, launcher.py, routes/__init__.py, proxy.rs and core.ts are
+        # hash-pinned in test_prompt_injection_defenses.py).
+        ":(exclude)phoenix/api/observability.py",
+        ":(exclude)phoenix/api/structured_logging.py",
+        ":(exclude)phoenix/api/routes/observability.py",
     ]
     assert not subprocess.check_output(
         ["git", "diff", "origin/main", "--", *paths], cwd=ROOT
