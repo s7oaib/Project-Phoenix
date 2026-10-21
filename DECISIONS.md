@@ -4597,6 +4597,60 @@ call stays outside the V1 threat model: the residual window shrinks from a
 whole mission to the inside of one call. No new dependencies and no new event
 types.
 
+## ADR-100 — LEVI passes a grounded final answer deterministically
+
+Status: Accepted (the owner asked on 2026-10-21 to "fix it, recommended
+approach, prompt text needs owner approval"; no prompt text changed, and R1–R8
+in `tickets/PHX-118-levi-final-verifier-reliability.md` await the owner's
+review)
+Date: 2026-10-21
+Ticket: PHX-118
+
+Context: in the 2026-10-19 exe rehearsal LEVI's final_verifier (qwen3.5:9b,
+think:false) rejected a correct final answer ("AURORA", read from
+`project-notes.txt` and passed by the document_verifier) in about half the
+runs. Live diagnosis (5 runs, raw replies captured in scratch only) showed why:
+the final verifier sees each verified step output as a bare item (`s1` =
+"AURORA") with no provenance, so it sometimes fails the candidate because "no
+verified step output references project-notes.txt", and its prompt says to fail
+when unsure. Identical inputs pass in other runs.
+
+Decision:
+
+- **Deterministic grounding pre-check** (`phoenix/agents/final_grounding.py`,
+  `GroundedFinalVerificationResponder` wrapping the unchanged
+  `FinalVerificationResponder`). LEVI passes the final answer on one check,
+  `deterministic.grounded_final`, without a model call only when the stripped
+  candidate is one line of at most 200 characters, not JSON, identical to the
+  verified output of the plan's last step, that step is a document step whose
+  `read_text` call succeeded and passed LEVI's tool-evidence check, the
+  candidate is a verbatim, case-sensitive, boundary-delimited span of the file
+  content, and the prompt-injection guard finds no signal in the content or
+  the candidate. Every other final answer goes to the unchanged model check.
+- **Never weaker for anything not proven.** The pre-check can only replace the
+  model for an answer that adds nothing to already verified evidence; it
+  cannot turn a model rejection into a pass. LEVI's all-checks verdict and
+  INV-008 are unchanged; MAHORAGA still never retries a rejection (ADR-093).
+- **Observable** (INV-022): `StepVerification.grounded` (default False, only
+  with a PASSED verdict); a grounded mission has no final_verifier generation.
+  Events and their allowlist are unchanged.
+- **No prompt change.** The prompt set stays `phoenix-prompts-v4`. A
+  provenance sentence for FINAL_VERIFICATION_SYSTEM (v5), which would also
+  cover reworded answers, is proposed in the ticket and awaits owner approval.
+- **Not chosen:** moving the final verifier to the 4B tier (the 4B model
+  produces the final answer; ADR-083 prefers a different verifier model) and
+  changing thinking (already off).
+- **Frozen file.** `phoenix/agents/runtime.py` moves from the PHX-109 pin to the
+  PHX-118 implementation commit (`PHX_118_COMMIT` / `PHX_118_PATHS`), in a
+  separate pin commit; the PR must merge with a merge commit.
+
+Consequences: on the AURORA mission the final_verifier call (35–54 s on
+BLAZE-6) is skipped and the false rejection cannot occur. Residual: the
+pre-check does not judge a format requirement a verbatim value could still
+violate (for example "reply in lowercase"); the eligibility rules keep this
+narrow, and the owner may restrict it further. No new dependencies, event
+types, migrations or API changes.
+
 ## ADR-115 — Fixed, versioned, sha-pinned metric datasets
 
 Status: Accepted (owner instruction 2026-10-21: recommended options throughout)
