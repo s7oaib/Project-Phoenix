@@ -1751,13 +1751,10 @@ PHX_104_PATHS = ("alembic/env.py",)
 # api/missions.py (optional path, decisions, re-runs), persistence/missions.py
 # (nullable path, triage_outcome) and the REST routes and schemas; all stay
 # pinned, at the PHX-105 implementation commit. PHX-109 moved runtime.py and
-# mission_events.py, PHX-108 schemas.py, and PHX-112 api/missions.py and
-# persistence/missions.py to their own pins (below).
+# mission_events.py, PHX-108 schemas.py, and PHX-112 api/missions.py,
+# persistence/missions.py and routes/missions.py to their own pins (below).
 PHX_105_COMMIT = "e34142ca0062dc14c05a5a1d18720b64446cdaa7"
-PHX_105_PATHS = (
-    "phoenix/agents/prompts.py",
-    "phoenix/api/routes/missions.py",
-)
+PHX_105_PATHS = ("phoenix/agents/prompts.py",)
 # PHX-106/107 (ADR-091, ADR-092) intentionally changed the desktop manifest,
 # entry point, Tauri config (capability and CSP) and native host (backend
 # sidecar, proxy and event bridge); they stay pinned, at the PHX-106/107
@@ -1788,27 +1785,35 @@ PHX_109_PATHS = ("phoenix/agents/mission_events.py",)
 # implementation commit. PHX-112 moved runtime.py to its own pin (below).
 PHX_118_COMMIT = "d382b11a0528df5de41772e7697687b81b836de2"
 PHX_118_PATHS: tuple[str, ...] = ()
-# PHX-112 (ADR-150, ADR-151) intentionally changed runtime.py (optional
+# PHX-112 (ADR-150 to ADR-152) intentionally changed runtime.py (optional
 # ControlStepRunner, approvals, MissionTrace.control_calls, kill switch),
 # api/missions.py (control grants and one-time P4 approvals in the approve ->
-# re-run loop) and persistence/missions.py (approve_once); all three stay
-# pinned, at the PHX-112 implementation commit (the PR must merge with a merge
-# commit so this commit stays reachable).
-PHX_112_COMMIT = "e25e91a8ffd2a976e8fc35fcbf6f7a48b03f34b8"
+# re-run loop), persistence/missions.py (approve_once), server.py (the
+# ControlStepRunner), capabilities.py (computer_control enabled), and the
+# missions, permissions and schemas routes (display-only approval summary; no
+# workspace check for control requests); all stay pinned, at the PHX-112
+# resolution commit on top of PHX-108 and PHX-118 (the PR must merge with a
+# merge commit so this commit stays reachable).
+PHX_112_COMMIT = "b71e716046595a7c16e9e94c71f6dd7ccf93f4aa"
 PHX_112_PATHS = (
     "phoenix/agents/runtime.py",
+    "phoenix/api/capabilities.py",
     "phoenix/api/missions.py",
+    "phoenix/api/routes/missions.py",
+    "phoenix/api/routes/permissions.py",
+    "phoenix/api/routes/schemas.py",
+    "phoenix/api/server.py",
     "phoenix/persistence/missions.py",
 )
 # PHX-108 (ADR-110 to ADR-114) intentionally changed server.py (ModelRegistrar),
-# the REST route package, schemas and settings routes, the settings store, the native proxy allowlist and the desktop
+# api/missions.py (before_run), the REST route package, schemas and settings
+# routes, the settings store, the native proxy allowlist and the desktop
 # adapters; all stay pinned, at the PHX-108 implementation commit (the PR must
-# merge with a merge commit so this commit stays reachable).
+# merge with a merge commit so this commit stays reachable). PHX-112 moved
+# server.py, api/missions.py and schemas.py to its own pin (above).
 PHX_108_COMMIT = "f70b201a42338cc3c38c2159d2b2ee5d1c84e416"
 PHX_108_PATHS = (
-    "phoenix/api/server.py",
     "phoenix/api/routes/__init__.py",
-    "phoenix/api/routes/schemas.py",
     "phoenix/api/routes/system.py",
     "phoenix/persistence/settings.py",
     "apps/desktop/src-tauri/src/proxy.rs",
