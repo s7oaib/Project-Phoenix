@@ -115,7 +115,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-110 Memory and RAG in missions — TODO
 - PHX-111 Web research — TODO
 - PHX-112 Computer control steps — TODO
-- PHX-113 Media and documents steps — TODO
+- PHX-113 Media and documents steps — DONE (opt-in; ADR-140–144; draft prompt text awaits owner approval, then wiring)
 - PHX-114 Voice pipeline — TODO
 - PHX-115 Observability — TODO
 - PHX-116 Colibri deep tier — TODO

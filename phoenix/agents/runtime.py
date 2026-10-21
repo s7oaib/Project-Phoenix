@@ -55,6 +55,12 @@ from pydantic import (
 )
 
 from phoenix.agents import prompts
+from phoenix.agents.capability_steps import (
+    CapabilityCallRecord,
+    CapabilityStepRunner,
+    CapabilityTools,
+    capability_grants,
+)
 from phoenix.agents.handoff import HandoffBuilder, HandoffEnvelope
 from phoenix.agents.mission_events import (
     EventPublisher,
@@ -326,6 +332,9 @@ class MissionTrace(_Value):
     ``switch_agent`` means PHOENIX answered on the DIRECT path after AIZEN's
     plan failed: ``path`` stays the decided COMPLEX and the task never
     COMPLETED, so it never counts as COMPLEX success.
+
+    PHX-113: ``capability_calls`` holds the media and document tool calls;
+    PHX-046 filesystem calls stay in ``tool_calls``.
     """
 
     prompt_set_version: Identifier
@@ -339,6 +348,7 @@ class MissionTrace(_Value):
     triage_outcome: TriageOutcome | None = None
     triage_reason: TriageFallbackReason | None = None
     recoveries: tuple[RecoveryRecord, ...] = ()
+    capability_calls: tuple[CapabilityCallRecord, ...] = ()
 
     @model_validator(mode="after")
     def consistent_triage(self) -> Self:
@@ -422,6 +432,7 @@ class _Evidence:
     verifications: list[StepVerification] = field(default_factory=list)
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
     recoveries: list[RecoveryRecord] = field(default_factory=list)
+    capability_calls: list[CapabilityCallRecord] = field(default_factory=list)
     # PHX-109: a direct fallback already settled the failed task as FAILED.
     task_failed: bool = False
 
@@ -472,6 +483,7 @@ class _Evidence:
                 triage_outcome=self.triage_outcome,
                 triage_reason=self.triage_reason,
                 recoveries=tuple(self.recoveries),
+                capability_calls=tuple(self.capability_calls),
             ),
         )
 
@@ -494,6 +506,10 @@ class PhoenixRuntime:
     filesystem_tool optionally enables read-only document steps under its
     explicit workspace root. Their grants come only from run()'s caller.
 
+    capabilities optionally enables PHX-113 media and document steps (see
+    capability_steps; their prompt text awaits the owner's approval). Their
+    grants also come only from run()'s caller.
+
     events optionally receives PHX-103 progress events (e.g. an EventBus). It
     must not block; anything it raises is swallowed and counted in
     dropped_events, so a mission never fails or waits because of it.
@@ -511,6 +527,7 @@ class PhoenixRuntime:
         limits: RuntimeLimits | None = None,
         filesystem_tool: FilesystemTool | None = None,
         events: EventSink | None = None,
+        capabilities: CapabilityTools | None = None,
     ) -> None:
         registry = (
             build_default_agent_registry() if agent_registry is None else agent_registry
@@ -544,6 +561,18 @@ class PhoenixRuntime:
                 max_read_bytes=self._limits.max_output_chars,
             )
             self._domains = (*TEXT_DOMAINS, RoutingDomain.DOCUMENTS)
+        # PHX-113 (ADR-140): opt-in media and document steps.
+        self._capabilities: CapabilityStepRunner | None = None
+        if capabilities is not None:
+            self._capabilities = CapabilityStepRunner(
+                capabilities,
+                self._guard,
+                filesystem=filesystem_tool,
+                max_read_bytes=self._limits.max_output_chars,
+            )
+            self._domains = tuple(
+                dict.fromkeys((*self._domains, *self._capabilities.domains))
+            )
         try:
             self._recovery = MahoragaRecovery(self._agents)
         except MahoragaRecoveryError:
@@ -601,7 +630,11 @@ class PhoenixRuntime:
         ):
             raise PhoenixRuntimeError("Inconsistent path decision")
         try:
-            accepted = document_grants(grants)
+            accepted = (
+                document_grants(grants)
+                if self._capabilities is None
+                else capability_grants(grants)
+            )
             session = (
                 None if session_id is None else _identifier.validate_python(session_id)
             )
@@ -777,7 +810,12 @@ class PhoenixRuntime:
                     for identity, status in health.items()
                 ),
                 requirements=CapabilityRequirements(),
-                permission_risk=PermissionRisk.P1 if documents else PermissionRisk.P0,
+                # Descriptive only; PHX-113 steps may reach P2 tools.
+                permission_risk=PermissionRisk.P2
+                if self._capabilities is not None and self._capabilities.handles(domain)
+                else PermissionRisk.P1
+                if documents
+                else PermissionRisk.P0,
             )
         )
 
@@ -1101,10 +1139,17 @@ class PhoenixRuntime:
         }
         routes[FINAL_STEP_ID] = self._route(RoutingDomain.USER_INTERACTION, health)
         plan_ids = tuple(step.step_id for step in plan.steps)
+        # PHX-113: capability steps replace PHX-046 document steps when enabled.
+        capability = {
+            step_id: route.domain
+            for step_id, route in routes.items()
+            if self._capabilities is not None
+            and self._capabilities.handles(route.domain)
+        }
         documents = {
             step_id
             for step_id, route in routes.items()
-            if route.domain == RoutingDomain.DOCUMENTS
+            if route.domain == RoutingDomain.DOCUMENTS and step_id not in capability
         }
         steps = [
             TaskStepDefinition(
@@ -1113,11 +1158,19 @@ class PhoenixRuntime:
                 objective=step.objective,
                 depends_on=plan_ids[index - 1 : index],
                 input_refs=plan_ids[index - 1 : index],
-                expected_output=prompts.DOCUMENT_STEP_EXPECTED_OUTPUT
+                expected_output=CapabilityStepRunner.expected_output(
+                    capability[step.step_id]
+                )
+                if step.step_id in capability
+                else prompts.DOCUMENT_STEP_EXPECTED_OUTPUT
                 if step.step_id in documents
                 else prompts.STEP_EXPECTED_OUTPUT,
                 timeout_seconds=limits.step_timeout_seconds,
-                completion_rule=prompts.DOCUMENT_STEP_COMPLETION_RULE
+                completion_rule=CapabilityStepRunner.completion_rule(
+                    capability[step.step_id]
+                )
+                if step.step_id in capability
+                else prompts.DOCUMENT_STEP_COMPLETION_RULE
                 if step.step_id in documents
                 else prompts.STEP_COMPLETION_RULE,
             )
@@ -1165,17 +1218,28 @@ class PhoenixRuntime:
                 source_agent_id="phoenix",
                 expected_output_schema=step.expected_output,
                 verification_required=True,
-                permission_scope=DOCUMENT_TOOL_IDS if step_id in documents else (),
+                permission_scope=self._capabilities.tool_ids(capability[step_id])
+                if self._capabilities is not None and step_id in capability
+                else DOCUMENT_TOOL_IDS
+                if step_id in documents
+                else (),
             )
             # PHX-047: both document turns run on the structured providers.
             binding = self._binding(
-                decision.agent_id, producer, evidence, structured=step_id in documents
+                decision.agent_id,
+                producer,
+                evidence,
+                structured=step_id in documents or step_id in capability,
             )
             prior = tuple((ref, outputs[ref]) for ref in step.input_refs)
             tool_evidence: ToolEvidence | None = None
+            capability_levi: Callable[[ModelBinding], VerificationResponder] | None
+            capability_levi = None
             role = (
                 "final_answer"
                 if final
+                else CapabilityStepRunner.role(capability[step_id])
+                if step_id in capability
                 else "document"
                 if step_id in documents
                 else "specialist"
@@ -1183,7 +1247,21 @@ class PhoenixRuntime:
             # Outside the step deadline, so a step timeout reports "timeout".
             async with _agent_phase(events, decision.agent_id, role, step_id):
                 async with asyncio.timeout(step.timeout_seconds):
-                    if step_id in documents:
+                    if self._capabilities is not None and step_id in capability:
+                        # PHX-113: one permissioned call; not retried (PHX-109 R10).
+                        candidate, capability_levi = await self._capabilities.perform(
+                            binding,
+                            handoff,
+                            capability[step_id],
+                            user_request=request.text,
+                            evidence=prior,
+                            grants=grants,
+                            session_id=session_id,
+                            record_tool=evidence.tool_calls.append,
+                            record_capability=evidence.capability_calls.append,
+                            events=events,
+                        )
+                    elif step_id in documents:
                         assert self._documents is not None  # allowlisted with a tool
                         candidate, tool_evidence = await self._documents.perform(
                             binding,
@@ -1220,7 +1298,7 @@ class PhoenixRuntime:
                 step_id=step_id,
             ) as check:
                 verifier = self._control("verifier", health, evidence, avoid=producer)
-                levi = _levi_responder(
+                levi = capability_levi or _levi_responder(
                     self._guard, request.text, prior, final, tool_evidence, grants
                 )
                 async with asyncio.timeout(limits.verification_timeout_seconds):
