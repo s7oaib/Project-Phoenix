@@ -243,7 +243,8 @@ def test_verdict_passes_only_when_every_criterion_passes() -> None:
         )
         assert verdict == "FAIL"
         assert sum(c["status"] == "FAIL" for c in criteria) == 1
-    verdict, _ = gate.evaluate(facts, live, {"mb_per_s": 550.0}, gate.Thresholds())
+    assert gate.Thresholds().min_read_mb_per_s == 1000  # pre-registered (ADR-120)
+    verdict, _ = gate.evaluate(facts, live, {"mb_per_s": 823.0}, gate.Thresholds())
     assert verdict == "FAIL"
     verdict, criteria = gate.evaluate(facts, None, io, gate.Thresholds())
     assert verdict == "INCOMPLETE"

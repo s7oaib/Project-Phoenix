@@ -49,7 +49,7 @@ If it fails the gate, configuration (3) is reported as measured and rejected, wi
 | Sequential shard read (preliminary, disk only) | 823 MB/s (8 GiB, after the hash pass) and 662 MB/s (8 GiB, alone). A .NET cross-check read 673 MB/s (4 GB, 64 MiB blocks). All three ran on AC power while another agent used the GPU, Ollama and RAM (8.5 GB available) |
 | `coli plan` (read-only, under that load) | RAM budget 6.6 GB (4.9 GB dense + 4.2 GB runtime) and a 4.2 GB VRAM hot tier of about 2,385 experts. That leaves 13.9 GB of cold experts on disk and 23% projected expert residency, with disk expert misses as the limit. It warns that the RAM budget cannot hold one expert slot per sparse layer. The plan must be re-read when the machine is idle |
 
-The NVMe floor was first set at 1000 MB/s, then lowered to 600 MB/s (ADR-120) after the preliminary reads above. The floor only rules out a SATA-class disk: Colibri streams experts, so the disk's real cost shows up in the TTFT and throughput criteria. Both values are recorded here for transparency.
+The NVMe floor is the pre-registered **1000 MB/s** (ADR-120). After the preliminary reads above, a 600 MB/s floor was briefly considered. The owner rejected it on 2026-10-21, because changing a threshold after seeing data is not acceptable for the FYP. The preliminary reads are below the floor, so `nvme_read_mb_per_s` is likely to FAIL, which makes the whole gate FAIL. The gate report and summary still print every measured value with its threshold and status, so the FYP can state which criteria failed and by how much.
 
 ## What was installed (nothing committed; all under `D:\Phoenix`)
 

@@ -4646,9 +4646,12 @@ Decision:
   NVMe read of the shards and the engine process's own disk reads and RSS. PASS
   needs every criterion: success rate >= 0.9, accuracy >= 0.5, TTFT median
   <= 60 s, output tokens / whole latency >= 2 tok/s, RAM headroom at peak
-  >= 1.5 GiB, VRAM peak <= 98% of the card, shard read >= 600 MB/s, manifest
-  OK. The read floor only rules out a SATA-class or slower disk: Colibri
-  streams experts, so the disk's real cost shows up in TTFT and throughput. Any failure is FAIL: configuration (3) is then reported as measured and
+  >= 1.5 GiB, VRAM peak <= 98% of the card, shard read >= 1000 MB/s, manifest
+  OK. The 1000 MB/s floor is pre-registered. After preliminary reads of
+  662–823 MB/s, a 600 MB/s floor was briefly considered. The owner rejected it
+  on 2026-10-21, because changing a threshold after seeing data is not
+  acceptable for the FYP. The gate report prints every measured value next to
+  its threshold, so the FYP can state which criteria failed. Any failure is FAIL: configuration (3) is then reported as measured and
   rejected with the numbers. A missing measurement is INCOMPLETE, never PASS.
 - **Honest metrics.** TTFT is time to the first visible answer, so it includes
   Qwen3.6's reasoning; `ColibriProvider` cannot turn thinking off without a

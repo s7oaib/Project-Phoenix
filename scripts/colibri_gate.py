@@ -92,8 +92,8 @@ class Thresholds:
     min_tokens_per_second: float = 2.0
     min_ram_headroom_bytes: int = int(1.5 * GIB)
     max_vram_fraction: float = 0.98
-    # A floor above SATA's ~550 MB/s; the disk's real cost shows in TTFT/tok/s.
-    min_read_mb_per_s: float = 600
+    # Pre-registered (ADR-120); not changed after seeing data.
+    min_read_mb_per_s: float = 1000
 
 
 # ---- host facts and the disk-only phases (no model load, no GPU work)
