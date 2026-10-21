@@ -6,11 +6,14 @@ stored request and the body only the duration ("session" or "always"): the
 tool, action, resource and actor of the grant always come from the stored
 request, and a body naming any of them is refused (422). A request whose
 resource is outside the active workspace root cannot be approved (409
-``workspace_changed``); deny it instead.
+``workspace_changed``); deny it instead. PHX-111: a web research request names
+the search provider, not a workspace path, so the workspace check does not
+apply to it; MissionService.approve still admits only the research step scope.
 """
 
 from fastapi import APIRouter, Request
 
+from phoenix.agents.research_steps import RESEARCH_TOOL_IDS
 from phoenix.api.routes.common import (
     DEFAULT_PAGE,
     ApiError,
@@ -82,7 +85,8 @@ async def approve(
     record = await missions.get_permission_request(request_id)
     # A request made under another (or no longer valid) workspace would store a
     # grant outside the active root; it can only be denied.
-    if not services.workspace.covers(record.request.resource):
+    research = record.request.tool_id in RESEARCH_TOOL_IDS
+    if not research and not services.workspace.covers(record.request.resource):
         raise ApiError(409, "workspace_changed")
     rerun = await missions.approve(request_id, _DURATIONS[body.duration])
     return ApproveResult(

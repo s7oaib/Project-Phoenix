@@ -180,6 +180,12 @@ gate under `.test-matrix/logs/`.
   real orchestration, permission, tool and audit components, and a scripted
   model. Its `[[gap]]` is removed. The owner-run live counterpart,
   `scripts/phoenix_mission_smoke.py`, is not a CI gate.
+- `tests/test_web_research.py` (PHX-111) covers web research offline: the
+  DuckDuckGo provider and page reader over `httpx.MockTransport` fixtures,
+  the P1 research tool, LEVI's deterministic citation checks and full research
+  missions (granted, waiting for permission, injected pages, fabricated
+  citations, rate limiting). Its owner-run live counterpart,
+  `scripts/research_mission_smoke.py`, is not a CI gate.
 - Native WebView2 acceptance and live model or device runs are `[[manual]]` rows
   with evidence references. They are reported as MANUAL, never as automated PASS.
 - The run fails on any gate failure or timeout, missing tool, unmapped or missing

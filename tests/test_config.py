@@ -32,7 +32,9 @@ def test_portable_defaults() -> None:
         "api_host",
         "api_port",
         "data_dir",
+        "web_research_enabled",  # PHX-111
     }
+    assert settings.web_research_enabled is False
 
 
 def test_environment_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -40,12 +42,14 @@ def test_environment_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PHOENIX_API_HOST", "localhost")
     monkeypatch.setenv("PHOENIX_API_PORT", "9000")
     monkeypatch.setenv("PHOENIX_DATA_DIR", "environment-data")
+    monkeypatch.setenv("PHOENIX_WEB_RESEARCH_ENABLED", "true")
     settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
     assert settings.model_dump() == {
         "environment": "test",
         "api_host": "localhost",
         "api_port": 9000,
         "data_dir": Path("environment-data"),
+        "web_research_enabled": True,
     }
 
 
@@ -61,6 +65,7 @@ def test_dotenv_and_precedence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
         "api_host": "localhost",
         "api_port": 9001,
         "data_dir": Path("dotenv-data"),
+        "web_research_enabled": False,
     }
     monkeypatch.setenv("PHOENIX_API_PORT", "9002")
     assert AppSettings().api_port == 9002

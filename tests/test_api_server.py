@@ -67,6 +67,7 @@ from phoenix.models.provider import (
 )
 from phoenix.persistence.database import create_engine_for_settings
 from phoenix.tools.filesystem import filesystem_tool_definitions
+from phoenix.tools.web_research import web_research_tool_definitions
 
 HEAD = "0008_mission_triage"
 ROOT = Path(__file__).resolve().parents[1]
@@ -250,7 +251,13 @@ def test_lifespan_builds_services_once_and_closes_them(settings: AppSettings) ->
         assert services.lifecycle.capacity == 1  # INV-023
         assert services.migration_heads == (HEAD,)
         assert services.event_bus.subscriber_count == 0
-        assert services.tool_registry.list_tools() == filesystem_tool_definitions()
+        # PHX-111: the research declaration is registered; the tool is not
+        # built because web research is disabled by default.
+        assert services.tool_registry.list_tools() == (
+            *filesystem_tool_definitions(),
+            *web_research_tool_definitions(),
+        )
+        assert services.runtime._research is None
         assert services.permission_policy.rules == ()
         assert fakes.default.closed == fakes.structured.closed == 0
     assert get_services(app) is None

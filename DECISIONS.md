@@ -4596,3 +4596,142 @@ linked spelling. A swap between the root check and a later operation within one
 call stays outside the V1 threat model: the residual window shrinks from a
 whole mission to the inside of one call. No new dependencies and no new event
 types.
+
+## ADR-135 — Web research steps in missions (URAHARA)
+
+Status: Proposed (PHX-111; recommended options applied under the owner's
+decisions of 2026-10-21; prompt text awaits the owner's approval)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Context: PHX-053/054 built the SearchProvider contracts, a P1 `WebSearchTool`
+and the advisory `UraharaResearchService`, but nothing let a PHOENIX mission
+search the web. The owner chose DuckDuckGo without an API key, a permission
+prompt before any query leaves the PC, untrusted fetched pages, cited answers
+checked deterministically by LEVI, and graceful rate-limit handling.
+
+Decision:
+
+- **Placement.** Logic lives in new modules: `phoenix/web/duckduckgo.py`
+  (provider), `phoenix/web/page_fetch.py` (page reader),
+  `phoenix/tools/web_research.py` (tool) and `phoenix/agents/research_steps.py`
+  (step runner, grants, LEVI responder). Shared files get small additive hooks:
+  `runtime.py` (optional `research_tool`, the `web_research` domain, a research
+  step branch, `MissionTrace.research_calls`, `rate_limited`), `prompts.py`
+  (v5 constants), `mission_events.py` (allowlist values), `api/missions.py`
+  and `api/routes/permissions.py` (research grants), `api/server.py` (wiring)
+  and `core/config.py` (`web_research_enabled`).
+- **A step mirrors PHX-046.** URAHARA proposes one query; PHOENIX builds the
+  call and permission request; the tool decides through ToolRegistry and
+  PermissionEngine (INV-004); the answer turn sees sources only as guarded
+  WEB_PAGE / WEB_SEARCH items (INV-017); grants come only from the caller
+  (INV-003). Research generations are not retried by MAHORAGA, as for
+  document steps (ADR-093), because a retry would repeat a network call.
+- **Why not WebSearchTool / UraharaResearchService.** `WebSearchTool`'s
+  resource hashes the exact query and timestamp, so a user's grant could never
+  match the re-run that follows an approval (the model proposes the query
+  again, at a new time). `UraharaResearchService` requires Playwright
+  BrowserTool evidence for every page and a separate synthesizer. Both stay
+  unchanged; the new tool reuses their PHX-053 contracts (`SearchProvider`,
+  `SearchRequest`/`SearchResponse`, public-URL admission).
+- **Capability flag.** Research steps exist only when `AppSettings.
+  web_research_enabled` is true (`PHOENIX_WEB_RESEARCH_ENABLED`); off by
+  default. PHX-108's capability endpoint is not on main, so it is not flipped
+  there yet. The research declaration is always registered so stored requests
+  can be shown and decided.
+
+## ADR-136 — DuckDuckGo over plain httpx; stdlib HTML extraction
+
+Status: Proposed (PHX-111)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Decision: the concrete provider posts the query to
+`https://html.duckduckgo.com/html/` with plain httpx and an honest
+User-Agent, and parses `result__a` / `result__snippet` anchors with the
+standard-library HTML parser. Sponsored (`y.js`) and non-public URLs are
+dropped by the PHX-053 admission. Pages are read with httpx and converted to
+text with the standard-library parser (scripts, styles and markup removed,
+block breaks kept). No dependency was added: `ddgs`/`duckduckgo-search` were
+pre-approved, but they impersonate browser TLS fingerprints to avoid bot
+detection and would add several transitive packages to the guarded lock.
+
+Page reading is bounded: public http(s) only, every hop re-admitted and its
+DNS answer required to be globally routable, at most 3 redirects, 1 MB per
+body, text/html or text/plain only, 10 s timeout, 4,000 characters per
+source, 3 sources per call. A page that cannot be read falls back, observably,
+to its search snippet (`page_failures`).
+
+Limitations: the HTML endpoint is unofficial and may change or block
+automated clients; DNS is resolved separately from httpx's connection, so a
+hostile resolver could rebind between them (as for BrowserTool).
+
+## ADR-137 — Research permission is scoped to the search provider (P1)
+
+Status: Proposed (PHX-111)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Decision: `web.research` is a P1 tool (docs/08: web search and page reading
+are "Observe", within a granted scope). Its permission resource is
+`search:<provider_id>` and its reason is the fixed `RESEARCH_TOOL_REASON`.
+Without a matching SESSION or PERSISTENT grant from the user, PermissionEngine
+answers APPROVAL_REQUIRED, nothing is sent, and the mission ends
+`waiting_permission` with the request; approving ("this session" or "always")
+through the existing API stores the grant and re-runs the mission. The user's
+approval therefore covers queries to that provider for the chosen duration and
+can be revoked at `/grants`. The approve route skips its workspace check for
+research requests only (they name no path); `MissionService.approve` still
+admits only document or research scopes (`mission_grants`).
+
+Limitations: the approval card shows the provider, not the query (the query is
+proposed again on the re-run). P1 research calls write no audit rows (INV-007
+covers P3/P4).
+
+## ADR-138 — Prompt set v5 and the `rate_limited` failure code
+
+Status: Proposed (PHX-111; exact prompt text awaits the owner's approval)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Decision:
+
+- `phoenix-prompts-v5` adds `RESEARCH_PLANNING_SYSTEM` (role
+  `research_planner`), `RESEARCH_SPECIALIST_SYSTEM`, `RESEARCH_ANSWER_SYSTEM`,
+  their task texts and step rules, and a `web_research` domain description.
+  Every v4 constant is byte-identical; `PLANNING_SYSTEM` is unchanged and still
+  used when research is disabled, so runs without the flag (including the FYP
+  configurations) see the v4 prompts.
+- A throttled search (HTTP 202/403/418/429 or an anomaly page) fails the
+  mission with the new closed `MissionFailureCode.RATE_LIMITED`
+  (`rate_limited`), with `tool.failed` code `rate_limited` and the research
+  record's `error_code`. MAHORAGA's classifier treats it as final (no
+  immediate retry against a rate limiter); other search failures are
+  `tool_failed`.
+
+## ADR-139 — LEVI checks research citations deterministically
+
+Status: Proposed (PHX-111)
+Date: 2026-10-21
+Ticket: PHX-111
+
+Decision: the answer turn replies with claims, each citing a source URL and a
+quoted span. PHOENIX renders them (claim, title, URL, quote) as the step
+output. LEVI's research responder makes no model call and passes only if all
+checks pass:
+
+1. `research_evidence`: the result correlates with PHOENIX's call and request,
+   was ALLOWED by one of the caller's grants, and succeeded with sources;
+2. `citation_urls`: every cited URL is a fetched source (no fabricated URL);
+3. `citation_quotes`: every quote (at least 12 characters, compared after
+   case, whitespace and typographic-quote normalization) occurs in that
+   source's fetched content;
+4. `claim_numbers`: every number in a claim occurs in one of its quotes;
+5. `rendering`: the candidate equals PHOENIX's rendering of the parsed claims.
+
+After the final answer is verified, PHOENIX appends a deterministic
+`Sources:` list of the cited, fetched sources (title and URL).
+
+Limitations: the checks prove that quotes exist and numbers are quoted, not
+that a claim's wording is entailed by its quote; the final answer's own
+wording is judged by the existing final verifier.

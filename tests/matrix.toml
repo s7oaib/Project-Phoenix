@@ -29,7 +29,7 @@ timeout = 1200
 [[gate]]
 # pyproject.toml is guard-pinned, so scripts/ get their own strict mypy gate.
 id = "mypy-scripts"
-command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py"]
+command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py", "scripts/research_mission_smoke.py"]
 timeout = 600
 
 [[gate]]
@@ -440,6 +440,17 @@ categories = ["unit", "integration", "voice_states", "recovery", "permission_byp
 path = "tests/test_wake_word_provider.py"
 categories = ["unit", "voice_states"]
 # voice_states: test_scoped_cancellation_keeps_unrelated_operation_and_sorted_ids
+
+[[file]]
+path = "tests/test_web_research.py"
+categories = ["unit", "integration", "end_to_end", "tools", "permissions", "permission_bypass", "prompt_injection", "forged_tool_results", "secret_leakage"]
+# PHX-111 DuckDuckGo provider (MockTransport fixtures), page reader, WebResearchTool,
+# LEVI's deterministic citation checks and full research missions (scripted model).
+# end_to_end: test_granted_research_mission_completes_with_cited_answer
+# permission_bypass: test_no_grant_waits_for_permission_and_sends_nothing
+# prompt_injection: test_sources_reach_the_model_only_as_guarded_untrusted_items
+# forged_tool_results: test_fabricated_citation_url_fails_levi
+# secret_leakage: test_granted_research_mission_completes_with_cited_answer (trace/events)
 
 [[file]]
 path = "tests/test_windows_ui_automation.py"

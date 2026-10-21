@@ -83,6 +83,9 @@ from phoenix.security.audit import AuditTrail
 from phoenix.security.permissions import PermissionPolicy
 from phoenix.tools.filesystem import FilesystemTool, filesystem_tool_definitions
 from phoenix.tools.registry import ToolRegistry
+from phoenix.tools.web_research import WebResearchTool, web_research_tool_definitions
+from phoenix.web.duckduckgo import DuckDuckGoSearchProvider
+from phoenix.web.page_fetch import HttpPageFetcher
 
 if sys.platform == "win32":
     import msvcrt
@@ -407,7 +410,19 @@ async def open_services(
             pass  # keep what registered; readiness reports the gap (INV-022)
         lifecycle = ModelLifecycleManager()
         session_factory = create_session_factory(engine)
-        tools = ToolRegistry(filesystem_tool_definitions())
+        # PHX-111: the research declaration is always registered (so a stored
+        # research request can be shown and decided); the tool itself exists
+        # only when web research is enabled.
+        tools = ToolRegistry(
+            (*filesystem_tool_definitions(), *web_research_tool_definitions())
+        )
+        research: WebResearchTool | None = None
+        if settings.web_research_enabled:
+            search = DuckDuckGoSearchProvider()
+            stack.push_async_callback(search.aclose)
+            fetcher = HttpPageFetcher()
+            stack.push_async_callback(fetcher.aclose)
+            research = WebResearchTool(tools, search, fetcher)
         bus = EventBus(capacity=EVENT_BUS_CAPACITY)
         stream = EventStream(
             bus,
@@ -430,6 +445,7 @@ async def open_services(
                 if workspace_root is None
                 else FilesystemTool(workspace_root, tools, policy, audit),
                 events=stream,
+                research_tool=research,
             )
 
         runtime = build_runtime()

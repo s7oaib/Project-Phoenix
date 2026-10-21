@@ -1480,6 +1480,9 @@ def test_source_architecture_and_immutability() -> None:
         "phoenix/tools/registry.py",
         ":(exclude)apps/desktop/src/App.tsx",
         ":(exclude)apps/desktop/src/styles.css",
+        # PHX-111 (ADR-135) adds web_research_enabled; config.py is hash-pinned
+        # (PHX_111_PATHS in test_prompt_injection_defenses.py).
+        ":(exclude)phoenix/core/config.py",
         # PHX-100 (ADR-084) adds these new modules; every file that existed in
         # phoenix/api stays protected.
         ":(exclude)phoenix/api/server.py",

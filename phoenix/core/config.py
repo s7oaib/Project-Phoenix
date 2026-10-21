@@ -26,3 +26,7 @@ class AppSettings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
     data_dir: Path = Field(default_factory=lambda: Path.home() / ".phoenix" / "data")
+    # PHX-111 (ADR-135): offer web research steps (DuckDuckGo). Off until
+    # PHX-108's capability settings own it; every query still needs the user's
+    # grant (PHOENIX_WEB_RESEARCH_ENABLED=true enables it for a launch).
+    web_research_enabled: bool = False
