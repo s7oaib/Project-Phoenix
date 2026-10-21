@@ -1,11 +1,13 @@
-// PHX-107 (ADR-092) + minimal PHX-108: renders App with live ports and a compact connection
-// bar for what App has no port for yet: backend state, the document workspace folder
-// (PATCH /settings), an optional mission-path override of PHX-105 triage, and the active
-// mission's cancel / run-again.
+// PHX-107 (ADR-092) + PHX-108 (ADR-110 to ADR-114): renders App with live ports and a compact
+// connection bar (backend state, the document workspace, this launch's mission path, and the
+// active mission's cancel / run-again). While setup is incomplete, a first-run screen shows the
+// onboarding steps instead of App until the user continues. App's Onboarding, Settings,
+// Computer Control, Research and Media views are supplied from SetupViews.
 
-import { useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useSyncExternalStore } from 'react';
 import App from '../App';
 import { verificationText, type ConnectionView, type MissionPath, type MissionView, type PhoenixStore } from './core';
+import { CapabilityPanel, FirstRunScreen, OnboardingPanel, SettingsPanel } from './SetupViews';
 import './connected.css';
 
 const backendText: Readonly<Record<string, string>> = {
@@ -43,18 +45,9 @@ const missionText: Readonly<Record<string, string>> = {
   waiting_permission: 'waiting for your permission — open Permissions to approve or deny', superseded: 'superseded by a linked re-run',
 };
 
-export function ConnectionBar({ connection, store }: { connection: ConnectionView; store: Pick<PhoenixStore, 'setWorkspace' | 'setPath' | 'missionAction'> }) {
-  const [folder, setFolder] = useState('');
-  const [busy, setBusy] = useState(false);
+export function ConnectionBar({ connection, store }: { connection: ConnectionView; store: Pick<PhoenixStore, 'setPath' | 'missionAction'> }) {
   const { backend, stream, workspace, mission } = connection;
   const ready = backend.state === 'ready';
-
-  async function saveWorkspace(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (busy) return;
-    setBusy(true);
-    try { await store.setWorkspace(folder); } finally { setBusy(false); }
-  }
 
   return (
     <section className="connection-bar" aria-label="Backend connection">
@@ -63,16 +56,12 @@ export function ConnectionBar({ connection, store }: { connection: ConnectionVie
         {ready ? (stream.connected ? ' Live progress connected.' : ' Live progress reconnecting; views reload from the backend.') : ''}
       </p>
       {ready && <>
-        <form className="connection-row" onSubmit={saveWorkspace}>
-          <label htmlFor="workspace-root">Document workspace</label>
-          <span className="connection-value">{workspace?.root ? `${workspace.root} (${workspace.status})` : 'Not set — document steps are off'}</span>
-          <input id="workspace-root" type="text" maxLength={4096} placeholder={'D:\\Documents\\project'} value={folder}
-            aria-describedby="workspace-feedback" onChange={(event) => setFolder(event.currentTarget.value)} />
-          <button type="submit" disabled={busy}>Set folder</button>
-          <span id="workspace-feedback" className="connection-feedback" role="status" aria-live="polite">{connection.workspaceMessage}</span>
-        </form>
+        <p className="connection-row">
+          <span className="connection-label">Document workspace</span>
+          <span className="connection-value">{workspace?.root ? `${workspace.root} (${workspace.status})` : 'Not set — document steps are off'} · change it in Settings</span>
+        </p>
         <div className="connection-row">
-          <label htmlFor="mission-path">Mission path</label>
+          <label htmlFor="mission-path">Mission path (this launch)</label>
           <select id="mission-path" value={connection.path} onChange={(event) => store.setPath(event.currentTarget.value as MissionPath)}>
             <option value="auto">Automatic (PHOENIX decides)</option>
             <option value="direct">Override: direct answer</option>
@@ -91,13 +80,26 @@ export function ConnectionBar({ connection, store }: { connection: ConnectionVie
   );
 }
 
+export const CONNECTED_STATUS = 'Connected to the local PHOENIX backend — live data';
+
 export function ConnectedApp({ store }: { store: PhoenixStore }) {
   const view = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  const connection = view.connection;
+  const firstRun = connection.backend.state === 'ready' && connection.onboarding !== undefined && !connection.onboarding.complete && !connection.onboardingDismissed;
+  const panels = {
+    onboarding: <OnboardingPanel connection={connection} store={store} />,
+    settings: <SettingsPanel connection={connection} store={store} />,
+    computer: <CapabilityPanel view="computer" connection={connection} />,
+    research: <CapabilityPanel view="research" connection={connection} />,
+    media: <CapabilityPanel view="media" connection={connection} />,
+  };
   return (
     <>
-      <ConnectionBar connection={view.connection} store={store} />
-      <App chatPort={view.chatPort} agentPort={view.agentPort} taskPort={view.taskPort} permissionPort={view.permissionPort}
-        modelPort={view.modelPort} observabilityPort={view.observabilityPort} />
+      <ConnectionBar connection={connection} store={store} />
+      {firstRun ? <FirstRunScreen connection={connection} store={store} /> :
+        <App chatPort={view.chatPort} agentPort={view.agentPort} taskPort={view.taskPort} permissionPort={view.permissionPort}
+          modelPort={view.modelPort} observabilityPort={view.observabilityPort} panels={panels}
+          statusLine={connection.backend.state === 'ready' ? CONNECTED_STATUS : 'Local PHOENIX backend not connected'} />}
     </>
   );
 }

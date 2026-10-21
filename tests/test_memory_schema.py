@@ -582,7 +582,7 @@ def test_real_alembic_upgrade_downgrade_reupgrade_lifecycle(tmp_path: Path) -> N
     settings = AppSettings(data_dir=tmp_path, _env_file=None)  # type: ignore[call-arg]
     config = migration_config(settings)
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["0008_mission_triage"]
+    assert scripts.get_heads() == ["0009_default_mission_path"]
     baseline = scripts.get_revision("0001")
     revision = scripts.get_revision("0002_memory_schema")
     assert baseline is not None and baseline.down_revision is None
