@@ -162,6 +162,11 @@ categories = ["unit", "integration"]
 # (real BenchmarkRunner + ModelLifecycleManager driving a fake Colibri provider)
 
 [[file]]
+path = "tests/test_phoenix_control_smoke.py"
+categories = ["unit"]
+# PHX-124 control smoke releases its audit DB before temp cleanup (Windows WinError 32)
+
+[[file]]
 path = "tests/test_computer_control_steps.py"
 categories = ["integration", "end_to_end", "permissions", "tools", "prompt_injection", "permission_bypass", "command_argument_injection", "forged_tool_results"]
 # PHX-112 computer-control missions (real runtime, ToolRegistry/PermissionEngine, real Browser/

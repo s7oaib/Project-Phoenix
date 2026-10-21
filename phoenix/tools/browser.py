@@ -932,16 +932,18 @@ class BrowserTool:
             session = _Session(
                 call.session_id, runtime, browser, context, page, redirects
             )
-            context.route("**/*", session.route)
-            redirects.on("Fetch.requestPaused", session.response)
+            # Playwright caches handler wrappers as attributes on a bound
+            # method's instance; slotted _Session cannot take them (PHX-124).
+            context.route("**/*", lambda route: session.route(route))
+            redirects.on("Fetch.requestPaused", lambda e: session.response(e))
             redirects.send(
                 "Fetch.enable",
                 {"patterns": [{"urlPattern": "*", "requestStage": "Response"}]},
             )
-            context.on("page", session.new_page)
-            browser.on("disconnected", session.crashed)
-            page.on("download", session.detected_download)
-            page.on("crash", session.crashed)
+            context.on("page", lambda p: session.new_page(p))
+            browser.on("disconnected", lambda b: session.crashed(b))
+            page.on("download", lambda d: session.detected_download(d))
+            page.on("crash", lambda p: session.crashed(p))
             object.__setattr__(self, "_session", session)
         except Exception:
             _cleanup(context, browser, runtime)

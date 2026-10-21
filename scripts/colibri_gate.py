@@ -34,7 +34,7 @@ import platform
 import statistics
 import sys
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -60,8 +60,14 @@ from phoenix.models.benchmark import (  # noqa: E402
 )
 from phoenix.models.lifecycle import ModelLifecycleManager  # noqa: E402
 from phoenix.models.provider import (  # noqa: E402
+    CancellationResult,
+    GenerationChunk,
+    GenerationRequest,
+    GenerationResponse,
+    ModelCapabilities,
     ModelProvider,
     ModelProviderError,
+    ProviderHealth,
     ProviderHealthStatus,
 )
 
@@ -206,6 +212,63 @@ def shard_files(model_dir: Path) -> list[Path]:
 
 ProviderFactory = Callable[[], AbstractAsyncContextManager[ModelProvider]]
 ProcessIo = Callable[[], dict[str, int] | None]
+TokenCounter = Callable[[str], int]
+
+
+def load_token_counter(model_dir: Path) -> TokenCounter | None:
+    """The served model's own tokenizer.json, read locally (no download).
+
+    Colibri's API reports no output-token usage, so throughput re-tokenizes the
+    streamed answer text (ADR-190). None means throughput is not measured.
+    """
+    path = model_dir / "tokenizer.json"
+    if not path.is_file():
+        return None
+    try:
+        from tokenizers import Tokenizer
+
+        tokenizer = Tokenizer.from_file(str(path))
+    except Exception:
+        return None
+    return lambda text: len(tokenizer.encode(text, add_special_tokens=False).ids)
+
+
+class CountingProvider(ModelProvider):
+    """Delegates unchanged; counts each operation's streamed text in memory.
+
+    Only the per-operation token count is kept; the text itself is dropped
+    (ADR-029). Tokens never streamed (hidden reasoning, special tokens) are not
+    counted, so the derived throughput is a lower bound.
+    """
+
+    def __init__(self, inner: ModelProvider, count: TokenCounter) -> None:
+        super().__init__(inner.provider_id)
+        self._inner, self._count = inner, count
+        self.output_tokens: dict[str, int] = {}
+
+    async def health(self) -> ProviderHealth:
+        return await self._inner.health()
+
+    async def capabilities(self, model_id: str) -> ModelCapabilities:
+        return await self._inner.capabilities(model_id)
+
+    async def generate(self, request: GenerationRequest) -> GenerationResponse:
+        response = await self._inner.generate(request)
+        self.output_tokens[request.operation_id] = self._count(response.text)
+        return response
+
+    async def stream(
+        self, request: GenerationRequest
+    ) -> AsyncIterator[GenerationChunk]:
+        parts: list[str] = []
+        async for chunk in self._inner.stream(request):
+            parts.append(chunk.text)
+            if chunk.is_final:
+                self.output_tokens[request.operation_id] = self._count("".join(parts))
+            yield chunk
+
+    async def cancel(self, operation_id: str) -> CancellationResult:
+        return await self._inner.cancel(operation_id)
 
 
 def engine_process_io() -> dict[str, int] | None:
@@ -235,16 +298,22 @@ async def live_run(
     tasks: Path,
     process_io: ProcessIo,
     resource_probe: ResourceProbe | None = None,
-) -> tuple[dict[str, Any], BenchmarkReport | None]:
+    counter: TokenCounter | None = None,
+) -> tuple[dict[str, Any], BenchmarkReport | None, dict[str, int]]:
     suite, _ = baseline.load_task_set(tasks)
-    async with provider_factory() as provider:
+    counted: dict[str, int] = {}
+    async with provider_factory() as served:
+        provider = served
+        if counter is not None:
+            provider = CountingProvider(served, counter)
+            counted = provider.output_tokens
         health = await provider.health()
         if health.status != ProviderHealthStatus.HEALTHY:
-            return {"endpoint": health.status.value, "refused": True}, None
+            return {"endpoint": health.status.value, "refused": True}, None, counted
         try:
             await provider.capabilities(model_id)
         except ModelProviderError:
-            return {"endpoint": "model_not_served", "refused": True}, None
+            return {"endpoint": "model_not_served", "refused": True}, None, counted
         before = await asyncio.to_thread(process_io)
         started = time.perf_counter()
         report = await BenchmarkRunner(
@@ -261,25 +330,34 @@ async def live_run(
             "rss_bytes_after": after["rss_bytes"],
             "processes": after["processes"],
         }
-    return {"endpoint": "healthy", "refused": False, "engine": engine}, report
+    return {"endpoint": "healthy", "refused": False, "engine": engine}, report, counted
 
 
-def live_metrics(report: BenchmarkReport) -> dict[str, Any]:
+def live_metrics(
+    report: BenchmarkReport, counted: Mapping[str, int] | None = None
+) -> dict[str, Any]:
     """Gate figures from measured trials only (warm-ups stay diagnostic).
 
     Throughput is output tokens / whole latency per successful trial: the
     harness tokens_per_second excludes hidden reasoning time (ADR-079).
+    Provider-reported output tokens win; otherwise the gate's own tokenizer
+    re-count of the streamed text is used (ADR-190). Neither: not measured.
     """
     measured = [t for t in report.trials if t.kind is TrialKind.MEASURED]
     ok = [t for t in measured if t.status is TrialStatus.SUCCESS]
-    rates = [
-        t.usage.output_tokens / (t.latency_ms / 1000)
-        for t in ok
-        if t.usage is not None
-        and t.usage.output_tokens
-        and t.latency_ms is not None
-        and t.latency_ms > 0
-    ]
+    rates: list[float] = []
+    methods: set[str] = set()
+    for t in ok:
+        if t.latency_ms is None or t.latency_ms <= 0:
+            continue
+        if t.usage is not None and t.usage.output_tokens:
+            tokens, method = t.usage.output_tokens, "provider_usage"
+        elif (counted or {}).get(t.operation_id):
+            tokens, method = (counted or {})[t.operation_id], "tokenizer_recount"
+        else:
+            continue
+        rates.append(tokens / (t.latency_ms / 1000))
+        methods.add(method)
     ram = [
         t.resources.max_observed_ram_used_bytes
         for t in measured
@@ -304,9 +382,17 @@ def live_metrics(report: BenchmarkReport) -> dict[str, Any]:
         "tokens_per_second_median": round(statistics.median(rates), 2)
         if rates
         else None,
+        "throughput_method": "+".join(sorted(methods)) or None,
+        "throughput_trials": len(rates),
         "max_ram_used_bytes": max(ram) if ram else None,
+        # nvidia-smi memory.used is device-wide, sampled at each trial's two
+        # boundaries (bounded to 1 s each, so a busy host can drop samples).
         "max_gpu_used_mib": peak_gpu.max_observed_used_mib if peak_gpu else None,
         "gpu_total_mib": peak_gpu.total_mib if peak_gpu else None,
+        "gpu_samples": sum(g.samples for g in gpus if g.index == peak_gpu.index)
+        if peak_gpu
+        else 0,
+        "gpu_samples_expected": 2 * len(measured),
         "system_disk_read_bytes": sum(disk) if disk else None,
         "failures": sorted({t.failure.value for t in measured if t.failure}),
     }
@@ -414,6 +500,25 @@ def write_summary(results: dict[str, Any], path: Path) -> None:
             f"({engine['read_mb_per_s_avg']} MB/s average); engine RSS after "
             f"{engine['rss_bytes_after'] / GIB:.2f} GiB."
         )
+    live = results.get("live") or {}
+    if live.get("max_gpu_used_mib") is not None:
+        lines.append(
+            f"- VRAM: nvidia-smi device-wide peak {live['max_gpu_used_mib']} MiB in "
+            f"{live['gpu_samples']}/{live['gpu_samples_expected']} trial-boundary "
+            "samples (not per-process attribution)."
+            + (
+                " 0 MiB means the engine held no GPU memory (CPU-only run)."
+                if live["max_gpu_used_mib"] == 0
+                else ""
+            )
+        )
+    if live:
+        lines.append(
+            f"- Throughput method: {live.get('throughput_method') or 'NOT MEASURED'} "
+            f"({live.get('throughput_trials', 0)} trials; tokenizer_recount re-encodes "
+            "the streamed text with the model's tokenizer.json, a lower bound; "
+            "ADR-190)."
+        )
     lines += [
         "",
         "| Criterion | Status | Value | Threshold |",
@@ -494,7 +599,7 @@ def main(
     report = None
     if args.live:
         factory = provider_factory or (lambda: _colibri(args.base_url))
-        endpoint, report = asyncio.run(
+        endpoint, report, counted = asyncio.run(
             live_run(
                 factory,
                 args.model_id,
@@ -502,6 +607,7 @@ def main(
                 args.tasks,
                 process_io or engine_process_io,
                 resource_probe,
+                load_token_counter(args.model_dir),
             )
         )
         if endpoint["refused"]:
@@ -512,7 +618,7 @@ def main(
             )
             return 2
         assert report is not None
-        live = live_metrics(report)
+        live = live_metrics(report, counted)
     verdict, criteria = evaluate(facts, live, io, limits)
     if manifest is not None and not manifest["ok"]:
         verdict = "FAIL"
