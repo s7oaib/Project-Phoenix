@@ -6548,3 +6548,48 @@ both behaviours are kept:
 - **Pins.** Protected paths whose merged content matches no earlier pin move to
   `PHX_TRAIN_COMMIT`/`PHX_TRAIN_PATHS` at the train's resolution commit (two
   commits: resolution, then pin), and leave their older blocks.
+
+## ADR-166 — PHX-121 combined planner for mixed capability families
+
+Status: Proposed (the owner approves the v6 prompt text before merge)
+Date: 2026-10-22
+Ticket: PHX-121
+
+Under ADR-160/ADR-165 one planner was picked by precedence (research, else
+capability, else control, else v4), so with the backend's always-wired
+capability tools AIZEN never planned computer-control steps, and with web
+research on it never planned document writes or media.
+
+- **Selection rule.** Per mission, from its allowed domains (knowledge_rag
+  counts only while something is indexed): the capability families are
+  `documents`, `knowledge_rag`, `web_research`, `media` and
+  `computer_control`. When more than one is allowed, AIZEN plans with the
+  `phoenix-prompts-v6` `COMBINED_PLANNING_SYSTEM`; otherwise the ADR-160/165
+  order is unchanged (research planner, capability planner, control planner,
+  v4 planner). The text domains are not families.
+- **Domain list from enabled capabilities.** The combined prompt's step list
+  is "reasoning and writing text alone" plus one `COMBINED_PLANNING_LINES`
+  line per enabled capability, in a fixed order: workspace reads (filesystem
+  tool), document read and create (PHX-113 document tool), knowledge lookup,
+  web research, each configured media service (Spotify, YouTube) and each
+  configured control tool kind (browser, windows, screen, terminal). Nothing
+  is said about a disabled capability. Lines are PHOENIX constants with no
+  braces; model text never selects them.
+- **Safety rules kept.** Only listed kinds of step, no unlisted tool, service
+  or operation names, exactly one kind of action per step, actions that cannot
+  be undone only when the user explicitly asked, never a step that grants or
+  approves a permission, no file changes or deletions, no final answer step.
+  The prompt confers no authority: assignment, ToolRegistry, PermissionEngine,
+  caller-only grants and one-time P4 approvals are unchanged.
+- **Per-family planners kept, not retired.** Single-family setups (the FYP
+  evaluation configurations use the filesystem tool only) keep their
+  owner-approved v5 or control-v1 planners byte-identical, so their measured
+  behaviour does not move. Retiring them would change every single-family
+  configuration for no functional gain.
+- **Prompt version.** `PROMPT_SET_VERSION` becomes `phoenix-prompts-v6`; v6
+  only adds `COMBINED_PLANNING_SYSTEM` and `COMBINED_PLANNING_LINES`. Every v5
+  constant is unchanged and hash-pinned. Runs record the new version string
+  even when they use only v5 texts.
+- **Backend.** No server change: the backend wires capability tools (YouTube,
+  documents with a workspace) and the browser/Windows control runner, so the
+  desktop backend now plans with the combined planner.

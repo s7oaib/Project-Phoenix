@@ -39,7 +39,8 @@ from phoenix.agents.capability_steps import (
     capability_grants,
 )
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
-from phoenix.agents.responders import ResponderErrorCode
+from phoenix.agents.responders import ModelBinding, ResponderErrorCode
+from phoenix.agents.router import RoutingDomain
 from phoenix.agents.runtime import (
     DOCUMENT_TOOL_REASON,
     MissionFailureCode,
@@ -1234,6 +1235,80 @@ def test_capability_missions_use_the_v5_capability_planner(stack: Stack) -> None
     assert prompts.DOMAIN_DESCRIPTIONS["documents"] not in assignment
 
 
+def planner_system(runtime: PhoenixRuntime, *extra: RoutingDomain) -> str:
+    """The planner system prompt this runtime picks for its domains (+ extra)."""
+    responder = runtime._planning_responder(
+        cast(ModelBinding, None), (*runtime._domains, *extra), 4
+    )
+    return str(cast(Any, responder).SYSTEM.format(max_steps=4))
+
+
+LINES = prompts.COMBINED_PLANNING_LINES
+
+
+@pytest.mark.parametrize(
+    ("options", "extra", "listed"),
+    [
+        # One family: the v5 capability planner, unchanged.
+        ({}, (), None),
+        ({"filesystem": True}, (), None),
+        # Two or more families: the v6 combined planner, enabled lines only.
+        (
+            {"media": True},
+            (),
+            {"read_document", "create_document", "spotify", "youtube"},
+        ),
+        (
+            {"media": True, "filesystem": True},
+            (),
+            {"documents", "read_document", "create_document", "spotify", "youtube"},
+        ),
+        (
+            {"documents": False, "media": True},
+            (RoutingDomain.KNOWLEDGE_RAG,),
+            {"knowledge_rag", "spotify", "youtube"},
+        ),
+        (
+            {},
+            (RoutingDomain.KNOWLEDGE_RAG,),
+            {"read_document", "create_document", "knowledge_rag"},
+        ),
+    ],
+)
+def test_planner_choice_per_capability_configuration(
+    stack: Stack,
+    options: dict[str, bool],
+    extra: tuple[RoutingDomain, ...],
+    listed: set[str] | None,
+) -> None:
+    # PHX-121 (ADR-166): more than one capability family -> combined planner.
+    system = planner_system(stack.runtime(**options), *extra)
+    if listed is None:
+        assert system == prompts.CAPABILITY_PLANNING_SYSTEM.format(max_steps=4)
+        return
+    lines = "\n".join(line for key, line in LINES.items() if key in listed)
+    assert system == prompts.COMBINED_PLANNING_SYSTEM.format(
+        max_steps=4, capabilities=lines
+    )
+    for key, line in LINES.items():
+        assert (line in system) == (key in listed), key
+    # No claim about a disabled capability or family.
+    if "spotify" not in listed:
+        assert "Spotify" not in system
+
+
+def test_media_missions_plan_with_the_combined_planner(stack: Stack) -> None:
+    # Documents and media are two families: the mission's planner turn sees the
+    # v6 combined planner, and the mission still completes as before.
+    result = mission(stack, (stack.document_grant(),), media=True)
+    assert result.kind is MissionKind.COMPLETED
+    system = stack.provider.system("planner")
+    assert system.startswith(
+        prompts.COMBINED_PLANNING_SYSTEM.split("{capabilities}")[0].format(max_steps=4)
+    )
+    assert LINES["youtube"] in system and LINES["web_research"] not in system
+
+
 def test_capability_steps_are_opt_in(stack: Stack) -> None:
     # Without capabilities the PHX-046 runtime is unchanged.
     store = ModelCapabilityRegistry()
@@ -1426,8 +1501,9 @@ def test_document_tool_requires_canonical_registry(stack: Stack) -> None:
 
 
 def test_capability_prompts_are_part_of_v5() -> None:
-    # PHX-120 (ADR-160): the approved draft moved verbatim into prompts.py.
-    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v5"
+    # PHX-120 (ADR-160): the approved draft moved verbatim into prompts.py
+    # (unchanged in PHX-121's v6, hash-pinned in test_phoenix_runtime.py).
+    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v6"
     for name in (
         "DOCUMENT_CAPABILITY_SYSTEM",
         "DOCUMENT_CAPABILITY_ANSWER_SYSTEM",

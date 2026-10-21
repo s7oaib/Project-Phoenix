@@ -64,6 +64,8 @@ PHX-112 (ADR-150): with an optional ControlStepRunner, computer_control steps
 run permissioned browser, Windows UI, screenshot and terminal actions (see
 control_steps), with control grants and exact P4 approvals from the caller
 only. cancel() trips the mission's kill switch before it cancels the task.
+PHX-121 (ADR-166): a mission whose allowed domains span more than one
+capability family plans with the phoenix-prompts-v6 combined planner instead.
 
 Task state is task-level: intermediate step verification runs while RUNNING, and
 VERIFYING is the final-answer verification phase. Callers refresh capability
@@ -95,6 +97,11 @@ from phoenix.agents.capability_steps import (
     CapabilityCallRecord,
     CapabilityStepRunner,
     CapabilityTools,
+)
+from phoenix.agents.combined_planning import (
+    CombinedPlanningResponder,
+    capability_lines,
+    combined,
 )
 from phoenix.agents.control_steps import (
     CONTROL_ACTOR_ID,
@@ -155,7 +162,12 @@ from phoenix.agents.orchestrator import (
     PhoenixRequest,
     PhoenixResultKind,
 )
-from phoenix.agents.planner import AizenPlan, AizenPlanner, PlanningRequest
+from phoenix.agents.planner import (
+    AizenPlan,
+    AizenPlanner,
+    PlanningRequest,
+    PlanningResponder,
+)
 from phoenix.agents.recovery import (
     MahoragaRecovery,
     MahoragaRecoveryError,
@@ -736,7 +748,17 @@ class PhoenixRuntime:
             self._domains = (*self._domains, RoutingDomain.WEB_RESEARCH)
         # PHX-113 (ADR-140): opt-in media and document steps.
         self._capabilities: CapabilityStepRunner | None = None
+        # PHX-121: the media services the combined planner may list.
+        self._media_services: tuple[str, ...] = ()
         if capabilities is not None:
+            self._media_services = tuple(
+                name
+                for name, tool in (
+                    ("spotify", capabilities.spotify),
+                    ("youtube", capabilities.youtube),
+                )
+                if tool is not None
+            )
             self._capabilities = CapabilityStepRunner(
                 capabilities,
                 self._guard,
@@ -799,6 +821,49 @@ class PhoenixRuntime:
     def dropped_events(self) -> int:
         """Events the sink refused or that failed the allowlist (INV-022)."""
         return self._events.dropped
+
+    def _planning_responder(
+        self,
+        binding: ModelBinding,
+        domains: tuple[RoutingDomain, ...],
+        max_steps: int,
+    ) -> PlanningResponder:
+        """AIZEN's planner for this mission's allowed domains.
+
+        PHX-121 (ADR-166): more than one capability family plans with the v6
+        combined planner, listing only the enabled capabilities. Otherwise, as
+        before: PHX-111 research_planner with the tool; PHX-120 (ADR-160) the
+        capability planner with PHX-113 capability steps; PHX-112 the control
+        planner, which replaces the v4 planner; else the v4 planner.
+        """
+        control = self._control_steps
+        if combined(domains):
+            keys: list[str] = []
+            if RoutingDomain.DOCUMENTS in domains:
+                if self._documents is not None:
+                    keys.append("documents")
+                if self._capabilities is not None and self._capabilities.handles(
+                    RoutingDomain.DOCUMENTS
+                ):
+                    keys += ["read_document", "create_document"]
+            if RoutingDomain.KNOWLEDGE_RAG in domains:
+                keys.append("knowledge_rag")
+            if RoutingDomain.WEB_RESEARCH in domains:
+                keys.append("web_research")
+            if RoutingDomain.MEDIA in domains:
+                keys += self._media_services
+            if RoutingDomain.COMPUTER_CONTROL in domains and control is not None:
+                keys += control.tool_kinds
+            return CombinedPlanningResponder(
+                binding, max_steps=max_steps, capabilities=capability_lines(keys)
+            )
+        if self._research is not None:
+            return ResearchPlanningResponder(binding, max_steps=max_steps)
+        if self._capabilities is not None:
+            return CapabilityPlanningResponder(binding, max_steps=max_steps)
+        if control is not None:
+            return control.planning_responder(binding, max_steps=max_steps)
+        return ModelPlanningResponder(binding, max_steps=max_steps)
 
     def _bind_loop(self) -> None:
         loop = asyncio.get_running_loop()
@@ -1487,22 +1552,8 @@ class PhoenixRuntime:
                         binding=self._control("strategist", health, evidence),
                         attempt=lambda binding: self._planner.plan(
                             planning,
-                            # PHX-111: research_planner only with the tool;
-                            # PHX-120 (ADR-160): else the capability planner
-                            # with PHX-113 capability steps; PHX-112: else the
-                            # control planner, which replaces the v4 planner.
-                            responder=(
-                                ResearchPlanningResponder
-                                if self._research is not None
-                                else CapabilityPlanningResponder
-                                if self._capabilities is not None
-                                else ModelPlanningResponder
-                            )(binding, max_steps=limits.max_plan_steps)
-                            if steps_runner is None
-                            or self._research is not None
-                            or self._capabilities is not None
-                            else steps_runner.planning_responder(
-                                binding, max_steps=limits.max_plan_steps
+                            responder=self._planning_responder(
+                                binding, domains, limits.max_plan_steps
                             ),
                         ),
                     )
