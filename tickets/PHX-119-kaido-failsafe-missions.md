@@ -170,4 +170,9 @@ New `tests/test_kaido_missions.py` (unit, integration, recovery, api_contract, s
 
 ## Completion evidence
 
-See the final report on the branch (commands and results are recorded in the commit message of the implementation commit).
+- Implementation commit `5a49797`; pin commit `da294a6` (`PHX_119_COMMIT`).
+- `uv run pytest tests/test_kaido_missions.py`: 44 passed.
+- Impacted suites (API, server, security, events, WS, mission events and service, MAHORAGA, runtime, triage, e2e, REST, FYP runners, prompt-injection pins): pass.
+- `uv run python scripts/test_matrix.py` on `da294a6` (clean tree): PASS. Every gate passed: uv-sync, ruff check and format, mypy, mypy-scripts, pytest (16,419 tests, 0 failures, 0 errors, 30 skipped), npm-test, typecheck, frontend-build, tauri-info, cargo-check, cargo-test, uv-build. No test timed out under load.
+- INV-008/009/010/021/022/023 reviewed: KAIDO is degraded only, never verified, bounded to one reply, explicit on failure, observable, and holds one lease.
+- No new dependencies, event types or migrations. No tool or permission path is used in KAIDO mode.
