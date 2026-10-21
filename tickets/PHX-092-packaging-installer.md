@@ -122,6 +122,14 @@ picked up from `uv.lock` automatically. ADR numbers 125–129.
   install folder; removed only with the opt-in box), which the test then deleted
   with the temp folders.
 
+- Matrix on the clean pin commit `b1283fc`: `uv run python scripts/test_matrix.py` →
+  PASS, all 13 gates (pytest 16,367 passed / 30 skipped; npm 196 passed; cargo check and test,
+  typecheck, frontend build, tauri info, uv build). The first run
+  failed once in `tests/test_fyp_multi_agent.py::test_output_schema_privacy_and_metric_coverage`,
+  a pre-existing random flake unrelated to PHX-092 (a 4-digit scripted answer, `2397`,
+  appeared inside a random UUID in the results file); it passed 3/3 alone and the
+  whole matrix passed on rerun.
+
 ## Acceptance
 
 - Installer builds locally and in CI: PASS locally; CI job added (runs after push).
