@@ -4753,7 +4753,7 @@ Decision:
   `phoenix/api/routes/system.py`, `phoenix/persistence/settings.py`,
   `apps/desktop/src-tauri/src/proxy.rs`, `apps/desktop/src/adapters/core.ts`,
   `ConnectedApp.tsx` and `connected.css` move to `PHX_108_COMMIT` /
-  `PHX_108_PATHS`, landed as an implementation commit then a pin commit; the PR
+  `PHX_108_PATHS` (`f70b201a42338cc3c38c2159d2b2ee5d1c84e416`), landed as an implementation commit then a pin commit; the PR
   must merge with a merge commit. The two `git diff origin/main` guards
   exclude the five new files.
 
