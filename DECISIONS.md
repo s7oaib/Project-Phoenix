@@ -4683,6 +4683,7 @@ Every answer that is not eligible goes to the unchanged final_verifier model.
 `runtime.py` and `final_grounding.py` move to the PHX-118b pin
 (`PHX_118B_COMMIT` / `PHX_118B_PATHS`, replacing `PHX_118_*`), in a separate
 pin commit. No prompt, event, migration or API change.
+
 ## ADR-105 — faster-whisper for wake spotting and transcription on the CPU
 
 Status: Accepted (owner decision 2026-10-21; versions, constraint and model
@@ -4855,199 +4856,6 @@ Ticket: PHX-114
   generic synthetic voice that imitates no character or voice actor, built from
   a public-domain dataset. This is a declaration, not proof of rights (PHX-063).
 
-## ADR-150 — Computer-control steps in PHOENIX missions
-
-Status: Accepted (owner decisions relayed for PHX-112 on 2026-10-21; the
-control prompts of ADR-152 approved by the owner the same day)
-Date: 2026-10-21
-Ticket: PHX-112
-
-PHX-050–052 and PHX-044 built the browser, Windows UI, screenshot/vision and
-terminal tools, but no mission could use them. ADR numbers 150–154 are reserved
-for PHX-112 (parallel tickets hold other ranges).
-
-Decision:
-
-- **A new step kind, owned by `computer_control` (KAKASHI).** A runtime built
-  with a `ControlStepRunner` (new `phoenix/agents/control_steps.py`) allowlists
-  the `computer_control` routing domain; without one nothing changes. The
-  runtime hook is additive: an optional constructor argument, an optional
-  `approvals` argument on `run()`, a `control_calls` trace field (IDs, codes,
-  hashes only) and a dispatch branch next to the document step.
-- **The model only proposes.** One `control_request` of at most four actions
-  per step. PHOENIX builds every call and `PermissionRequest` itself: it opens
-  and closes its own browser session (fixed session ID), uses the page URL the
-  browser actually reached (never a model URL) for later page actions, and
-  resolves a window title through one permissioned `list_windows` call, so the
-  model never supplies session IDs, window handles, process IDs or classes.
-- **PermissionEngine decides every action (INV-004).** PHOENIX first
-  pre-checks, with its own engine snapshot, every action whose resource is
-  already known; the first that needs approval ends the mission
-  `waiting_permission` before any effect. Each tool then decides again with its
-  own engine and writes the P3/P4 audit rows itself (INV-007). P0 and P5 are
-  rejected before any call (INV-006). Risk levels are the tools' canonical
-  ones (see `docs/08_PERMISSION_MATRIX.md`).
-- **LEVI checks the evidence first.** Every action must correlate with the
-  PHOENIX-issued call and request, be ALLOWED by a caller grant, PHOENIX's
-  teardown rule or the user's P4 decision, have succeeded, and carry both
-  audit IDs when P3/P4; only then does the grounded model check run (INV-008).
-- **One worker thread.** All tool calls run on the runner's single worker
-  thread, in order. Playwright's synchronous API stays on one thread, and a
-  hung call delays only later control actions (bounded by tool timeouts).
-- **PHOENIX's own browser.** BrowserTool already launches Playwright's bundled
-  Chromium with a fresh in-memory context: an isolated profile, never the
-  owner's Chrome/Edge profile. The Chromium binary lives in the PHOENIX-owned
-  folder `D:\Phoenix\browsers` (`PHOENIX_BROWSERS_PATH` overrides it), set for
-  the process by `phoenix/tools/browser_setup.py` and installed only by the
-  explicit, owner-run `scripts/install_control_browser.py --install`. Nothing
-  downloads at runtime; end users get the browser only through that step.
-- **Vision is advisory.** A screenshot step captures one resolved window (P1)
-  and asks the vision service one bounded question under the heavy-generation
-  lease (INV-023); only its text summary is rendered, never the frame.
-
-Limitations: control steps publish no `tool.*`/`permission.requested` events
-(the PHX-103 allowlist names filesystem tools only; extending it belongs to
-PHX-115); the step runs at most four actions per proposal and cannot observe a
-page before choosing its next action within one step; the backend composition
-root enables browser and Windows UI control steps only (ADR-152). No new
-dependencies, migrations, event types or API routes.
-
-## ADR-151 — Control approvals in the approve → re-run loop
-
-Status: Accepted (PHX-112, 2026-10-21)
-Date: 2026-10-21
-Ticket: PHX-112
-
-There is no mid-mission resume (ADR-082): approving a request supersedes the
-waiting mission and queues a linked re-run, which issues new requests. A P2/P3
-grant can match a new request; a P4 action has no grant form (PermissionGrant
-allows P1–P3 only) and needs an explicit decision tied to one request.
-
-Decision:
-
-- **P1/P2:** the user's choice, a SESSION ("this session") or PERSISTENT
-  ("always") grant, as for documents.
-- **P3:** SESSION only; "always" is refused (PermissionEngine never matches a
-  persistent P3 grant, so storing one would only mislead).
-- **P4:** one explicit `UserPermissionDecision` on the exact stored request,
-  kept in the mission service's memory for the one linked re-run
-  (`MissionStore.approve_once` marks the request approved and queues the
-  re-run; no grant row). The re-run reuses that exact request when it proposes
-  the same action, so the decision correlates; any other action asks again. It
-  is used at most once, whatever duration the user picked (never broader than
-  asked), and a restart drops it with the interrupted re-run (fail-closed).
-- **At most one P4 action per mission.** A re-run repeats earlier actions, so
-  a second P4 would either loop forever or repeat the first effect; it is
-  rejected (`tool_rejected`) instead.
-- **Display-only approval summary (amended after review).** The stored
-  request names a window by handle/process/class and fill/set_text text by
-  hash only, and a window title can be spoofed by any program. When a control
-  request needs approval, PHOENIX records an `ApprovalSummary` built from the
-  call it issued and what it observed: the action in words, the page URL the
-  browser reached and the element selector, or the listed window title plus
-  the real process name, executable path and PID (`psutil`, read-only), the
-  terminal profile and arguments, and the exact text to be typed. Text that
-  looks like a password, key or token (known prefixes, password-shaped or long
-  token-shaped words; the heuristic errs toward hiding) is masked as
-  `[hidden: N characters]` with a note. `GET /permissions`,
-  `GET /permissions/{id}` and the mission detail return it as `summary` next to
-  the raw request. It is display only: approve and deny still take only the
-  request ID and duration, the grant or P4 decision binds to the stored
-  request's exact tool, action and resource, and the summary is never read by
-  PermissionEngine, the runner's correlation or the API's approval path; a
-  summary whose tool differs from the stored request's is not shown. Summaries
-  live in the runner's memory only (at most 256, so the typed text never
-  reaches the database); after a restart a pending request shows its raw
-  resource only.
-- **No workspace check for control requests.** The approve route's
-  `workspace_changed` check applies to document requests only; a control
-  request names no workspace path. MissionService still refuses any request
-  outside the canonical control scope.
-- One control step runs at a time, and a P3 action may not precede a deferred
-  P4 page action in one proposal (a re-run would repeat the P3 effect).
-- Stored grants pass to a run through `control_grants` only when the run's
-  runtime has control steps; grants, approvals and decisions never come from
-  model text (INV-003).
-
-## ADR-152 — The control prompts are a separate set; the backend enables control
-
-Status: Accepted (amended 2026-10-21: the owner approved the prompt texts)
-Date: 2026-10-21
-Ticket: PHX-112
-
-The approved `phoenix-prompts-v4` planner prompt forbids tool use other than
-workspace reads, and the assignment prompt describes only the existing domains,
-so control steps need new text. Parallel tickets edit `prompts.py`.
-
-Decision: the new texts live in `phoenix/agents/control_prompts.py` (planner
-variant, the `computer_control` domain description, specialist, answer and
-verifier prompts, step contract strings), hash-pinned in
-`tests/test_computer_control_steps.py`. `prompts.py` stays byte-identical; the
-runner swaps in the control planner and assignment responders only when it is
-configured. They were drafted as `phoenix-control-prompts-v1-draft`; the owner
-approved them unchanged on 2026-10-21, so the set is now
-`phoenix-control-prompts-v1` (only the version string changed).
-
-Amendment (enabling): the backend composition root (`phoenix/api/server.py`)
-now builds one `ControlStepRunner`, shared by every runtime it builds (the
-startup runtime and each workspace runtime), over PHOENIX's own isolated
-browser and the Windows UI tool. The one ToolRegistry holds the filesystem and
-the canonical control definitions; the policy is `control_permission_policy()`
-(its only rule is the browser teardown); Playwright is pointed at the
-PHOENIX-owned browser folder for the backend's lifetime (nothing downloads; a
-missing Chromium fails the action explicitly). The screenshot/vision and
-terminal control tools are not wired: they need a vision model binding and an
-owner-chosen terminal root and profile set. The PHX-108 capability flag
-`computer_control` is now enabled. The runner's worker is shut down with the
-backend.
-
-## ADR-153 — Kill switch and PHOENIX's browser teardown
-
-Status: Accepted (PHX-112, 2026-10-21)
-Date: 2026-10-21
-Ticket: PHX-112
-
-The control tools are synchronous and declare no cancellation: an in-flight
-Playwright, UI Automation or child-process call cannot be pre-empted from
-outside without changing the frozen tools.
-
-Decision:
-
-- **Kill switch.** Each mission has a `ControlKillSwitch`. `PhoenixRuntime.cancel`
-  (and so the mission service's cancel and shutdown) trips it before cancelling
-  the task. The mission ends `cancelled` at once; no further control action
-  starts (the worker checks the switch right before each call); the in-flight
-  call finishes on its tool's own timeout (browser 30 s, Windows UI 10 s,
-  terminal profile ≤ 300 s), and its result is discarded, never shown to a
-  model.
-- **Teardown.** After a cancel, the browser session close is queued behind the
-  in-flight call on the same worker. Closing PHOENIX's own session is allowed
-  by the one standing policy rule `phx-112.browser-teardown` (P2
-  `browser.session_close`, fixed session resource) from
-  `control_permission_policy()`: teardown removes capability and has no
-  external effect, so it never waits for a user. It still goes through
-  PermissionEngine (MATCHING_POLICY). Opening the session needs a user grant.
-
-Limitations: a terminal child process or a hung UI Automation call runs until
-its own timeout after a cancel; real pre-emption needs tool-level cancellation
-(a later ticket).
-
-## ADR-154 — Page and screen content stay untrusted data
-
-Status: Accepted (PHX-112, 2026-10-21)
-Date: 2026-10-21
-Ticket: PHX-112
-
-Decision: page text, element text, window and control text, vision summaries
-and command output reach models only as one guarded `TOOL_OUTPUT` item
-(INV-017), the same item for the answer turn and LEVI's model check; system
-prompts and the text outside the guarded block never contain them. The answer
-turn cannot act: a reply that repeats an injected action is plain model text,
-fails LEVI's plain-text check and runs nothing. Window-title resolution never
-renders the window list (other windows' titles stay private); a screenshot
-frame is never rendered or traced, only the advisory vision text; traces keep
-IDs, statuses, codes, hashes and lengths only. Password and file inputs stay
-blocked by the tools themselves.
 ## ADR-110 — Tier models register whenever their provider becomes available
 
 Status: Accepted (recommended option, under the owner's instruction "use
@@ -5211,140 +5019,6 @@ Decision:
 Consequences: no new dependency, command, event or plugin. Manual WebView2
 acceptance of the new views remains to be done.
 
-## ADR-155 — KAIDO engages process-wide from the shared provider-health signal
-
-Status: Accepted (recommended defaults applied under the coordinator's PHX-119
-brief; the owner reviews R1–R14 in `tickets/PHX-119-kaido-failsafe-missions.md`
-and approves the KAIDO prompt text)
-Date: 2026-10-21
-Ticket: PHX-119
-
-This replaces ADR-093's "KAIDO stays deferred".
-
-Context: a provider that stays down, or a machine short of memory, fails every
-mission explicitly. PHX-028's `KaidoFailSafe` existed as a pure policy with no
-caller. PHX-108 keys tier-model re-registration off the same `/ready` probe.
-
-Decision:
-
-- **One monitor.** `phoenix.agents.kaido.KaidoMonitor`, one per backend, shared
-  by readiness and every runtime (including workspace runtimes). Its input is
-  the provider statuses a caller just probed (`/ready`'s `probe_provider`, and a
-  mission's once-per-mission probe), so KAIDO keys off the same signal as
-  readiness and PHX-108, plus a memory sample (ADR-158).
-- **Engage, release.** Engage on the first observation with no `HEALTHY`
-  provider (`primary_model_provider_unavailable`) or with memory pressure
-  (`resource_pressure`); provider loss takes precedence. A memory engagement
-  releases after `release_after` (default 2) consecutive clear observations; a
-  provider engagement after `provider_release_after` (default 1), because a
-  provider answering `HEALTHY` again is unambiguous and PHX-108's
-  `ModelRegistrar` registers its tier models on that same probe (a mission
-  right after a late Ollama start runs normally). Each engagement
-  is a PHX-028 decision with fixed reason text and the capabilities basic
-  conversation, diagnostics and recovery guidance; never tool routing.
-- **The KAIDO mission.** With a monitor, a mission's health probe runs first.
-  Engaged, the mission is one generation on T0 (new tier row `failsafe` =
-  `qwen3.5:2b`) through the structured think:false provider, at most 1,024
-  output tokens, inside an 8K-token budget (a request whose characters exceed
-  `(8192 − 1024) × 3` with the system prompt is declined; every 16,000-character
-  API request fits). T0 may run on a `DEGRADED` provider. No triage, plan,
-  tools, PermissionEngine call, MAHORAGA retry or LEVI check.
-- **Labelled and unverified.** The answer starts with the fixed
-  `KAIDO_ANSWER_LABEL` line; `MissionTrace.kaido.verified` is literal false.
-  The mission is `completed` (as a DIRECT answer is, ADR-081), and the UI reads
-  `kaido` to show degraded mode.
-- **No KAIDO without a monitor.** `PhoenixRuntime(kaido=None)` behaves exactly
-  as before, so offline runtimes, the FYP runners and older tests are unchanged.
-- **Prompt text.** `KAIDO_SYSTEM` (role marker `PHOENIX ROLE: kaido`) and the
-  label live in `kaido.py` under `KAIDO_PROMPT_VERSION = "kaido-prompts-v1"`,
-  so `PROMPT_SET_VERSION` (v4) is unchanged. Both await the owner's approval.
-- **Frozen files.** `failsafe.py`, `recovery.py`, `responders.py` and
-  `prompts.py` are byte-identical. `runtime.py` and `mission_events.py` move
-  from the PHX-109 pin, and `server.py`, `routes/missions.py` and
-  `routes/schemas.py` from the PHX-104/PHX-105 pins, to the PHX-119
-  implementation commit (`PHX_119_COMMIT` / `PHX_119_PATHS`), as an
-  implementation commit followed by a pin commit. After PHX-118 and PHX-108
-  merged, the five paths (three now carry more than one ticket's changes:
-  `runtime.py` with PHX-118, `server.py` and `routes/schemas.py` with PHX-108)
-  are pinned at the PHX-119 resolution commit that merged
-  `feature/PHX-108-settings-onboarding`; `PHX_118_PATHS` and `PHX_109_PATHS`
-  become empty and `PHX_108_PATHS` drops `server.py` and `schemas.py`.
-
-Limitations: when the only provider is unavailable, T0 is unavailable too, so
-KAIDO records the engagement and the mission still fails `provider_unavailable`
-(it helps when the provider is degraded or memory is short). Ollama's own
-context window is not set per request (the provider contract has no field and
-`ollama.py` is frozen); the 8K budget is enforced on the request side. T0 must
-be registered (startup, or PHX-108's re-registration).
-
-## ADR-156 — KAIDO's observability reuses phoenix.degraded and phoenix.ready
-
-Status: Accepted (as ADR-155)
-Date: 2026-10-21
-Ticket: PHX-119
-
-Decision:
-
-- **Events.** No new event types (still 32). The PHX-103 allowlist gains
-  `phoenix.degraded` (`failsafe_id`, `kaido_scope`, `trigger`; severity
-  warning) and `phoenix.ready` (`failsafe_id`, `kaido_scope`), with closed
-  values only. Process engagement and release are correlated by the failsafe ID
-  (a UUID); a KAIDO mission publishes `phoenix.degraded` correlated by its
-  mission ID, then `agent.started` / `agent.completed` or `agent.failed` with
-  agent `failsafe` and the new closed role `kaido`.
-- **Trace.** `MissionTrace.kaido: KaidoRecord | None` with the failsafe ID,
-  trigger, scope (`process` or `mission`), capabilities, recovery ID, outcome
-  (`answered`, `failed`, `unavailable`, `declined`) and `verified=false`; no
-  text. Validators reject a KAIDO answer whose task `COMPLETED` or does not end
-  `DEGRADED`, and exhaustion evidence missing from `recoveries`. Traces stored
-  before PHX-119 load (`kaido` defaults to null); no migration.
-- **API.** `GET /ready` gains `kaido` (a `KaidoStatus`), and an engaged KAIDO
-  makes `status` `degraded` (HTTP 200). `GET /missions/{id}` gains `kaido`
-  (`KaidoOut`). Mission status stays `completed`/`failed`; no new status.
-
-## ADR-157 — KAIDO answers after MAHORAGA's mission budget is exhausted
-
-Status: Accepted (as ADR-155)
-Date: 2026-10-21
-Ticket: PHX-119
-
-Decision:
-
-- **When.** Only when MAHORAGA itself reported `exhausted` for the mission
-  (a positive budget fully spent); that `RecoveryResult` is the PHX-028
-  `recovery_exhausted` evidence. A zero budget (recovery off), a retry that
-  failed again, a LEVI rejection, and an exhausted LEVI generation never reach
-  KAIDO: nothing replaces a verification that could not run (INV-008).
-- **Task state.** The COMPLEX task first ends `FAILED` with the original codes
-  (as the PHX-109 direct fallback does). If KAIDO answers, the task moves
-  `FAILED → DEGRADED` (an existing edge) and the mission completes with the
-  labelled, unverified answer; if KAIDO cannot answer, the original failure
-  code stands and the task stays `FAILED`.
-- **Bound.** At most one KAIDO reply per mission, never retried, so recovery
-  stays finite (INV-009).
-
-## ADR-158 — Memory pressure evidence for KAIDO
-
-Status: Accepted (as ADR-155)
-Date: 2026-10-21
-Ticket: PHX-119
-
-Context: the docs name resource pressure as a KAIDO trigger without
-thresholds, and no resource monitor existed.
-
-Decision:
-
-- **Sample.** The backend samples available system RAM with psutil (already a
-  dependency; no subprocess) on each KAIDO observation. A caller-supplied probe
-  may also report free VRAM; the backend does not run `nvidia-smi` per probe,
-  and while Ollama holds a model, free VRAM is not a pressure signal.
-- **Thresholds.** Engage below 2,048 MiB free RAM (or 512 MiB free VRAM);
-  count as clear only at or above 3,072 MiB RAM (and 1,024 MiB VRAM).
-  `ServerConfig.kaido_policy` holds them and `kaido_ram_probe=False` turns the
-  sample off. A failing probe is no evidence: it neither engages nor clears.
-
-Limitations: the thresholds are judgement for BLAZE-6 (24 GiB RAM, 6 GiB VRAM),
-not benchmarked; a live low-memory run is in the ticket's smoke steps.
 ## ADR-115 — Fixed, versioned, sha-pinned metric datasets
 
 Status: Accepted (owner instruction 2026-10-21: recommended options throughout)
@@ -5547,6 +5221,7 @@ Decision:
 Limitations: the thresholds are recommended starting values, not derived from
 data. The first live runs may justify an owner-approved amendment. Nothing is
 frozen by this ADR itself.
+
 ## ADR-120 — Colibri deep tier: official release engine, catalog container and a measured gate
 
 Status: Accepted (owner decision 2026-10-21: "yes, try it"; downloads
@@ -5648,142 +5323,7 @@ latency is the sum of both attempts.
 existing `PhoenixRuntime` multi-provider and `tier_table` parameters. Product
 escalation inside PHOENIX is a later ticket, if the gate passes and the owner
 wants it.
-## ADR-145 — Structured JSON logs with redaction and rotating files
 
-Status: Accepted (recommended option applied under the owner's instruction,
-"recommended options", for PHX-115; R1–R4 in
-`tickets/PHX-115-observability.md` await the owner's review)
-Date: 2026-10-21
-Ticket: PHX-115
-
-Context: the backend logged plain text to stderr (`basicConfig`), which the
-desktop shell writes to a log file truncated at each launch. docs/23 asks for
-structured logs with a correlation ID, task/step IDs, a safe message and an
-error type, and never secrets (RULES security 6, INV-018).
-
-Decision:
-
-- **Format.** `phoenix/api/structured_logging.py` writes one JSON object per
-  line with closed keys: `ts`, `level`, `subsystem`, `message`, and only the
-  correlation fields `correlation_id`, `mission_id`, `task_id`, `step_id`,
-  `agent_id`, `event_type`, each kept only when identifier-shaped. Any other
-  `extra` key is dropped, so a stray `extra={"prompt": ...}` never reaches a
-  log.
-- **Exceptions.** Only `error_type` (class name) and `error_frames`
-  (`file:line:function`, innermost 12). The exception message, arguments and
-  locals are never formatted, because PHOENIX's errors may carry model or tool
-  content.
-- **Redaction (defence in depth).** `redact()` removes bearer values,
-  `key=value` secrets (API keys, tokens, secrets, passwords, cookies,
-  authorization), private key blocks, `sk-`, GitHub, Slack and AWS key shapes,
-  and every registered secret; the launcher registers the per-launch API token
-  and forgets it on exit. Control characters are replaced and messages are
-  capped at 1,000 characters. PHOENIX code still logs IDs, codes and timings
-  only.
-- **Files.** `<data_dir>/logs/phoenix.jsonl`, rotated at 5 MiB with 5 backups
-  (stdlib `RotatingFileHandler`), plus the same JSON on stderr. Records go
-  through a `QueueHandler`/`QueueListener`, so the event loop never waits on
-  disk; the safe entry is built before the record is queued.
-  `LoggingHandle.close()` stops the listener and restores the root logger
-  exactly (tests and repeated launches leave no handlers behind).
-- **Mission events.** Every allowlisted event is logged once by the metrics
-  collector (ADR-146) as `phoenix.events`, warning for failures.
-
-Consequences: logs are machine-readable and greppable by mission ID; the
-shell's own `backend.log` now holds JSON lines too. No new dependency.
-Limitation: redaction is pattern-based and cannot recognise an arbitrary
-secret that is not registered; the guarantee rests on PHOENIX never logging
-content.
-
-## ADR-146 — Runtime metrics collector and authenticated `GET /metrics`
-
-Status: Accepted (recommended option applied under the owner's instruction,
-"recommended options", for PHX-115; R5–R8 await the owner's review)
-Date: 2026-10-21
-Ticket: PHX-115
-
-Context: docs/23 lists latency, provider/model, TTFT, tokens/sec, RAM/VRAM/CPU,
-tool success, verification, recovery and permission metrics. Content-free
-events (ADR-087) and stored `MissionTrace` evidence already hold most of them.
-The event vocabulary is frozen at 32 types.
-
-Decision:
-
-- **Placement.** `MetricsCollector` (`phoenix/api/observability.py`) wraps the
-  `EventStream` as the runtime's and mission service's `EventSink`. It
-  re-checks the PHX-103 allowlist, updates bounded aggregates (256 samples per
-  stage, 256 tracked missions, 16 models, 64 recent logs), logs the event and
-  forwards it unchanged. Observing is best effort: it never raises into,
-  blocks or alters a mission (INV-021, INV-022). No event type, payload field,
-  migration or runtime change is added; events are mapped, not extended.
-- **Trace evidence.** Tokens, generation durations, per-model usage and the
-  provider health a mission saw come from the stored trace of each mission that
-  ended (`completed`, `failed`, `cancelled`, `waiting_permission`), read
-  lazily through `MissionService.get_trace` when `/metrics` is requested, at
-  most 64 per request, each mission once. Tokens/sec is output tokens over
-  total generation latency, the PHX-091 reporting rule.
-- **TTFT.** Mission generations do not stream, and non-streaming TTFT is
-  unknown (ADR-011, ADR-016), so no per-generation TTFT is inferred from
-  Ollama's prompt-evaluation timings. The live TTFT metric is the mission's
-  time to first answer, queued to completed, named by `ttft_basis:
-  "mission_first_answer"`. Streaming generation would make it token-level; that
-  is a separate ticket.
-- **Resources.** Process working set and system RAM through `ctypes`
-  (`GlobalMemoryStatusEx`, `K32GetProcessMemoryInfo`) on Windows and `/proc`
-  elsewhere; process CPU % from `time.process_time` between snapshots. No
-  `psutil`, so no new dependency. VRAM is Ollama's own placement report,
-  `GET /api/ps` (`size_vram` per loaded model), one bounded request per
-  snapshot (probe timeout, no proxy, no redirects, 256 KiB cap, names
-  validated), only when an `OllamaProvider` is configured; otherwise, or on any
-  failure, `unavailable`.
-- **Permission decisions.** Requested (`permission.requested`), user-approved
-  (mission `superseded`), user-denied (mission failed `permission_denied`) and
-  policy-denied (`tool.failed` with `decision` `denied`/`blocked`).
-- **Route.** `GET /metrics` (`phoenix/api/routes/observability.py`), behind
-  the PHX-101 middleware like every route (token, bound Host, Origin). The
-  response schema is closed (`extra="forbid"`) and holds counts, timings,
-  sizes, IDs and closed values only.
-- **Wiring.** `server.py` builds the collector, passes it as `events=` to the
-  runtime and the mission service, binds the trace loader and the stream's
-  drop counters, and adds `BackendServices.observability`. `routes/__init__.py`
-  includes the router.
-
-Consequences: the numbers are per launch and in memory; disk I/O is not
-measured. A snapshot costs at most one `/api/ps` request and 64 trace reads.
-
-## ADR-147 — The desktop proxy admits `GET /metrics`
-
-Status: Accepted (recommended option applied under the owner's instruction for
-PHX-115; R9 awaits the owner's review)
-Date: 2026-10-21
-Ticket: PHX-115
-
-Decision: `proxy.rs` adds exactly `(GET, "/metrics", no query keys)` to the
-allowlist (19 routes). Any query, trailing segment, other method or nested path
-is refused before I/O, like every other route; Rust still adds the bearer token
-and the webview never sees it. Tests list it among the admitted routes and add
-`/metrics?verbose=1`, `/metrics/`, `/metrics/{id}`, `POST` and `PATCH` to the
-refused set.
-
-## ADR-148 — Live data in the Observability view through the existing port
-
-Status: Accepted (recommended option applied under the owner's instruction for
-PHX-115; R10 awaits the owner's review)
-Date: 2026-10-21
-Ticket: PHX-115
-
-Decision: `adapters/core.ts` fetches `GET /metrics` when the backend becomes
-ready, when the event stream (re)connects, when a mission settles or waits for
-permission, and every fifth poll tick (15 s). `toBackendDiagnostics` maps the
-snapshot into App's closed metric names (`task_step_latency`, `ttft`,
-`tokens_per_sec`, `provider_model`, `ram`, `vram`, `cpu`,
-`tool_success_failure`, `permission_decisions`, `verification_result`,
-`recovery_attempts`) with units and the snapshot time, at most 40 entries; the
-live event metrics fill the rest of App's 64. The backend's recent structured
-event logs fill the `logs` collection (at most 64), with correlation, task and
-step IDs. Malformed snapshots are ignored and the last good one stays. App.tsx
-is unchanged (ADR-092), so its captions still call the evidence
-caller-supplied; the copy update stays with PHX-108.
 ## ADR-125 — A self-contained bundled backend: embeddable CPython 3.11 plus the locked wheels
 
 Status: Accepted (owner decisions for PHX-092, 2026-10-21: bundled embeddable
@@ -5958,6 +5498,7 @@ installer still builds.
 Consequences: each run downloads the embeddable Python (verified by its pinned
 digest) and the locked wheels (verified by the lock's hashes). Build outputs are
 never committed (`build/` and `target/` are ignored).
+
 ## ADR-130 — Knowledge steps in missions: a PHOENIX-built P0 retrieval
 
 Status: Accepted (recommended defaults applied under the coordinator's
@@ -6384,6 +5925,472 @@ unapproved text. On approval the text moves into `prompts.py` as
 `phoenix-prompts-v5` and the composition root is wired. Until then the planner
 does not plan writes or media and `media` cannot be assigned.
 
+## ADR-145 — Structured JSON logs with redaction and rotating files
+
+Status: Accepted (recommended option applied under the owner's instruction,
+"recommended options", for PHX-115; R1–R4 in
+`tickets/PHX-115-observability.md` await the owner's review)
+Date: 2026-10-21
+Ticket: PHX-115
+
+Context: the backend logged plain text to stderr (`basicConfig`), which the
+desktop shell writes to a log file truncated at each launch. docs/23 asks for
+structured logs with a correlation ID, task/step IDs, a safe message and an
+error type, and never secrets (RULES security 6, INV-018).
+
+Decision:
+
+- **Format.** `phoenix/api/structured_logging.py` writes one JSON object per
+  line with closed keys: `ts`, `level`, `subsystem`, `message`, and only the
+  correlation fields `correlation_id`, `mission_id`, `task_id`, `step_id`,
+  `agent_id`, `event_type`, each kept only when identifier-shaped. Any other
+  `extra` key is dropped, so a stray `extra={"prompt": ...}` never reaches a
+  log.
+- **Exceptions.** Only `error_type` (class name) and `error_frames`
+  (`file:line:function`, innermost 12). The exception message, arguments and
+  locals are never formatted, because PHOENIX's errors may carry model or tool
+  content.
+- **Redaction (defence in depth).** `redact()` removes bearer values,
+  `key=value` secrets (API keys, tokens, secrets, passwords, cookies,
+  authorization), private key blocks, `sk-`, GitHub, Slack and AWS key shapes,
+  and every registered secret; the launcher registers the per-launch API token
+  and forgets it on exit. Control characters are replaced and messages are
+  capped at 1,000 characters. PHOENIX code still logs IDs, codes and timings
+  only.
+- **Files.** `<data_dir>/logs/phoenix.jsonl`, rotated at 5 MiB with 5 backups
+  (stdlib `RotatingFileHandler`), plus the same JSON on stderr. Records go
+  through a `QueueHandler`/`QueueListener`, so the event loop never waits on
+  disk; the safe entry is built before the record is queued.
+  `LoggingHandle.close()` stops the listener and restores the root logger
+  exactly (tests and repeated launches leave no handlers behind).
+- **Mission events.** Every allowlisted event is logged once by the metrics
+  collector (ADR-146) as `phoenix.events`, warning for failures.
+
+Consequences: logs are machine-readable and greppable by mission ID; the
+shell's own `backend.log` now holds JSON lines too. No new dependency.
+Limitation: redaction is pattern-based and cannot recognise an arbitrary
+secret that is not registered; the guarantee rests on PHOENIX never logging
+content.
+
+## ADR-146 — Runtime metrics collector and authenticated `GET /metrics`
+
+Status: Accepted (recommended option applied under the owner's instruction,
+"recommended options", for PHX-115; R5–R8 await the owner's review)
+Date: 2026-10-21
+Ticket: PHX-115
+
+Context: docs/23 lists latency, provider/model, TTFT, tokens/sec, RAM/VRAM/CPU,
+tool success, verification, recovery and permission metrics. Content-free
+events (ADR-087) and stored `MissionTrace` evidence already hold most of them.
+The event vocabulary is frozen at 32 types.
+
+Decision:
+
+- **Placement.** `MetricsCollector` (`phoenix/api/observability.py`) wraps the
+  `EventStream` as the runtime's and mission service's `EventSink`. It
+  re-checks the PHX-103 allowlist, updates bounded aggregates (256 samples per
+  stage, 256 tracked missions, 16 models, 64 recent logs), logs the event and
+  forwards it unchanged. Observing is best effort: it never raises into,
+  blocks or alters a mission (INV-021, INV-022). No event type, payload field,
+  migration or runtime change is added; events are mapped, not extended.
+- **Trace evidence.** Tokens, generation durations, per-model usage and the
+  provider health a mission saw come from the stored trace of each mission that
+  ended (`completed`, `failed`, `cancelled`, `waiting_permission`), read
+  lazily through `MissionService.get_trace` when `/metrics` is requested, at
+  most 64 per request, each mission once. Tokens/sec is output tokens over
+  total generation latency, the PHX-091 reporting rule.
+- **TTFT.** Mission generations do not stream, and non-streaming TTFT is
+  unknown (ADR-011, ADR-016), so no per-generation TTFT is inferred from
+  Ollama's prompt-evaluation timings. The live TTFT metric is the mission's
+  time to first answer, queued to completed, named by `ttft_basis:
+  "mission_first_answer"`. Streaming generation would make it token-level; that
+  is a separate ticket.
+- **Resources.** Process working set and system RAM through `ctypes`
+  (`GlobalMemoryStatusEx`, `K32GetProcessMemoryInfo`) on Windows and `/proc`
+  elsewhere; process CPU % from `time.process_time` between snapshots. No
+  `psutil`, so no new dependency. VRAM is Ollama's own placement report,
+  `GET /api/ps` (`size_vram` per loaded model), one bounded request per
+  snapshot (probe timeout, no proxy, no redirects, 256 KiB cap, names
+  validated), only when an `OllamaProvider` is configured; otherwise, or on any
+  failure, `unavailable`.
+- **Permission decisions.** Requested (`permission.requested`), user-approved
+  (mission `superseded`), user-denied (mission failed `permission_denied`) and
+  policy-denied (`tool.failed` with `decision` `denied`/`blocked`).
+- **Route.** `GET /metrics` (`phoenix/api/routes/observability.py`), behind
+  the PHX-101 middleware like every route (token, bound Host, Origin). The
+  response schema is closed (`extra="forbid"`) and holds counts, timings,
+  sizes, IDs and closed values only.
+- **Wiring.** `server.py` builds the collector, passes it as `events=` to the
+  runtime and the mission service, binds the trace loader and the stream's
+  drop counters, and adds `BackendServices.observability`. `routes/__init__.py`
+  includes the router.
+
+Consequences: the numbers are per launch and in memory; disk I/O is not
+measured. A snapshot costs at most one `/api/ps` request and 64 trace reads.
+
+## ADR-147 — The desktop proxy admits `GET /metrics`
+
+Status: Accepted (recommended option applied under the owner's instruction for
+PHX-115; R9 awaits the owner's review)
+Date: 2026-10-21
+Ticket: PHX-115
+
+Decision: `proxy.rs` adds exactly `(GET, "/metrics", no query keys)` to the
+allowlist (19 routes). Any query, trailing segment, other method or nested path
+is refused before I/O, like every other route; Rust still adds the bearer token
+and the webview never sees it. Tests list it among the admitted routes and add
+`/metrics?verbose=1`, `/metrics/`, `/metrics/{id}`, `POST` and `PATCH` to the
+refused set.
+
+## ADR-148 — Live data in the Observability view through the existing port
+
+Status: Accepted (recommended option applied under the owner's instruction for
+PHX-115; R10 awaits the owner's review)
+Date: 2026-10-21
+Ticket: PHX-115
+
+Decision: `adapters/core.ts` fetches `GET /metrics` when the backend becomes
+ready, when the event stream (re)connects, when a mission settles or waits for
+permission, and every fifth poll tick (15 s). `toBackendDiagnostics` maps the
+snapshot into App's closed metric names (`task_step_latency`, `ttft`,
+`tokens_per_sec`, `provider_model`, `ram`, `vram`, `cpu`,
+`tool_success_failure`, `permission_decisions`, `verification_result`,
+`recovery_attempts`) with units and the snapshot time, at most 40 entries; the
+live event metrics fill the rest of App's 64. The backend's recent structured
+event logs fill the `logs` collection (at most 64), with correlation, task and
+step IDs. Malformed snapshots are ignored and the last good one stays. App.tsx
+is unchanged (ADR-092), so its captions still call the evidence
+caller-supplied; the copy update stays with PHX-108.
+
+## ADR-150 — Computer-control steps in PHOENIX missions
+
+Status: Accepted (owner decisions relayed for PHX-112 on 2026-10-21; the
+control prompts of ADR-152 approved by the owner the same day)
+Date: 2026-10-21
+Ticket: PHX-112
+
+PHX-050–052 and PHX-044 built the browser, Windows UI, screenshot/vision and
+terminal tools, but no mission could use them. ADR numbers 150–154 are reserved
+for PHX-112 (parallel tickets hold other ranges).
+
+Decision:
+
+- **A new step kind, owned by `computer_control` (KAKASHI).** A runtime built
+  with a `ControlStepRunner` (new `phoenix/agents/control_steps.py`) allowlists
+  the `computer_control` routing domain; without one nothing changes. The
+  runtime hook is additive: an optional constructor argument, an optional
+  `approvals` argument on `run()`, a `control_calls` trace field (IDs, codes,
+  hashes only) and a dispatch branch next to the document step.
+- **The model only proposes.** One `control_request` of at most four actions
+  per step. PHOENIX builds every call and `PermissionRequest` itself: it opens
+  and closes its own browser session (fixed session ID), uses the page URL the
+  browser actually reached (never a model URL) for later page actions, and
+  resolves a window title through one permissioned `list_windows` call, so the
+  model never supplies session IDs, window handles, process IDs or classes.
+- **PermissionEngine decides every action (INV-004).** PHOENIX first
+  pre-checks, with its own engine snapshot, every action whose resource is
+  already known; the first that needs approval ends the mission
+  `waiting_permission` before any effect. Each tool then decides again with its
+  own engine and writes the P3/P4 audit rows itself (INV-007). P0 and P5 are
+  rejected before any call (INV-006). Risk levels are the tools' canonical
+  ones (see `docs/08_PERMISSION_MATRIX.md`).
+- **LEVI checks the evidence first.** Every action must correlate with the
+  PHOENIX-issued call and request, be ALLOWED by a caller grant, PHOENIX's
+  teardown rule or the user's P4 decision, have succeeded, and carry both
+  audit IDs when P3/P4; only then does the grounded model check run (INV-008).
+- **One worker thread.** All tool calls run on the runner's single worker
+  thread, in order. Playwright's synchronous API stays on one thread, and a
+  hung call delays only later control actions (bounded by tool timeouts).
+- **PHOENIX's own browser.** BrowserTool already launches Playwright's bundled
+  Chromium with a fresh in-memory context: an isolated profile, never the
+  owner's Chrome/Edge profile. The Chromium binary lives in the PHOENIX-owned
+  folder `D:\Phoenix\browsers` (`PHOENIX_BROWSERS_PATH` overrides it), set for
+  the process by `phoenix/tools/browser_setup.py` and installed only by the
+  explicit, owner-run `scripts/install_control_browser.py --install`. Nothing
+  downloads at runtime; end users get the browser only through that step.
+- **Vision is advisory.** A screenshot step captures one resolved window (P1)
+  and asks the vision service one bounded question under the heavy-generation
+  lease (INV-023); only its text summary is rendered, never the frame.
+
+Limitations: control steps publish no `tool.*`/`permission.requested` events
+(the PHX-103 allowlist names filesystem tools only; extending it belongs to
+PHX-115); the step runs at most four actions per proposal and cannot observe a
+page before choosing its next action within one step; the backend composition
+root enables browser and Windows UI control steps only (ADR-152). No new
+dependencies, migrations, event types or API routes.
+
+## ADR-151 — Control approvals in the approve → re-run loop
+
+Status: Accepted (PHX-112, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-112
+
+There is no mid-mission resume (ADR-082): approving a request supersedes the
+waiting mission and queues a linked re-run, which issues new requests. A P2/P3
+grant can match a new request; a P4 action has no grant form (PermissionGrant
+allows P1–P3 only) and needs an explicit decision tied to one request.
+
+Decision:
+
+- **P1/P2:** the user's choice, a SESSION ("this session") or PERSISTENT
+  ("always") grant, as for documents.
+- **P3:** SESSION only; "always" is refused (PermissionEngine never matches a
+  persistent P3 grant, so storing one would only mislead).
+- **P4:** one explicit `UserPermissionDecision` on the exact stored request,
+  kept in the mission service's memory for the one linked re-run
+  (`MissionStore.approve_once` marks the request approved and queues the
+  re-run; no grant row). The re-run reuses that exact request when it proposes
+  the same action, so the decision correlates; any other action asks again. It
+  is used at most once, whatever duration the user picked (never broader than
+  asked), and a restart drops it with the interrupted re-run (fail-closed).
+- **At most one P4 action per mission.** A re-run repeats earlier actions, so
+  a second P4 would either loop forever or repeat the first effect; it is
+  rejected (`tool_rejected`) instead.
+- **Display-only approval summary (amended after review).** The stored
+  request names a window by handle/process/class and fill/set_text text by
+  hash only, and a window title can be spoofed by any program. When a control
+  request needs approval, PHOENIX records an `ApprovalSummary` built from the
+  call it issued and what it observed: the action in words, the page URL the
+  browser reached and the element selector, or the listed window title plus
+  the real process name, executable path and PID (`psutil`, read-only), the
+  terminal profile and arguments, and the exact text to be typed. Text that
+  looks like a password, key or token (known prefixes, password-shaped or long
+  token-shaped words; the heuristic errs toward hiding) is masked as
+  `[hidden: N characters]` with a note. `GET /permissions`,
+  `GET /permissions/{id}` and the mission detail return it as `summary` next to
+  the raw request. It is display only: approve and deny still take only the
+  request ID and duration, the grant or P4 decision binds to the stored
+  request's exact tool, action and resource, and the summary is never read by
+  PermissionEngine, the runner's correlation or the API's approval path; a
+  summary whose tool differs from the stored request's is not shown. Summaries
+  live in the runner's memory only (at most 256, so the typed text never
+  reaches the database); after a restart a pending request shows its raw
+  resource only.
+- **No workspace check for control requests.** The approve route's
+  `workspace_changed` check applies to document requests only; a control
+  request names no workspace path. MissionService still refuses any request
+  outside the canonical control scope.
+- One control step runs at a time, and a P3 action may not precede a deferred
+  P4 page action in one proposal (a re-run would repeat the P3 effect).
+- Stored grants pass to a run through `control_grants` only when the run's
+  runtime has control steps; grants, approvals and decisions never come from
+  model text (INV-003).
+
+## ADR-152 — The control prompts are a separate set; the backend enables control
+
+Status: Accepted (amended 2026-10-21: the owner approved the prompt texts)
+Date: 2026-10-21
+Ticket: PHX-112
+
+The approved `phoenix-prompts-v4` planner prompt forbids tool use other than
+workspace reads, and the assignment prompt describes only the existing domains,
+so control steps need new text. Parallel tickets edit `prompts.py`.
+
+Decision: the new texts live in `phoenix/agents/control_prompts.py` (planner
+variant, the `computer_control` domain description, specialist, answer and
+verifier prompts, step contract strings), hash-pinned in
+`tests/test_computer_control_steps.py`. `prompts.py` stays byte-identical; the
+runner swaps in the control planner and assignment responders only when it is
+configured. They were drafted as `phoenix-control-prompts-v1-draft`; the owner
+approved them unchanged on 2026-10-21, so the set is now
+`phoenix-control-prompts-v1` (only the version string changed).
+
+Amendment (enabling): the backend composition root (`phoenix/api/server.py`)
+now builds one `ControlStepRunner`, shared by every runtime it builds (the
+startup runtime and each workspace runtime), over PHOENIX's own isolated
+browser and the Windows UI tool. The one ToolRegistry holds the filesystem and
+the canonical control definitions; the policy is `control_permission_policy()`
+(its only rule is the browser teardown); Playwright is pointed at the
+PHOENIX-owned browser folder for the backend's lifetime (nothing downloads; a
+missing Chromium fails the action explicitly). The screenshot/vision and
+terminal control tools are not wired: they need a vision model binding and an
+owner-chosen terminal root and profile set. The PHX-108 capability flag
+`computer_control` is now enabled. The runner's worker is shut down with the
+backend.
+
+## ADR-153 — Kill switch and PHOENIX's browser teardown
+
+Status: Accepted (PHX-112, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-112
+
+The control tools are synchronous and declare no cancellation: an in-flight
+Playwright, UI Automation or child-process call cannot be pre-empted from
+outside without changing the frozen tools.
+
+Decision:
+
+- **Kill switch.** Each mission has a `ControlKillSwitch`. `PhoenixRuntime.cancel`
+  (and so the mission service's cancel and shutdown) trips it before cancelling
+  the task. The mission ends `cancelled` at once; no further control action
+  starts (the worker checks the switch right before each call); the in-flight
+  call finishes on its tool's own timeout (browser 30 s, Windows UI 10 s,
+  terminal profile ≤ 300 s), and its result is discarded, never shown to a
+  model.
+- **Teardown.** After a cancel, the browser session close is queued behind the
+  in-flight call on the same worker. Closing PHOENIX's own session is allowed
+  by the one standing policy rule `phx-112.browser-teardown` (P2
+  `browser.session_close`, fixed session resource) from
+  `control_permission_policy()`: teardown removes capability and has no
+  external effect, so it never waits for a user. It still goes through
+  PermissionEngine (MATCHING_POLICY). Opening the session needs a user grant.
+
+Limitations: a terminal child process or a hung UI Automation call runs until
+its own timeout after a cancel; real pre-emption needs tool-level cancellation
+(a later ticket).
+
+## ADR-154 — Page and screen content stay untrusted data
+
+Status: Accepted (PHX-112, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-112
+
+Decision: page text, element text, window and control text, vision summaries
+and command output reach models only as one guarded `TOOL_OUTPUT` item
+(INV-017), the same item for the answer turn and LEVI's model check; system
+prompts and the text outside the guarded block never contain them. The answer
+turn cannot act: a reply that repeats an injected action is plain model text,
+fails LEVI's plain-text check and runs nothing. Window-title resolution never
+renders the window list (other windows' titles stay private); a screenshot
+frame is never rendered or traced, only the advisory vision text; traces keep
+IDs, statuses, codes, hashes and lengths only. Password and file inputs stay
+blocked by the tools themselves.
+
+## ADR-155 — KAIDO engages process-wide from the shared provider-health signal
+
+Status: Accepted (recommended defaults applied under the coordinator's PHX-119
+brief; the owner reviews R1–R14 in `tickets/PHX-119-kaido-failsafe-missions.md`
+and approves the KAIDO prompt text)
+Date: 2026-10-21
+Ticket: PHX-119
+
+This replaces ADR-093's "KAIDO stays deferred".
+
+Context: a provider that stays down, or a machine short of memory, fails every
+mission explicitly. PHX-028's `KaidoFailSafe` existed as a pure policy with no
+caller. PHX-108 keys tier-model re-registration off the same `/ready` probe.
+
+Decision:
+
+- **One monitor.** `phoenix.agents.kaido.KaidoMonitor`, one per backend, shared
+  by readiness and every runtime (including workspace runtimes). Its input is
+  the provider statuses a caller just probed (`/ready`'s `probe_provider`, and a
+  mission's once-per-mission probe), so KAIDO keys off the same signal as
+  readiness and PHX-108, plus a memory sample (ADR-158).
+- **Engage, release.** Engage on the first observation with no `HEALTHY`
+  provider (`primary_model_provider_unavailable`) or with memory pressure
+  (`resource_pressure`); provider loss takes precedence. A memory engagement
+  releases after `release_after` (default 2) consecutive clear observations; a
+  provider engagement after `provider_release_after` (default 1), because a
+  provider answering `HEALTHY` again is unambiguous and PHX-108's
+  `ModelRegistrar` registers its tier models on that same probe (a mission
+  right after a late Ollama start runs normally). Each engagement
+  is a PHX-028 decision with fixed reason text and the capabilities basic
+  conversation, diagnostics and recovery guidance; never tool routing.
+- **The KAIDO mission.** With a monitor, a mission's health probe runs first.
+  Engaged, the mission is one generation on T0 (new tier row `failsafe` =
+  `qwen3.5:2b`) through the structured think:false provider, at most 1,024
+  output tokens, inside an 8K-token budget (a request whose characters exceed
+  `(8192 − 1024) × 3` with the system prompt is declined; every 16,000-character
+  API request fits). T0 may run on a `DEGRADED` provider. No triage, plan,
+  tools, PermissionEngine call, MAHORAGA retry or LEVI check.
+- **Labelled and unverified.** The answer starts with the fixed
+  `KAIDO_ANSWER_LABEL` line; `MissionTrace.kaido.verified` is literal false.
+  The mission is `completed` (as a DIRECT answer is, ADR-081), and the UI reads
+  `kaido` to show degraded mode.
+- **No KAIDO without a monitor.** `PhoenixRuntime(kaido=None)` behaves exactly
+  as before, so offline runtimes, the FYP runners and older tests are unchanged.
+- **Prompt text.** `KAIDO_SYSTEM` (role marker `PHOENIX ROLE: kaido`) and the
+  label live in `kaido.py` under `KAIDO_PROMPT_VERSION = "kaido-prompts-v1"`,
+  so `PROMPT_SET_VERSION` (v4) is unchanged. Both await the owner's approval.
+- **Frozen files.** `failsafe.py`, `recovery.py`, `responders.py` and
+  `prompts.py` are byte-identical. `runtime.py` and `mission_events.py` move
+  from the PHX-109 pin, and `server.py`, `routes/missions.py` and
+  `routes/schemas.py` from the PHX-104/PHX-105 pins, to the PHX-119
+  implementation commit (`PHX_119_COMMIT` / `PHX_119_PATHS`), as an
+  implementation commit followed by a pin commit. After PHX-118 and PHX-108
+  merged, the five paths (three now carry more than one ticket's changes:
+  `runtime.py` with PHX-118, `server.py` and `routes/schemas.py` with PHX-108)
+  are pinned at the PHX-119 resolution commit that merged
+  `feature/PHX-108-settings-onboarding`; `PHX_118_PATHS` and `PHX_109_PATHS`
+  become empty and `PHX_108_PATHS` drops `server.py` and `schemas.py`.
+
+Limitations: when the only provider is unavailable, T0 is unavailable too, so
+KAIDO records the engagement and the mission still fails `provider_unavailable`
+(it helps when the provider is degraded or memory is short). Ollama's own
+context window is not set per request (the provider contract has no field and
+`ollama.py` is frozen); the 8K budget is enforced on the request side. T0 must
+be registered (startup, or PHX-108's re-registration).
+
+## ADR-156 — KAIDO's observability reuses phoenix.degraded and phoenix.ready
+
+Status: Accepted (as ADR-155)
+Date: 2026-10-21
+Ticket: PHX-119
+
+Decision:
+
+- **Events.** No new event types (still 32). The PHX-103 allowlist gains
+  `phoenix.degraded` (`failsafe_id`, `kaido_scope`, `trigger`; severity
+  warning) and `phoenix.ready` (`failsafe_id`, `kaido_scope`), with closed
+  values only. Process engagement and release are correlated by the failsafe ID
+  (a UUID); a KAIDO mission publishes `phoenix.degraded` correlated by its
+  mission ID, then `agent.started` / `agent.completed` or `agent.failed` with
+  agent `failsafe` and the new closed role `kaido`.
+- **Trace.** `MissionTrace.kaido: KaidoRecord | None` with the failsafe ID,
+  trigger, scope (`process` or `mission`), capabilities, recovery ID, outcome
+  (`answered`, `failed`, `unavailable`, `declined`) and `verified=false`; no
+  text. Validators reject a KAIDO answer whose task `COMPLETED` or does not end
+  `DEGRADED`, and exhaustion evidence missing from `recoveries`. Traces stored
+  before PHX-119 load (`kaido` defaults to null); no migration.
+- **API.** `GET /ready` gains `kaido` (a `KaidoStatus`), and an engaged KAIDO
+  makes `status` `degraded` (HTTP 200). `GET /missions/{id}` gains `kaido`
+  (`KaidoOut`). Mission status stays `completed`/`failed`; no new status.
+
+## ADR-157 — KAIDO answers after MAHORAGA's mission budget is exhausted
+
+Status: Accepted (as ADR-155)
+Date: 2026-10-21
+Ticket: PHX-119
+
+Decision:
+
+- **When.** Only when MAHORAGA itself reported `exhausted` for the mission
+  (a positive budget fully spent); that `RecoveryResult` is the PHX-028
+  `recovery_exhausted` evidence. A zero budget (recovery off), a retry that
+  failed again, a LEVI rejection, and an exhausted LEVI generation never reach
+  KAIDO: nothing replaces a verification that could not run (INV-008).
+- **Task state.** The COMPLEX task first ends `FAILED` with the original codes
+  (as the PHX-109 direct fallback does). If KAIDO answers, the task moves
+  `FAILED → DEGRADED` (an existing edge) and the mission completes with the
+  labelled, unverified answer; if KAIDO cannot answer, the original failure
+  code stands and the task stays `FAILED`.
+- **Bound.** At most one KAIDO reply per mission, never retried, so recovery
+  stays finite (INV-009).
+
+## ADR-158 — Memory pressure evidence for KAIDO
+
+Status: Accepted (as ADR-155)
+Date: 2026-10-21
+Ticket: PHX-119
+
+Context: the docs name resource pressure as a KAIDO trigger without
+thresholds, and no resource monitor existed.
+
+Decision:
+
+- **Sample.** The backend samples available system RAM with psutil (already a
+  dependency; no subprocess) on each KAIDO observation. A caller-supplied probe
+  may also report free VRAM; the backend does not run `nvidia-smi` per probe,
+  and while Ollama holds a model, free VRAM is not a pressure signal.
+- **Thresholds.** Engage below 2,048 MiB free RAM (or 512 MiB free VRAM);
+  count as clear only at or above 3,072 MiB RAM (and 1,024 MiB VRAM).
+  `ServerConfig.kaido_policy` holds them and `kaido_ram_probe=False` turns the
+  sample off. A failing probe is no evidence: it neither engages nor clears.
+
+Limitations: the thresholds are judgement for BLAZE-6 (24 GiB RAM, 6 GiB VRAM),
+not benchmarked; a live low-memory run is in the ticket's smoke steps.
+
 ## ADR-160 — One owner-approved `phoenix-prompts-v5` set
 
 Status: Accepted
@@ -6500,3 +6507,44 @@ PHX-118 and PHX-120 moves to `PHX_120_COMMIT`/`PHX_120_PATHS` at the PHX-120
 implementation commit (two commits: implementation, then pin), and leaves its
 older block, so each path has exactly one baseline. Paths only one ticket
 changed keep that ticket's pin. The PR must merge with a merge commit.
+
+## ADR-165 — Release train 2026-10-21: integration choices
+
+Status: Accepted (integration defaults; the owner reviews them with the train)
+Date: 2026-10-21
+Ticket: release train (PHX-114, PHX-117, PHX-116, PHX-115, PHX-092, PHX-120,
+PHX-112 on PHX-118b/PHX-119 main)
+
+The seven branches were merged in that order onto main with merge commits, so
+every pinned commit stays reachable. Where two tickets changed the same code,
+both behaviours are kept:
+
+- **Capability flags.** `workspace_documents`, `memory`, `media`,
+  `document_generation`, `computer_control` and `voice` are enabled;
+  `web_research` is enabled but still reported only with the launch opt-in
+  (ADR-161). This supersedes ADR-161's "`computer_control` and `voice` stay
+  off", which described PHX-120 before PHX-112 and PHX-114 landed.
+- **Planner choice.** The runtime keeps PHX-120's order (ADR-160): the
+  research planner with a WebResearchTool, else the capability planner with
+  capability tools; PHX-112's control planner replaces only the v4 planner
+  (its stated role, ADR-152), i.e. when neither is configured. No prompt text
+  was written or changed. Because the backend always wires capability tools,
+  the desktop backend plans with the capability planner; `computer_control`
+  stays an allowed assignment domain, described with the approved
+  `CONTROL_DOMAIN_DESCRIPTION`. A planner prompt that names both capability
+  and control steps needs owner-approved text (follow-up).
+- **Assignment.** One ModelStepAssignmentResponder gets the v5 descriptions
+  plus, with a ControlStepRunner, the control description (the same text
+  ControlAssignmentResponder used).
+- **Grants.** With control steps, grants whose actor is `computer_control`
+  pass `control_grants`; every other grant passes `mission_grants` (document,
+  research and PHX-113 capability scopes). MissionService and the approve
+  route do the same; control requests, like research and media requests, skip
+  the workspace check.
+- **Events.** KAIDO's and the voice pipeline's events go through PHX-115's
+  MetricsCollector, like every mission event, before the stream.
+- **Runtime.** KAIDO's capability-registry handle is `_capability_registry`, so
+  it no longer shadows PHX-120's `_capabilities` step runner.
+- **Pins.** Protected paths whose merged content matches no earlier pin move to
+  `PHX_TRAIN_COMMIT`/`PHX_TRAIN_PATHS` at the train's resolution commit (two
+  commits: resolution, then pin), and leave their older blocks.

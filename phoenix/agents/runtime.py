@@ -706,7 +706,7 @@ class PhoenixRuntime:
         self._planner = AizenPlanner(self._agents)
         self._router = AgentModelRouter(self._agents, capability_registry)
         self._selector = ControlRoleModelSelector(capability_registry)
-        self._capabilities = capability_registry
+        self._capability_registry = capability_registry
         if kaido is not None and type(kaido) is not KaidoMonitor:
             raise PhoenixRuntimeError("Expected a KaidoMonitor")
         self._kaido = kaido
@@ -1014,7 +1014,7 @@ class PhoenixRuntime:
         if not usable:
             raise ProviderUnavailableError("No usable provider for KAIDO")
         for ref in usable:
-            if self._capabilities.get(ref.provider_id, ref.model_id) is not None:
+            if self._capability_registry.get(ref.provider_id, ref.model_id) is not None:
                 binding = self._binding(KAIDO_AGENT_ID, ref, evidence, structured=True)
                 return replace(
                     binding,
