@@ -1194,6 +1194,55 @@ def test_approval_outside_the_active_root_is_refused(
     )
 
 
+def test_web_research_request_is_approved_without_a_workspace(
+    backend: Backend,
+) -> None:
+    """PHX-111: a research request names the provider, not a workspace path.
+
+    The re-run's DuckDuckGo request reaches the autouse network guard, so the
+    mission fails explicitly as tool_failed: nothing leaves the test process.
+    """
+    backend.settings = AppSettings(
+        data_dir=backend.tmp / "data",
+        web_research_enabled=True,
+        _env_file=None,  # type: ignore[call-arg]
+    )
+    backend.provider.replies |= {
+        "research_planner": json.dumps(
+            {"steps": [{"objective": "Search the web for the codename."}]}
+        ),
+        "assignment": json.dumps(
+            {"assignments": [{"step_id": "s1", "domain": "web_research"}]}
+        ),
+        "research_specialist": json.dumps(
+            {"search_request": {"query": "pelican codename"}}
+        ),
+    }
+    with backend.client() as client:
+        accepted = chat(client, QUESTION, path="complex")
+        waiting = wait_for(client, accepted["mission_id"])
+        assert waiting["status"] == "waiting_permission", waiting
+        request = waiting["permission_request"]
+        pending = client.get(f"/permissions/{request['request_id']}").json()
+        assert (pending["tool_id"], pending["resource"], pending["risk_level"]) == (
+            "web.research",
+            "search:duckduckgo",
+            "P1",
+        )
+        response = client.post(
+            f"/permissions/{request['request_id']}/approve",
+            json={"duration": "session"},
+        )
+        assert response.status_code == 202, response.text
+        rerun = wait_for(client, response.json()["mission_id"])
+        assert (rerun["status"], rerun["failure_code"]) == ("failed", "tool_failed")
+        (grant,) = client.get("/grants").json()["items"]
+        assert (grant["tool_id"], grant["resource"]) == (
+            "web.research",
+            "search:duckduckgo",
+        )
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="junctions are Windows-only")
 def test_data_directory_overlap_uses_the_real_path(base: Path) -> None:
     """D3: a junctioned data directory still protects its real target."""

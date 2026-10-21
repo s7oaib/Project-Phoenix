@@ -1818,6 +1818,22 @@ PHX_110_PATHS = (
     "phoenix/api/routes/missions.py",
     "phoenix/api/routes/schemas.py",
 )
+# PHX-111 (ADR-135 to ADR-139) intentionally changed runtime.py (research
+# steps, research_calls, rate_limited), mission_events.py (research
+# allowlist values), prompts.py (v5 research prompts), api/missions.py and
+# api/routes/permissions.py (research grants), api/server.py (wiring) and
+# core/config.py (web_research_enabled); all stay pinned, at the PHX-111
+# implementation commit.
+PHX_111_COMMIT = "4a844623e48a1ad8acf39bae2a042e2bd1d58a33"
+PHX_111_PATHS = (
+    "phoenix/agents/runtime.py",
+    "phoenix/agents/mission_events.py",
+    "phoenix/agents/prompts.py",
+    "phoenix/api/missions.py",
+    "phoenix/api/routes/permissions.py",
+    "phoenix/api/server.py",
+    "phoenix/core/config.py",
+)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -1842,6 +1858,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_108_PATHS
         and path not in PHX_118_PATHS
         and path not in PHX_110_PATHS
+        and path not in PHX_111_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1856,6 +1873,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_118_COMMIT, path) for path in PHX_118_PATHS]
     baselines += [(PHX_108_COMMIT, path) for path in PHX_108_PATHS]
     baselines += [(PHX_110_COMMIT, path) for path in PHX_110_PATHS]
+    baselines += [(PHX_111_COMMIT, path) for path in PHX_111_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

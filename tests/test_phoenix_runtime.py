@@ -713,6 +713,10 @@ def test_prompt_set_is_versioned_with_role_markers() -> None:
     systems = (
         prompts.KNOWLEDGE_ANSWER_SYSTEM,
         prompts.KNOWLEDGE_VERIFICATION_SYSTEM,
+        # PHX-111 (v5) research roles.
+        prompts.RESEARCH_PLANNING_SYSTEM,
+        prompts.RESEARCH_SPECIALIST_SYSTEM,
+        prompts.RESEARCH_ANSWER_SYSTEM,
         prompts.TRIAGE_SYSTEM,
         prompts.DIRECT_SYSTEM,
         prompts.PLANNING_SYSTEM,
@@ -759,6 +763,19 @@ V2_PROMPT_SHA256 = {
 
 
 V3_CHANGED = {"ASSIGNMENT_SYSTEM"}
+# PHX-111 (ADR-138): v5 adds only these constants (and a "web_research" domain
+# description); the owner approves their exact text.
+V5_RESEARCH_CONSTANTS = frozenset(
+    {
+        "RESEARCH_PLANNING_SYSTEM",
+        "RESEARCH_SPECIALIST_SYSTEM",
+        "RESEARCH_ANSWER_SYSTEM",
+        "RESEARCH_TOOL_TASK",
+        "RESEARCH_ANSWER_TASK",
+        "RESEARCH_STEP_EXPECTED_OUTPUT",
+        "RESEARCH_STEP_COMPLETION_RULE",
+    }
+)
 DOCUMENTS_RULE = (
     'If "documents" is one of the allowed domains, assign every step that reads a\n'
     'file, lists a directory or inspects a file\'s metadata to "documents".\n'
@@ -790,6 +807,7 @@ def test_v3_changes_exactly_the_listed_v2_constants() -> None:
         "TRIAGE_SYSTEM",
         # PHX-110 (ADR-134) adds the knowledge constants in v5.
         *V5_PROMPT_SHA256,
+        *V5_RESEARCH_CONSTANTS,
     }
     for name, digest in V2_PROMPT_SHA256.items():
         text: str = getattr(prompts, name)
@@ -804,6 +822,7 @@ def test_v3_changes_exactly_the_listed_v2_constants() -> None:
         "documents",
         # PHX-110 (v5) adds only the knowledge domain's description.
         "knowledge_rag",
+        "web_research",  # PHX-111 (v5)
     }
 
 
@@ -867,6 +886,7 @@ def test_v4_adds_only_triage_and_keeps_every_v3_constant() -> None:
         "PROMPT_SET_VERSION",
         "TRIAGE_SYSTEM",
         *V5_PROMPT_SHA256,
+        *V5_RESEARCH_CONSTANTS,
     }
     for name, digest in V3_PROMPT_SHA256.items():
         assert digest_of(getattr(prompts, name)) == digest, name
@@ -900,12 +920,31 @@ def test_v5_adds_only_the_knowledge_texts() -> None:
     assert prompts.KNOWLEDGE_VERIFICATION_SYSTEM.format(max_checks=3).count("3") == 1
 
 
+def test_v5_research_planner_differs_from_planning_only_in_research() -> None:
+    # PHX-111: the research planner keeps the planner's reply contract and adds
+    # web search steps; PLANNING_SYSTEM itself is unchanged (v3 hash above).
+    research = prompts.RESEARCH_PLANNING_SYSTEM
+    assert research.splitlines()[0] == "PHOENIX ROLE: research_planner"
+    assert research.splitlines()[-2:] == prompts.PLANNING_SYSTEM.splitlines()[-2:]
+    assert "searching the web for one topic" in research
+    assert "{max_steps}" in research and research.format(max_steps=3)
+    assert '{"search_request": {"query": ' in prompts.RESEARCH_SPECIALIST_SYSTEM
+    assert "never invent a URL" in prompts.RESEARCH_ANSWER_SYSTEM
+    assert "web_research" in prompts.DOMAIN_DESCRIPTIONS
+
+
 def test_new_modules_stay_provider_neutral() -> None:
     # PHX-046 (ADR-082): only the runtime and tool steps may reach the filesystem
     # tool and its registry; every other ban holds for every module.
     # PHX-110 (ADR-130): retrieval_steps holds the P0 knowledge.retrieve
-    # definition, so it may import the registry too.
-    tool_modules = {"phoenix.tools.filesystem", "phoenix.tools.registry"}
+    # definition, so it may import the registry too. PHX-111 (ADR-135): the
+    # runtime and research steps may also reach the web research tool, never a
+    # concrete search provider, page fetcher or httpx.
+    tool_modules = {
+        "phoenix.tools.filesystem",
+        "phoenix.tools.registry",
+        "phoenix.tools.web_research",
+    }
     for name in (
         "prompts",
         "responders",
@@ -914,6 +953,7 @@ def test_new_modules_stay_provider_neutral() -> None:
         "triage",
         "final_grounding",
         "retrieval_steps",
+        "research_steps",
     ):
         tree = ast.parse((ROOT / f"phoenix/agents/{name}.py").read_text("utf-8"))
         imported = {
@@ -933,8 +973,12 @@ def test_new_modules_stay_provider_neutral() -> None:
             or module.startswith(
                 ("phoenix.tools", "phoenix.persistence", "phoenix.api")
             )
-            and not (name in ("runtime", "tool_steps") and module in tool_modules)
+            and not (
+                name in ("runtime", "tool_steps", "research_steps")
+                and module in tool_modules
+            )
             and not (name == "retrieval_steps" and module == "phoenix.tools.registry")
+            or module.startswith("phoenix.web")
             for module in imported
         ), name
 
