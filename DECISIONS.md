@@ -4596,3 +4596,168 @@ linked spelling. A swap between the root check and a later operation within one
 call stays outside the V1 threat model: the residual window shrinks from a
 whole mission to the inside of one call. No new dependencies and no new event
 types.
+
+## ADR-105 — faster-whisper for wake spotting and transcription on the CPU
+
+Status: Accepted (owner decision 2026-10-21; versions, constraint and model
+sizes are the recommended defaults, pending the owner's review in PHX-114)
+Date: 2026-10-21
+Ticket: PHX-114
+
+The owner chose faster-whisper for both the always-on wake check and speech to
+text, on the CPU, so the RTX 3050 stays with Ollama.
+
+- **Requirement.** `faster-whisper>=1.2.1,<2`, locked **1.2.1** (MIT). It
+  brings CTranslate2 4.8.3 (MIT), ONNX Runtime 1.31.0 (MIT), PyAV 18.1.0,
+  tokenizers 0.23.3, huggingface-hub, tqdm, PyYAML and their own
+  dependencies.
+- **Constraint.** `[tool.uv] constraint-dependencies = ["huggingface-hub<1"]`
+  (locked **0.36.2**, with requests 2.34.2 and urllib3 2.8.0). huggingface-hub
+  2.x depends on `httpx2`, which Starlette 1.7's TestClient then prefers over
+  `httpx`. That would change every API test's client library. huggingface-hub
+  1.x adds `typer` and its CLI tree. faster-whisper only imports the hub, and
+  PHOENIX never calls it (models load from a local directory with
+  `local_files_only=True`). hf-xet's platform marker excludes Windows'
+  `AMD64`, so it is locked but not installed on BLAZE-6.
+- **Use.** `WhisperModel(dir, device="cpu", compute_type="int8",
+  local_files_only=True)`. `tiny.en` (4 threads, beam 1) checks each speech
+  burst for the wake phrase, and `base.en` (8 threads, beam 5) transcribes
+  requests. Measured on BLAZE-6: base.en takes 0.5 s for a 3.2 s utterance,
+  small.en 1.8 s, with the same transcript. faster-whisper's own Silero VAD
+  filter is off; PHOENIX's endpointer decides utterances. Segments Whisper marks
+  as probable non-speech (`no_speech_prob` 0.6 or more) or decodes poorly
+  (`avg_logprob` -1.0 or less) are dropped, so silence yields no text.
+- **Imports.** The adapters load the engine through `importlib` when a
+  model is loaded, so importing the backend loads no native library, and
+  strict mypy needs no override.
+
+## ADR-106 — Piper for speech synthesis
+
+Status: Accepted (owner decision 2026-10-21; the licence note needs the
+owner's review)
+Date: 2026-10-21
+Ticket: PHX-114
+
+- **Requirement.** `piper-tts>=1.8,<2`, locked **1.8.0**, with ONNX Runtime
+  (shared with faster-whisper) and pathvalidate 3.3.1. It bundles espeak-ng for
+  phonemization; no system install is needed on Windows.
+- **Licence.** piper-tts 1.x (OHF-Voice/piper1-gpl) is **GPL-3.0-or-later**,
+  unlike the archived MIT rhasspy/piper. It is a runtime dependency of the
+  backend. That is fine for a local, unreleased FYP build. Distributing
+  PHOENIX with it carries GPL obligations, so the owner must review it before
+  any public release. Coqui XTTS stays a candidate behind the same TtsProvider
+  contract.
+- **Use.** `PiperVoice.load(path, use_cuda=False)` (ONNX Runtime CPU).
+  Loading runs one warm-up synthesis: Piper's first call costs about 4 s once.
+  After that, the first sentence of a reply is ready in about 45 ms and a
+  4-second reply in about 0.16 s. `PiperTtsProvider` returns the whole reply as
+  one PHX-063 `TtsAudio`, at most 115 s. Spoken replies are short renderings,
+  so streaming playback is not needed yet.
+
+## ADR-107 — sounddevice for microphone and speaker; numpy as a direct requirement
+
+Status: Accepted (owner decision 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-114
+
+- **Requirements.** `sounddevice>=0.5.6,<0.6`, locked **0.5.6** (MIT), with
+  cffi 2.1.1 and pycparser 3.11. Its Windows wheel bundles PortAudio. Also
+  `numpy>=2,<3`, locked **2.4.6**. numpy was already pulled in by CTranslate2
+  and ONNX Runtime, but PHOENIX now uses it directly: PCM to float for Whisper,
+  and linear resampling.
+- **Capture.** The default input is opened only when voice starts. It
+  delivers 30 ms mono 16 kHz S16LE `PcmAudioFrame`s through a bounded queue
+  (6 s; the oldest frame is dropped and counted). A device that refuses 16 kHz
+  is opened at its default rate and resampled. A device that stops delivering
+  for 2 s fails the run (`microphone_unavailable`).
+- **Playback.** Blocking writes in a worker thread, in 50 ms blocks, checking
+  an interrupt flag between blocks (barge-in). A device that refuses the voice
+  rate gets resampled audio.
+- **Privacy.** Audio is never written to disk, logged or put in events.
+
+## ADR-108 — The voice loop: same path as chat, opt-in, isolated, observable
+
+Status: Accepted (recommended defaults applied; the owner reviews R4 to R11
+in `tickets/PHX-114-voice-pipeline.md`)
+Date: 2026-10-21
+Ticket: PHX-114
+
+Decision:
+
+- **Composition.** `VoicePipeline` drives the PHX-064
+  `VoiceConversationManager`. For the first wake of a run it also drives the
+  PHX-065 `RisePhoenixStartupCoordinator`: the spoken acknowledgement, six real
+  health checks, then the ready or degraded line. Later wakes play a 160 ms
+  chime. An energy endpointer (EnergyVad, -45 dBFS, 30 ms frames) cuts
+  utterances: 450 ms of silence ends a wake utterance and 810 ms ends a request.
+  The first 3 s of a wake utterance go to the wake provider. A wake utterance
+  of 2.2 s or more is also the first request. Requests are rechunked into 1 s
+  frames, up to 30 s. Follow-ups need no wake phrase for 30 s of silence.
+- **Same path as `POST /chat` (INV-001, INV-003, INV-004).** The responder
+  calls `MissionService.create_conversation` and `submit(conversation_id, text,
+  None)`, so PHOENIX triages the request and tool calls still pass
+  PermissionEngine and ToolRegistry. It reads the settled mission (at most
+  600 s) and speaks a short rendering of the stored answer. It never approves,
+  denies or revokes. A mission waiting for permission is announced aloud and
+  left to the user. One conversation is kept per voice run.
+- **Barge-in.** A stricter detector (-28 dBFS for 8 consecutive frames) runs
+  while PHOENIX speaks. The manager's scoped interruption stops playback, and
+  the speech already heard seeds the next request. There is no acoustic echo
+  cancellation.
+- **Opt-in.** Voice is off at launch. `POST /voice/start` (202) or
+  `PHOENIX_VOICE_AUTOSTART=1` starts it. `POST /voice/stop` releases the
+  microphone. Models load in worker threads while the state is `starting`.
+- **Isolation (INV-015, INV-016).** A failed transcription is retried
+  quietly twice, then the state becomes `text_only`. A TTS or playback failure
+  gives `degraded_voice`, and answers continue in the chat. Five wake errors in
+  a row, a dead microphone, missing models or missing native libraries end the
+  run as `unavailable` with a closed code. `start`, `stop` and `status` never
+  raise. Voice stops first at shutdown, before missions are cancelled.
+- **API.** `GET /voice/status`, `POST /voice/start` and `POST /voice/stop`,
+  behind PHX-101. Each returns `state`, `code`, `wake_phrase`, `session_id`,
+  `conversation_id`, `mission_id` and six `components` (`wake_word`, `vad`,
+  `stt`, `tts`, `conversation`, `audio_output`: available, degraded or
+  unavailable). There is no transcript or answer text; those stay in the
+  conversation.
+- **Events.** The PHX-103 allowlist gains `voice.listening`, `voice.speaking`
+  and `voice.interrupted`. Their payloads may hold `state` (off, starting,
+  sleeping, listening, thinking, speaking, degraded_voice, text_only,
+  unavailable), `session_id`, `turn_id`, `mission_id` (UUIDs) and `code`.
+  `voice.listening` carries every state change except speaking and barge-in.
+  The correlation ID is the voice session, and the agent is `voice` (UTA). The
+  vocabulary stays at 32. The manager's and coordinator's own events stay on a
+  private bus.
+- **Pins.** `mission_events.py`, `server.py` and `routes/__init__.py` (in
+  `test_prompt_injection_defenses.py`), and `pyproject.toml` and `uv.lock` (in
+  `workspace.test.mjs`), move to the PHX-114 implementation commit in a
+  separate pin commit; the PR must merge with a merge commit.
+
+## ADR-109 — Voice models: pinned, explicitly installed, stored on D:
+
+Status: Accepted (owner decision 2026-10-21: whisper models and one Piper
+English voice pre-approved, stored under `D:\Phoenix\models\voice`, never
+auto-downloaded for end users)
+Date: 2026-10-21
+Ticket: PHX-114
+
+- **Manifest.** `phoenix/voice/engines/models.py` pins every file to a Hugging
+  Face commit URL, an exact size and a SHA-256 digest:
+  - Systran `faster-whisper-tiny.en` (75.5 MB), `base.en` (145 MB) and
+    `small.en` (484 MB, optional), all MIT;
+  - Piper `en_US-norman-medium` (63.5 MB and its JSON config), from
+    rhasspy/piper-voices, MIT. The voice was trained from scratch on public
+    domain LibriVox recordings.
+- **Setup.** `scripts/voice_setup.py` is the only downloader, run explicitly
+  by the owner or at first-run setup. It uses stdlib HTTPS to the pinned URLs,
+  writes to a `.partial` file, verifies size and digest before an atomic
+  rename, and keeps files that already verify. `--check` verifies with no
+  network. The backend never downloads. It checks file sizes and reports
+  `models_missing` when anything is absent.
+- **Location.** `PHOENIX_VOICE_MODELS_DIR`, else `D:\Phoenix\models\voice`
+  when that directory exists (BLAZE-6 keeps large data on D:), else
+  `~/.phoenix/models/voice`. `PHOENIX_VOICE_STT_MODEL` may select `tiny.en` or
+  `small.en`; the default is `base.en`.
+- **Primary voice provenance.** The contract requires the primary profile to
+  be `original`. The stock Piper voice is declared original in that sense: a
+  generic synthetic voice that imitates no character or voice actor, built from
+  a public-domain dataset. This is a declaration, not proof of rights (PHX-063).

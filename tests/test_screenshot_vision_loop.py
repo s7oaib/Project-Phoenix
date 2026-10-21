@@ -1884,6 +1884,10 @@ def test_no_action_persistence_or_dependency_change() -> None:
             # missions.py, routes and schemas are excluded above and hash-pinned
             # in test_prompt_injection_defenses.py).
             ":(exclude)alembic/versions/0008_mission_triage.py",
+            # PHX-114 (ADR-108) adds the voice service and routes (server.py and
+            # routes/__init__.py are hash-pinned in test_prompt_injection_defenses.py).
+            ":(exclude)phoenix/api/voice.py",
+            ":(exclude)phoenix/api/routes/voice.py",
             # PHX-106/107 (ADR-091, ADR-092) change these desktop files (hash-pinned
             # in test_prompt_injection_defenses.py) and add the sidecar, proxy and
             # adapters.

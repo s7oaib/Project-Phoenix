@@ -679,7 +679,11 @@ def test_without_a_sink_nothing_is_published_and_results_match(stack: Stack) -> 
         (EventType.STEP_STARTED, {"step_id": "x" * 129}),
         (EventType.STEP_STARTED, {"step_id": ["s1"]}),
         (EventType.MEMORY_CREATED, {}),
-        (EventType.VOICE_SPEAKING, {}),
+        # PHX-114 publishes voice.* (ADR-108): state, IDs and codes only.
+        (EventType.VOICE_SPEAKING, {"transcript": "The codename is PELICAN-7."}),
+        (EventType.VOICE_LISTENING, {"state": "PELICAN"}),
+        (EventType.VOICE_INTERRUPTED, {"turn_id": "PELICAN-7"}),
+        (EventType.VOICE_LISTENING, {"code": "passwd"}),
     ],
 )
 def test_allowlist_refuses_content_and_unknown_fields(
@@ -762,6 +766,10 @@ def test_vocabulary_stays_32_and_mapping_uses_existing_types() -> None:
         "recovery.started",
         "recovery.completed",
         "recovery.exhausted",
+        # PHX-114 (ADR-108): the voice pipeline's state.
+        "voice.listening",
+        "voice.speaking",
+        "voice.interrupted",
     }
 
 

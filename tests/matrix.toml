@@ -29,7 +29,7 @@ timeout = 1200
 [[gate]]
 # pyproject.toml is guard-pinned, so scripts/ get their own strict mypy gate.
 id = "mypy-scripts"
-command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py"]
+command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py", "scripts/voice_setup.py", "scripts/voice_smoke.py"]
 timeout = 600
 
 [[gate]]
@@ -435,6 +435,19 @@ categories = ["unit", "migrations"]
 path = "tests/test_voice_conversation.py"
 categories = ["unit", "integration", "voice_states", "recovery", "permission_bypass"]
 # recovery: test_stage_failures_and_degraded_recovery (degraded fail-safe path)
+
+[[file]]
+path = "tests/test_voice_pipeline.py"
+categories = ["unit", "integration", "api_contract", "voice_states", "recovery", "end_to_end", "permission_bypass", "secret_leakage"]
+# PHX-114 voice pipeline (fake audio/models; live test skipped unless PHOENIX_VOICE_LIVE=1)
+# end_to_end/integration: test_spoken_request_runs_as_a_chat_mission_and_the_answer_is_spoken
+# (real composition root: MissionService, triage, PermissionEngine, SQLite; scripted model)
+# voice_states: test_wake_listen_answer_speak_then_sleep_after_the_follow_up_window,
+# test_user_speech_interrupts_playback_and_becomes_the_next_turn
+# recovery: test_voice_failures_never_break_text_chat, test_transcription_failures_retry_quietly_then_fall_back_to_text
+# api_contract: test_voice_routes_require_the_token_and_start_nothing_by_themselves
+# permission_bypass: test_spoken_outcomes_never_claim_success_or_approve
+# secret_leakage: test_voice_service_publishes_allowlisted_state_and_isolates_failures
 
 [[file]]
 path = "tests/test_wake_word_provider.py"

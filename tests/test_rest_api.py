@@ -367,9 +367,14 @@ def test_route_table_is_exact_and_deferred_routes_do_not_exist(
         for method in route.methods or ()
     }
     assert declared == API_ROUTES
+    # PHX-114 (ADR-108) adds the voice routes; tests/test_voice_pipeline.py
+    # covers them.
     assert routes_of(backend.app()) == API_ROUTES | {
         ("GET", "/health"),
         ("GET", "/ready"),
+        ("GET", "/voice/status"),
+        ("POST", "/voice/start"),
+        ("POST", "/voice/stop"),
     }
     # PHX-110 owns these; they are not even stubs.
     for method, path in (
