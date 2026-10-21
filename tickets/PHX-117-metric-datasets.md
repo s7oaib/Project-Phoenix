@@ -219,4 +219,14 @@ NOT RUNNABLE. Each reason now names where the metric is measured.
 
 ## Completion evidence
 
-Recorded after the full matrix run (see the second commit).
+- Implementation commit `1ee11642d8bcd34d50d158abb1306cb01d80f7b9`.
+- `uv run python scripts/test_matrix.py` on that commit, clean tree
+  (2026-10-21, 09:05–09:56 UTC): **PASS**.
+  - All 13 gates passed, including `mypy-scripts` with both new scripts.
+  - pytest: 16409 passed, 0 failed, 30 skipped.
+  - npm: 195/195.
+  - All 19 docs/24 categories passed.
+- An earlier standalone `pytest -q` gave the same result: 16409 passed and
+  30 skipped.
+- No frozen file changed. Nothing under `phoenix/` was touched, so there was
+  no re-pin and the second commit is evidence only.
