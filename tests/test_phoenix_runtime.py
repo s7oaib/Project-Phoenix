@@ -709,7 +709,10 @@ def test_assignment_without_its_own_tier_row_uses_the_phoenix_row() -> None:
 
 
 def test_prompt_set_is_versioned_with_role_markers() -> None:
-    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v5"
+    # PHX-121 (ADR-166): v6 adds the combined planner, which keeps the planner
+    # marker as another alternative to PLANNING_SYSTEM.
+    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v6"
+    assert prompts.COMBINED_PLANNING_SYSTEM.splitlines()[0] == "PHOENIX ROLE: planner"
     systems = (
         prompts.KNOWLEDGE_ANSWER_SYSTEM,
         prompts.KNOWLEDGE_VERIFICATION_SYSTEM,
@@ -801,6 +804,8 @@ def test_v3_changes_exactly_the_listed_v2_constants() -> None:
         "TRIAGE_SYSTEM",
         # PHX-110, PHX-111 and PHX-113 add their constants in v5 (PHX-120).
         *V5_PROMPT_SHA256,
+        # PHX-121 adds the combined planner in v6.
+        *V6_PROMPT_SHA256,
     }
     for name, digest in V2_PROMPT_SHA256.items():
         text: str = getattr(prompts, name)
@@ -910,6 +915,48 @@ V5_LINES_SHA256 = {
 V5_CHANGED_SHA256 = {
     "FINAL_VERIFICATION_SYSTEM": "6a162b4e3195939d9b02b0ef209565b8",
 }
+# PHX-121 (ADR-166): phoenix-prompts-v6 adds only the combined planner and its
+# capability lines (owner-gated text); any change needs a new prompt set version.
+V6_PROMPT_SHA256 = {
+    "COMBINED_PLANNING_SYSTEM": "5c8fdae04360164d035ef8b7e72beac6",
+}
+V6_LINES_SHA256 = {
+    "documents": "b159c166d68e8c86d231c786376f705c",
+    "read_document": "0110241e410d87db18aa605236a015c9",
+    "create_document": "2ce3fc72e798c71aca8f75e6b568228b",
+    "knowledge_rag": "5f645909649a4a64356066dae5cd7f1e",
+    "web_research": "cdd7c1802c22785bb4df818e262334c8",
+    "spotify": "e384b370ef41d674a4abd98499b5697e",
+    "youtube": "ff6a96e2cea42bd82eafe484ee381373",
+    "browser": "a7085594a2bbdfeddd9c0d6a8ef35de2",
+    "windows": "61a545bd720b3d3d893c9d3442ce8185",
+    "screen": "bf6c44ede2c2369fed11be1d4a5ac6e9",
+    "terminal": "e5f8bddd75eb6c206eb70d745f8ab918",
+}
+
+
+def test_v6_adds_only_the_combined_planner() -> None:
+    # PHX-121 (ADR-166): every v5 constant is pinned above and unchanged; v6
+    # adds exactly these texts, which keep the planner's reply contract.
+    for name, digest in V6_PROMPT_SHA256.items():
+        assert digest_of(getattr(prompts, name)) == digest, name
+    assert list(prompts.COMBINED_PLANNING_LINES) == list(V6_LINES_SHA256)
+    for key, digest in V6_LINES_SHA256.items():
+        line = prompts.COMBINED_PLANNING_LINES[key]
+        assert digest_of(line) == digest, key
+        assert line.startswith("- ") and "{" not in line and "}" not in line
+    combined = prompts.COMBINED_PLANNING_SYSTEM
+    assert combined.splitlines()[-2:] == prompts.PLANNING_SYSTEM.splitlines()[-2:]
+    filled = combined.format(max_steps=3, capabilities="- x")
+    assert "between 1\nand 3 ordered steps" in filled and "\n- x\n" in filled
+    flat = " ".join(combined.split())
+    for rule in (
+        "do not name tools, services or operations that are not listed",
+        "only when the user explicitly asked for it",
+        "Never plan a step that grants or approves a permission",
+        "does exactly one of these",
+    ):
+        assert rule in flat, rule
 
 
 def test_v4_adds_only_triage_and_keeps_every_v3_constant() -> None:
@@ -923,6 +970,7 @@ def test_v4_adds_only_triage_and_keeps_every_v3_constant() -> None:
         "PROMPT_SET_VERSION",
         "TRIAGE_SYSTEM",
         *V5_PROMPT_SHA256,
+        *V6_PROMPT_SHA256,
     }
     for name, digest in V3_PROMPT_SHA256.items():
         # PHX-120 (ADR-160): v5 changes FINAL_VERIFICATION_SYSTEM only.
