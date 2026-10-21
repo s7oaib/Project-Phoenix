@@ -2062,5 +2062,26 @@ test('PHX-087 suppressed sources report counts unavailable rather than claiming 
   assert.doesNotMatch(empty, /Diagnostic counts unavailable/);
 });
 
+test('PHX-108 the native proxy allowlist is exactly the twenty documented REST routes', () => {
+  const proxy = readFileSync(new URL('../apps/desktop/src-tauri/src/proxy.rs', import.meta.url), 'utf8');
+  const table = proxy.slice(proxy.indexOf('pub const ROUTES'), proxy.indexOf('];', proxy.indexOf('pub const ROUTES')));
+  const routes = [...table.matchAll(/Method::(Get|Post|Patch),\s*"([^"]+)",\s*&\[([^\]]*)\]/g)]
+    .map(([, method, path, keys]) => `${method.toUpperCase()} ${path} [${keys.replace(/\s+/g, '')}]`);
+  assert.deepEqual(routes, [
+    'GET /health []', 'GET /ready []', 'POST /chat []', 'GET /missions ["conversation_id","limit","offset"]', 'GET /missions/{id} []',
+    'POST /missions/{id}/cancel []', 'POST /missions/{id}/run-again []', 'GET /permissions ["limit","offset"]', 'GET /permissions/{id} []',
+    'POST /permissions/{id}/approve []', 'POST /permissions/{id}/deny []', 'GET /grants ["include_inactive","limit","offset"]',
+    'GET /conversations ["limit","offset"]', 'GET /conversations/{id}/messages ["limit","offset"]', 'GET /agents []', 'GET /models []',
+    'GET /settings []', 'PATCH /settings []',
+    // PHX-108 (ADR-110, ADR-112): read-only setup routes, no query and no body.
+    'GET /onboarding []', 'GET /capabilities []',
+  ]);
+  // Every fixed route the adapters name is on the allowlist (destructive routes stay absent).
+  const core = readFileSync(new URL('../apps/desktop/src/adapters/core.ts', import.meta.url), 'utf8');
+  const named = [...core.matchAll(/(?:request\('(GET|POST|PATCH)', |this\.get\()[`']([^`'?$]+)[`'?]/g)].map(([, method, path]) => `${method ?? 'GET'} ${path}`);
+  for (const route of ['GET /onboarding', 'GET /capabilities', 'PATCH /settings', 'GET /settings']) assert.ok(named.includes(route), route);
+  for (const route of named) assert.ok(routes.some((entry) => entry.startsWith(`${route} `)), route);
+});
+
 // PHX-106/107 (ADR-091, ADR-092): adapter, transport and native-boundary tests run in this file's node:test run.
 import './desktop_adapters.mjs';

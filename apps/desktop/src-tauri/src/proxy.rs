@@ -29,6 +29,8 @@ pub enum Method {
 
 /// Exact (method, route) pairs; `{id}` is one canonical lowercase UUID segment. Destructive
 /// routes no adapter uses (grant revoke, conversation deletes) are deliberately absent.
+/// PHX-108 (ADR-110, ADR-112) adds the two read-only setup routes, `GET /onboarding` and
+/// `GET /capabilities` (no query, no body).
 pub const ROUTES: &[(Method, &str, &[&str])] = &[
     (Method::Get, "/health", &[]),
     (Method::Get, "/ready", &[]),
@@ -60,6 +62,8 @@ pub const ROUTES: &[(Method, &str, &[&str])] = &[
     (Method::Get, "/models", &[]),
     (Method::Get, "/settings", &[]),
     (Method::Patch, "/settings", &[]),
+    (Method::Get, "/onboarding", &[]),
+    (Method::Get, "/capabilities", &[]),
 ];
 
 /// Closed failure codes returned to the webview.
@@ -281,6 +285,8 @@ mod tests {
             ("GET", "/agents".to_owned()),
             ("GET", "/models".to_owned()),
             ("GET", "/settings".to_owned()),
+            ("GET", "/onboarding".to_owned()),
+            ("GET", "/capabilities".to_owned()),
         ] {
             let admitted =
                 admit(method, &path, None).unwrap_or_else(|e| panic!("{method} {path}: {e:?}"));
@@ -307,7 +313,13 @@ mod tests {
             Some(json!({"workspace_root": "D:\\work"}))
         )
         .is_ok());
-        assert_eq!(ROUTES.len(), 18);
+        assert!(admit(
+            "PATCH",
+            "/settings",
+            Some(json!({"default_mission_path": "direct"}))
+        )
+        .is_ok());
+        assert_eq!(ROUTES.len(), 20);
     }
 
     #[test]
@@ -340,6 +352,15 @@ mod tests {
             ("GET", "/missions?limit=".to_owned()),
             ("GET", "/missions?limit".to_owned()),
             ("GET", "/agents?limit=1".to_owned()),
+            // PHX-108: the setup routes are GET only, with no query.
+            ("POST", "/onboarding".to_owned()),
+            ("PATCH", "/onboarding".to_owned()),
+            ("POST", "/capabilities".to_owned()),
+            ("PATCH", "/capabilities".to_owned()),
+            ("GET", "/onboarding?refresh=true".to_owned()),
+            ("GET", "/capabilities?limit=1".to_owned()),
+            ("GET", "/onboarding/".to_owned()),
+            ("GET", "/capabilities/computer_control".to_owned()),
             ("GET", "/health\r\nX: y".to_owned()),
             ("GET", "/héalth".to_owned()),
             ("GET", format!("/missions?offset={}", "1".repeat(MAX_PATH))),
@@ -357,6 +378,10 @@ mod tests {
     fn bodies_are_bounded_json_objects_on_write_routes_only() {
         assert_eq!(
             admit("GET", "/settings", Some(json!({}))),
+            Err(ProxyError::InvalidBody)
+        );
+        assert_eq!(
+            admit("GET", "/onboarding", Some(json!({}))),
             Err(ProxyError::InvalidBody)
         );
         assert_eq!(

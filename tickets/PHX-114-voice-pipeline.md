@@ -87,6 +87,16 @@ They are joined in a live loop. A spoken request is submitted exactly like a typ
   - `pyproject.toml` and `uv.lock` move from `829670b` to the same commit in `tests/workspace.test.mjs`.
   - This lands in a separate pin commit, so the PR must merge with a merge commit.
   - Guards updated for the new behaviour: the route table (`test_rest_api.py`), the event mapping (`test_mission_events.py`), the distribution requirements (`test_bootstrap.py`), the websockets lock gate (sets aside exactly the PHX-114 delta, which `test_voice_pipeline.py` pins) and the `phoenix/api` diff guards (exclude the two new modules).
+- **R15 — Merged with PHX-108.**
+  - `server.py` keeps both PHX-108's ModelRegistrar refresher and the voice
+    service. Voice starts after the refresher and stops first.
+  - `routes/__init__.py` installs PHX-108's setup routes and the voice routes.
+  - PHX-108's ADR-112 `voice` capability flag is flipped to `enabled`; live
+    availability stays in `GET /voice/status`.
+  - The three files move to a new PHX-114 pin at the resolution commit; the
+    PHX-108 and PHX-118 pin blocks stay.
+  - The owner accepted piper-tts's GPL-3.0 licence for the FYP (ADR-106); it
+    must be revisited before any public release.
 - **R14 — Primary voice provenance.** The Piper voice is declared `original` in the PHX-063 sense: a stock synthetic voice that imitates no character or voice actor. Its dataset is public domain. This is a declaration, not a rights proof (ADR-109).
 
 ## Requirements

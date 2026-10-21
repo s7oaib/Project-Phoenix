@@ -1189,7 +1189,7 @@ def test_protected_production_migrations_dependencies_and_events() -> None:
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0008_mission_triage"]
+    ).get_heads() == ["0009_default_mission_path"]
 
 
 def test_repository_credential_signature_scan() -> None:
