@@ -120,3 +120,4 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-115 Observability — TODO
 - PHX-116 Colibri deep tier — TODO
 - PHX-117 Metric datasets — TODO
+- PHX-118 LEVI final-verifier reliability — DONE (deterministic grounding pre-check, ADR-100; proposed v5 prompt text awaits owner approval)

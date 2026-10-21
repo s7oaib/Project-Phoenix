@@ -858,7 +858,14 @@ def test_new_modules_stay_provider_neutral() -> None:
     # PHX-046 (ADR-082): only the runtime and tool steps may reach the filesystem
     # tool and its registry; every other ban holds for every module.
     tool_modules = {"phoenix.tools.filesystem", "phoenix.tools.registry"}
-    for name in ("prompts", "responders", "runtime", "tool_steps", "triage"):
+    for name in (
+        "prompts",
+        "responders",
+        "runtime",
+        "tool_steps",
+        "triage",
+        "final_grounding",
+    ):
         tree = ast.parse((ROOT / f"phoenix/agents/{name}.py").read_text("utf-8"))
         imported = {
             node.module or ""
