@@ -5107,3 +5107,135 @@ After the final answer is verified, PHOENIX appends a deterministic
 Limitations: the checks prove that quotes exist and numbers are quoted, not
 that a claim's wording is entailed by its quote; the final answer's own
 wording is judged by the existing final verifier.
+
+## ADR-140 — Opt-in permissioned media and document steps in missions
+
+Status: Accepted (recommended options applied under the owner's instruction,
+"recommended options"; R1–R12 in `tickets/PHX-113-media-documents.md` await the
+owner's review; the prompt text awaits explicit approval, ADR-144)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Context: missions could only read UTF-8 text through PHX-046. The parsers
+(PHX-072), the generator (PHX-073) and the Spotify/YouTube tools (PHX-070/071)
+existed but were unreachable from a mission. Other tickets edit `runtime.py`,
+`tool_steps.py` and `prompts.py` concurrently.
+
+Decision:
+
+- New modules carry the work: `phoenix/tools/document_files.py`,
+  `phoenix/agents/capability_steps.py` and `phoenix/agents/capability_prompts.py`.
+  `PhoenixRuntime` gains one opt-in argument, `capabilities: CapabilityTools`;
+  without it the runtime is unchanged. With it, a `documents` step runs on
+  `CapabilityStepRunner` (PHX-046's three read-only filesystem operations when a
+  FilesystemTool is also given, plus `read_document` and `create_document`) and a
+  `media` step offers Spotify and YouTube control.
+- The PHX-046 pattern is kept exactly: one proposal on the structured binding,
+  a closed allowlist, PHOENIX-built calls and requests, the tool's
+  PermissionEngine deciding, `waiting_permission` on APPROVAL_REQUIRED, the
+  result reaching models only as the guarded `tool_output` item (INV-017), one
+  call per step and no retries (PHX-109 R10).
+- LEVI checks the tool evidence deterministically before its model
+  (`deterministic.tool_evidence`: correlated call/request/resource/actor/tool,
+  ALLOWED by a caller grant, attempted success, effect matching the operation,
+  a verified create, an accepted P2 media command); the model check is grounded
+  in the same guarded item (INV-008). Filesystem operations keep PHX-046/047's
+  responders and `ToolCallRecord`s.
+- `MissionTrace.capability_calls` (additive, default empty; old traces load)
+  records IDs, statuses, hashes and lengths only. The PHX-103 allowlist gains
+  the PHX-113 tool IDs, their actions and the `media` agent role; the event
+  vocabulary stays at 32 types.
+- `media` is offered only when `prompts.DOMAIN_DESCRIPTIONS` describes it,
+  because the assignment prompt must describe every allowed domain.
+- The composition root is not wired; that follows prompt approval.
+- `runtime.py` and `mission_events.py` move from the PHX-109 pin to the PHX-113
+  implementation commit (`PHX_113_COMMIT`/`PHX_113_PATHS`) in a separate pin
+  commit; `prompts.py`, `tool_steps.py`, `responders.py` and every tool module
+  stay byte-identical. Merge with a merge commit.
+
+No new dependencies, event types, migrations or API changes.
+
+## ADR-141 — PHX-113 grants: exact scope, P2 for the session only
+
+Status: Accepted (recommended option; owner review pending)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Decision: grants come only from the runtime caller (INV-003). A PHX-113 grant
+names one closed tool, its own action, the exact resource PHOENIX builds (the
+absolute workspace path, or the Spotify/YouTube canonical resource including the
+query hash), the step's actor (`document_analyst` or `media`), a fixed reason
+(`CAPABILITY_DOCUMENT_REASON` or `MEDIA_TOOL_REASON`) and the tool's risk. P1
+grants may be SESSION or PERSISTENT, as in PHX-046; P2 grants (document create,
+media play/pause/open) are SESSION only, so approval to create a file or control
+playback never outlives the backend session. PHX-046 grants pass unchanged.
+Duplicate IDs or scopes, unknown tools and mismatched fields fail before the
+mission starts. No policy rule auto-approves P2.
+
+Consequence: the user approves a path or a media request, not generated
+content; a re-run regenerates content and a different query needs a new
+approval.
+
+## ADR-142 — Workspace documents: parse to text, create-only writes
+
+Status: Accepted (recommended option; owner review pending)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Decision:
+
+- `DocumentFileTool` reuses FilesystemTool's workspace rules (`_path`,
+  `_target`, `_checked_root`: no traversal, links or junctions; the root is
+  re-checked on every call; ADR-094) instead of re-implementing them.
+- `document.read` (P1) reads one `.pdf/.docx/.md/.markdown/.csv` file
+  (≤ 4 MiB) and parses it with the PHX-072 parsers and their bounds; text over
+  20,000 characters fails `limit_exceeded` and is never truncated.
+- `document.create` (P2, docs/08 "create new safe output") generates Markdown
+  or DOCX through the PHX-073 generator, or CSV through the standard library,
+  then creates the file with an exclusive open: an existing file is never
+  overwritten (`already_exists`, no effect) and missing folders are not
+  created. The file is read back and compared before `verified: true`
+  (docs/19). CSV cells that could run as spreadsheet formulas are prefixed with
+  `'` (plain numbers are kept).
+- No overwrite (P3), delete or mkdir operation and no PDF output in V1.
+- Dependencies: none added. pypdf 6.19.0, python-docx 1.2.0 and ReportLab
+  5.0.1 were already promoted and locked by PHX-072/073 (ADR-065, ADR-066), so
+  no per-dependency ADR is needed.
+
+Limitations: a create cancelled while its worker thread writes cannot be
+undone; the tool, like the parsers and generator it owns, serves one event loop.
+
+## ADR-143 — Spotify and YouTube in missions
+
+Status: Accepted (recommended option; owner review pending)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Decision: a `media` step (agent `media`, BROOK) may propose Spotify `search`
+(P1), `play` (optional track/album/artist/playlist URI) and `pause` (P2), and
+YouTube `search` (P1), `open` (the tool's `cue`: load a video without playing),
+`play` and `pause` (P2), through the unchanged PHX-070/071 tools. Transfer,
+volume, seek, queue operations and browser external-open are not offered.
+Credentials stay behind the PHX-045 SecretStore: Spotify tokens come from the
+owner's one-time PKCE link (`begin_authorization`/`complete_authorization`),
+the YouTube API key is stored as `youtube.api_key`; nothing is hardcoded and a
+missing setup fails `tool_failed`. Third-party titles are guarded tool output;
+command acceptance never proves audible or visible playback. Tests use only
+`httpx.MockTransport` and a fake player.
+
+## ADR-144 — PHX-113 prompt text stays a draft outside the approved set
+
+Status: Accepted (owner approval of the text pending)
+Date: 2026-10-21
+Ticket: PHX-113
+
+Decision: ADR-081 requires the owner to approve exact prompt text. The new
+role prompts (`document_capability`, `document_capability_answer`,
+`media_specialist`, `media_answer`, `capability_verifier`), the proposed
+`documents` and `media` domain descriptions and the proposed planner text live
+in `phoenix/agents/capability_prompts.py` as `phx-113-draft-1`, not in
+`prompts.py`, whose `PROMPT_SET_VERSION` stays `phoenix-prompts-v4`. The
+capability steps are opt-in and unwired, so no production mission uses
+unapproved text. On approval the text moves into `prompts.py` as
+`phoenix-prompts-v5` and the composition root is wired. Until then the planner
+does not plan writes or media and `media` cannot be assigned.

@@ -151,3 +151,25 @@ integration can verify a saved file exists/is readable. See ADR-066.
 LIVE DOCUMENT GENERATION ACCEPTANCE: PENDING — deterministic in-memory PDF/DOCX/Markdown generation and structural verification passed; no user-owned production document has been exported.
 
 LIVE DISK EXPORT ACCEPTANCE: NOT IMPLEMENTED — PHX-073 does not write artifact bytes to disk; binary persistence remains a separate permission-gated integration.
+
+## Implemented workspace document steps — PHX-113
+
+`phoenix.tools.document_files.DocumentFileTool` brings PHX-072 parsing and
+PHX-073 generation to the workspace behind PermissionEngine, reusing
+FilesystemTool's path, link/junction and per-call root checks.
+
+- `document.read` (P1): one `.pdf/.docx/.md/.markdown/.csv` file (≤ 4 MiB),
+  parsed to text (≤ 20,000 characters, never truncated; PDF pages keep
+  `[page N]`). The text is untrusted: in a mission it reaches models only as the
+  guarded `tool_output` item, and LEVI's grounded check uses the same item.
+- `document.create` (P2): one new Markdown/DOCX (title + plain sections, via the
+  generator) or CSV (equal-width rows; formula-like cells prefixed with `'`)
+  file, created exclusively in an existing folder. It never overwrites
+  (`already_exists`), then reads the file back and compares bytes before
+  reporting `verified: true` — the saved-file check PHX-073 deferred.
+
+Missions reach both through the opt-in PHX-113 capability steps with caller
+grants only (P2 SESSION only); see
+[the PHX-113 contract](../tickets/PHX-113-media-documents.md) and ADR-140–144.
+
+LIVE DISK EXPORT ACCEPTANCE: IMPLEMENTED (Markdown/DOCX/CSV, create-only) — verified on temporary workspaces in tests; live missions await the owner's prompt approval and wiring.

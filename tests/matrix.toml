@@ -264,6 +264,18 @@ categories = ["unit", "recovery", "forged_tool_results"]
 # recovery: test_one_exact_request_one_bounded_proposal_no_execution
 
 [[file]]
+path = "tests/test_media_document_steps.py"
+categories = ["unit", "integration", "end_to_end", "tools", "permissions", "path_traversal", "permission_bypass", "prompt_injection", "malicious_documents", "forged_tool_results", "secret_leakage"]
+# PHX-113 media and document steps (real PhoenixRuntime + LEVI + DocumentFileTool/FilesystemTool/Spotify/YouTube
+# tools + PermissionEngine on tmp_path; scripted model, MockTransport, fake player)
+# end_to_end: test_read_document_mission_completes_with_verified_evidence, test_create_document_mission_writes_one_verified_file
+# path_traversal: test_write_path_traversal_and_bad_targets_are_refused, test_write_path_traversal_in_a_mission_is_rejected, test_write_through_junction_is_refused
+# permission_bypass: test_write_without_grant_waits_and_writes_nothing, test_write_denied_path_in_a_mission, test_model_text_cannot_grant
+# malicious_documents / prompt_injection: test_malicious_document_stays_inert_guarded_tool_output
+# forged_tool_results: test_forged_tool_result_fails_levi_without_model
+# secret_leakage: test_read_document_mission_completes_with_verified_evidence (trace and events content-free)
+
+[[file]]
 path = "tests/test_memory_schema.py"
 categories = ["unit", "migrations"]
 # migrations: test_real_alembic_upgrade_downgrade_reupgrade_lifecycle

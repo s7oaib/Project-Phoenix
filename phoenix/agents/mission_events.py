@@ -124,6 +124,24 @@ TOOL_IDS: Final = frozenset(f"filesystem.{op}" for op in DOCUMENT_OPERATIONS)
 # equality with research_steps.
 RESEARCH_OPERATIONS: Final = frozenset({"research"})
 RESEARCH_TOOL_IDS: Final = frozenset({"web.research"})
+# PHX-113 (ADR-140): mirrors capability_steps' closed tools and their actions
+# (tests assert equality); appended to the tool events' allowlist.
+CAPABILITY_TOOL_IDS: Final = frozenset(
+    {
+        "document.read",
+        "document.create",
+        "spotify.search",
+        "spotify.play",
+        "spotify.pause",
+        "youtube.search",
+        "youtube.cue",
+        "youtube.play",
+        "youtube.pause",
+    }
+)
+CAPABILITY_OPERATIONS: Final = frozenset(
+    {"read", "create", "search", "play", "pause", "cue"}
+)
 AGENT_IDS: Final = frozenset(
     agent.internal_id for agent in build_default_agent_registry().agents
 )
@@ -137,6 +155,7 @@ AGENT_ROLES: Final = frozenset(
         "final_answer",
         TRIAGE_ROLE,  # PHX-105
         "research",  # PHX-111
+        "media",  # PHX-113
     }
 )
 AGENT_OUTCOMES: Final = frozenset({"completed", "waiting_permission"})
@@ -145,7 +164,7 @@ SCOPES: Final = frozenset({"task", "mission"})
 _STEP: dict[str, _Kind] = {"step_id": STEP}
 _TOOL: dict[str, _Kind] = {
     **_STEP,
-    "tool_id": TOOL_IDS | RESEARCH_TOOL_IDS,
+    "tool_id": TOOL_IDS | RESEARCH_TOOL_IDS | CAPABILITY_TOOL_IDS,
     "call_id": UUID,
 }
 _ROLE: dict[str, _Kind] = {"role": AGENT_ROLES, "step_id": STEP}
@@ -209,7 +228,9 @@ PAYLOAD_FIELDS: Final[Mapping[EventType, Mapping[str, _Kind]]] = MappingProxyTyp
         },
         EventType.TOOL_REQUESTED: {
             **_TOOL,
-            "operation": DOCUMENT_OPERATIONS | RESEARCH_OPERATIONS,
+            "operation": DOCUMENT_OPERATIONS
+            | RESEARCH_OPERATIONS
+            | CAPABILITY_OPERATIONS,
             "permission_request_id": UUID,
         },
         EventType.TOOL_STARTED: _TOOL,

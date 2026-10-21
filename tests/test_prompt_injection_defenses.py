@@ -1834,6 +1834,15 @@ PHX_111_PATHS = (
     "phoenix/api/server.py",
     "phoenix/core/config.py",
 )
+# PHX-113 (ADR-140) intentionally changed runtime.py (opt-in capability steps,
+# MissionTrace.capability_calls) and mission_events.py (PHX-113 tool IDs,
+# actions and the media role); both stay pinned, at the PHX-113
+# implementation commit.
+PHX_113_COMMIT = "6c27714839e28ba5e494680bf36e607d70d4407a"
+PHX_113_PATHS = (
+    "phoenix/agents/runtime.py",
+    "phoenix/agents/mission_events.py",
+)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -1859,6 +1868,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_118_PATHS
         and path not in PHX_110_PATHS
         and path not in PHX_111_PATHS
+        and path not in PHX_113_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1874,6 +1884,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_108_COMMIT, path) for path in PHX_108_PATHS]
     baselines += [(PHX_110_COMMIT, path) for path in PHX_110_PATHS]
     baselines += [(PHX_111_COMMIT, path) for path in PHX_111_PATHS]
+    baselines += [(PHX_113_COMMIT, path) for path in PHX_113_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

@@ -35,6 +35,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
 from phoenix.agents import prompts
+from phoenix.agents.capability_steps import capability_grants
 from phoenix.agents.handoff import HandoffEnvelope
 from phoenix.agents.mission_events import MissionEvents, elapsed_ms
 from phoenix.agents.planner import PlanDraft, PlanningRequest, PlanStep
@@ -128,16 +129,24 @@ def research_grants(grants: object) -> tuple[PermissionGrant, ...]:
     return tuple(accepted)
 
 
-def mission_grants(grants: object) -> tuple[PermissionGrant, ...]:
-    """Caller grants for document or research steps; nothing else, no duplicates."""
+def mission_grants(
+    grants: object, *, capabilities: bool = False
+) -> tuple[PermissionGrant, ...]:
+    """Caller grants for document or research steps; nothing else, no duplicates.
+
+    PHX-120 (ADR-162): with ``capabilities`` a non-research grant may also be a
+    PHX-113 media or document grant (``capability_grants``, which passes PHX-046
+    document grants unchanged).
+    """
     if type(grants) not in (tuple, list):
         raise ValueError("Grants require an ordered sequence")
+    other = capability_grants if capabilities else document_grants
     accepted: list[PermissionGrant] = []
     for grant in cast(Sequence[object], grants):
         try:
             accepted.extend(research_grants([grant]))
         except ValueError:
-            accepted.extend(document_grants([grant]))
+            accepted.extend(other([grant]))
     ids = [grant.grant_id for grant in accepted]
     scopes = [
         (g.tool_id, g.action, g.resource, g.duration, g.session_id) for g in accepted

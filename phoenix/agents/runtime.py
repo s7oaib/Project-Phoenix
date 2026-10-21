@@ -71,6 +71,11 @@ from pydantic import (
 )
 
 from phoenix.agents import prompts
+from phoenix.agents.capability_steps import (
+    CapabilityCallRecord,
+    CapabilityStepRunner,
+    CapabilityTools,
+)
 from phoenix.agents.final_grounding import (
     GROUNDED_CHECK_ID,
     FinalGrounding,
@@ -387,6 +392,9 @@ class MissionTrace(_Value):
     PHX-110: ``retrievals`` lists each knowledge retrieval (IDs and counts) and
     ``citations`` the sources verified knowledge steps cited (provenance only,
     never content). Both default to empty for earlier traces.
+
+    PHX-113: ``capability_calls`` holds the media and document tool calls;
+    PHX-046 filesystem calls stay in ``tool_calls``.
     """
 
     prompt_set_version: Identifier
@@ -404,6 +412,7 @@ class MissionTrace(_Value):
     citations: tuple[MissionCitation, ...] = ()
     # PHX-111: one record per research call (IDs, statuses, counts, hashes).
     research_calls: tuple[ResearchCallRecord, ...] = ()
+    capability_calls: tuple[CapabilityCallRecord, ...] = ()
 
     @model_validator(mode="after")
     def consistent_triage(self) -> Self:
@@ -493,6 +502,7 @@ class _Evidence:
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
     recoveries: list[RecoveryRecord] = field(default_factory=list)
     research_calls: list[ResearchCallRecord] = field(default_factory=list)
+    capability_calls: list[CapabilityCallRecord] = field(default_factory=list)
     # PHX-109: a direct fallback already settled the failed task as FAILED.
     task_failed: bool = False
     # PHX-110: retrievals and verified citations (cited text stays in memory).
@@ -548,6 +558,7 @@ class _Evidence:
                 retrievals=tuple(self.knowledge.records),
                 citations=tuple(self.knowledge.citations),
                 research_calls=tuple(self.research_calls),
+                capability_calls=tuple(self.capability_calls),
             ),
         )
 
@@ -572,6 +583,10 @@ class PhoenixRuntime:
     research_tool optionally enables PHX-111 web research steps (see
     research_steps), with the same caller-only grants.
 
+    capabilities optionally enables PHX-113 media and document steps (see
+    capability_steps; their prompt text awaits the owner's approval). Their
+    grants also come only from run()'s caller.
+
     events optionally receives PHX-103 progress events (e.g. an EventBus). It
     must not block; anything it raises is swallowed and counted in
     dropped_events, so a mission never fails or waits because of it.
@@ -595,6 +610,7 @@ class PhoenixRuntime:
         events: EventSink | None = None,
         knowledge: KnowledgeSource | None = None,
         research_tool: WebResearchTool | None = None,
+        capabilities: CapabilityTools | None = None,
     ) -> None:
         registry = (
             build_default_agent_registry() if agent_registry is None else agent_registry
@@ -638,6 +654,18 @@ class PhoenixRuntime:
                 raise PhoenixRuntimeError("Expected a WebResearchTool")
             self._research = ResearchStepRunner(research_tool, self._guard)
             self._domains = (*self._domains, RoutingDomain.WEB_RESEARCH)
+        # PHX-113 (ADR-140): opt-in media and document steps.
+        self._capabilities: CapabilityStepRunner | None = None
+        if capabilities is not None:
+            self._capabilities = CapabilityStepRunner(
+                capabilities,
+                self._guard,
+                filesystem=filesystem_tool,
+                max_read_bytes=self._limits.max_output_chars,
+            )
+            self._domains = tuple(
+                dict.fromkeys((*self._domains, *self._capabilities.domains))
+            )
         try:
             self._recovery = MahoragaRecovery(self._agents)
         except MahoragaRecoveryError:
@@ -695,7 +723,9 @@ class PhoenixRuntime:
         ):
             raise PhoenixRuntimeError("Inconsistent path decision")
         try:
-            accepted = mission_grants(grants)
+            accepted = mission_grants(
+                grants, capabilities=self._capabilities is not None
+            )
             session = (
                 None if session_id is None else _identifier.validate_python(session_id)
             )
@@ -871,7 +901,12 @@ class PhoenixRuntime:
                     for identity, status in health.items()
                 ),
                 requirements=CapabilityRequirements(),
-                permission_risk=PermissionRisk.P1 if documents else PermissionRisk.P0,
+                # Descriptive only; PHX-113 steps may reach P2 tools.
+                permission_risk=PermissionRisk.P2
+                if self._capabilities is not None and self._capabilities.handles(domain)
+                else PermissionRisk.P1
+                if documents
+                else PermissionRisk.P0,
             )
         )
 
@@ -1203,10 +1238,17 @@ class PhoenixRuntime:
         }
         routes[FINAL_STEP_ID] = self._route(RoutingDomain.USER_INTERACTION, health)
         plan_ids = tuple(step.step_id for step in plan.steps)
+        # PHX-113: capability steps replace PHX-046 document steps when enabled.
+        capability = {
+            step_id: route.domain
+            for step_id, route in routes.items()
+            if self._capabilities is not None
+            and self._capabilities.handles(route.domain)
+        }
         documents = {
             step_id
             for step_id, route in routes.items()
-            if route.domain == RoutingDomain.DOCUMENTS
+            if route.domain == RoutingDomain.DOCUMENTS and step_id not in capability
         }
         knowledge = {
             step_id
@@ -1225,7 +1267,11 @@ class PhoenixRuntime:
                 objective=step.objective,
                 depends_on=plan_ids[index - 1 : index],
                 input_refs=plan_ids[index - 1 : index],
-                expected_output=prompts.DOCUMENT_STEP_EXPECTED_OUTPUT
+                expected_output=CapabilityStepRunner.expected_output(
+                    capability[step.step_id]
+                )
+                if step.step_id in capability
+                else prompts.DOCUMENT_STEP_EXPECTED_OUTPUT
                 if step.step_id in documents
                 else prompts.KNOWLEDGE_STEP_EXPECTED_OUTPUT
                 if step.step_id in knowledge
@@ -1233,7 +1279,11 @@ class PhoenixRuntime:
                 if step.step_id in research
                 else prompts.STEP_EXPECTED_OUTPUT,
                 timeout_seconds=limits.step_timeout_seconds,
-                completion_rule=prompts.DOCUMENT_STEP_COMPLETION_RULE
+                completion_rule=CapabilityStepRunner.completion_rule(
+                    capability[step.step_id]
+                )
+                if step.step_id in capability
+                else prompts.DOCUMENT_STEP_COMPLETION_RULE
                 if step.step_id in documents
                 else prompts.KNOWLEDGE_STEP_COMPLETION_RULE
                 if step.step_id in knowledge
@@ -1288,7 +1338,9 @@ class PhoenixRuntime:
                 source_agent_id="phoenix",
                 expected_output_schema=step.expected_output,
                 verification_required=True,
-                permission_scope=DOCUMENT_TOOL_IDS
+                permission_scope=self._capabilities.tool_ids(capability[step_id])
+                if self._capabilities is not None and step_id in capability
+                else DOCUMENT_TOOL_IDS
                 if step_id in documents
                 else (KNOWLEDGE_TOOL_ID,)
                 if step_id in knowledge
@@ -1304,6 +1356,7 @@ class PhoenixRuntime:
                 producer,
                 evidence,
                 structured=step_id in documents
+                or step_id in capability
                 or step_id in knowledge
                 or step_id in research,
             )
@@ -1311,11 +1364,15 @@ class PhoenixRuntime:
             tool_evidence: ToolEvidence | None = None
             knowledge_evidence: KnowledgeEvidence | None = None
             research_evidence: ResearchEvidence | None = None
+            capability_levi: Callable[[ModelBinding], VerificationResponder] | None
+            capability_levi = None
             # PHX-110: a knowledge step publishes the specialist phase (the
             # PHX-103 role allowlist is unchanged); its agent ID tells it apart.
             role = (
                 "final_answer"
                 if final
+                else CapabilityStepRunner.role(capability[step_id])
+                if step_id in capability
                 else "document"
                 if step_id in documents
                 else RESEARCH_ROLE
@@ -1325,7 +1382,21 @@ class PhoenixRuntime:
             # Outside the step deadline, so a step timeout reports "timeout".
             async with _agent_phase(events, decision.agent_id, role, step_id):
                 async with asyncio.timeout(step.timeout_seconds):
-                    if step_id in documents:
+                    if self._capabilities is not None and step_id in capability:
+                        # PHX-113: one permissioned call; not retried (PHX-109 R10).
+                        candidate, capability_levi = await self._capabilities.perform(
+                            binding,
+                            handoff,
+                            capability[step_id],
+                            user_request=request.text,
+                            evidence=prior,
+                            grants=grants,
+                            session_id=session_id,
+                            record_tool=evidence.tool_calls.append,
+                            record_capability=evidence.capability_calls.append,
+                            events=events,
+                        )
+                    elif step_id in documents:
                         assert self._documents is not None  # allowlisted with a tool
                         candidate, tool_evidence = await self._documents.perform(
                             binding,
@@ -1386,7 +1457,7 @@ class PhoenixRuntime:
                 step_id=step_id,
             ) as check:
                 verifier = self._control("verifier", health, evidence, avoid=producer)
-                levi = _levi_responder(
+                levi = capability_levi or _levi_responder(
                     self._guard,
                     request.text,
                     prior,
