@@ -14,7 +14,7 @@ default 50) and `offset` (0-1,000,000) and return
 | Route | Success | Body / query | Notes |
 | --- | --- | --- | --- |
 | `GET /health` | 200 | | PHX-002, unchanged |
-| `GET /ready` | 200 / 503 | | PHX-100, unchanged |
+| `GET /ready` | 200 / 503 | | PHX-100; PHX-092 (ADR-127) adds `prerequisites`: `{"ollama": "running" \| "not_running" \| "not_found", "missing_models": [{"provider_id", "model_id"}]}` (tier models not registered at startup), `null` while the services are unavailable. Enums and model IDs only; PHOENIX never installs Ollama or pulls models. |
 | `POST /chat` | 202 | `{"text", "conversation_id"?, "path"?}` | Queues a mission and returns `{"mission_id", "conversation_id", "status": "queued", "rerun_of": null}` at once. A missing `conversation_id` starts a conversation. `path` is optional (PHX-105, ADR-090): omitted (or `null`), PHOENIX triages the request when it runs (falling back to `complex` if triage fails); `direct` or `complex` is the client's choice and is used as is. Text: 1-16,000 characters, not blank. |
 | `GET /missions` | 200 | `conversation_id`?, `limit`, `offset` | Mission summaries: IDs, status, `path` (`null` until triage decides), `triage_outcome` (`decided`, `fallback`, `client`, or `null` before a decision), failure code, responder error, `rerun_of`, timestamps. No text. |
 | `GET /missions/{mission_id}` | 200 | | Summary plus `request_text` (the user's message), `answer_text` (only when completed), `rerun_id`, `task_id`, `task_states` and the `permission_request` if any. |

@@ -22,9 +22,11 @@ runtime that missions starting afterwards use (``WorkspaceService``).
 """
 
 import asyncio
+import os
+import shutil
 import sys
 import time
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -242,6 +244,25 @@ class DatabaseReadiness(_Contract):
     at_head: bool
 
 
+class OllamaPrerequisite(StrEnum):
+    """PHX-092 (ADR-127): first-run check; Ollama is never installed by PHOENIX."""
+
+    RUNNING = "running"  # the Ollama provider answered the bounded probe
+    NOT_RUNNING = "not_running"  # an Ollama executable exists but does not answer
+    NOT_FOUND = "not_found"  # no Ollama executable on PATH or in its default place
+
+
+class PrerequisiteReadiness(_Contract):
+    """What the user must install or start; models are never pulled by PHOENIX.
+
+    ``missing_models`` are tier-table models that were not registered at startup
+    (registration happens once, so a model pulled later needs a restart).
+    """
+
+    ollama: OllamaPrerequisite
+    missing_models: tuple[ModelReadiness, ...]
+
+
 class ReadinessResponse(_Contract):
     """Statuses and IDs plus the PHOENIX version only.
 
@@ -255,6 +276,53 @@ class ReadinessResponse(_Contract):
     providers: tuple[ProviderReadiness, ...]
     models: tuple[ModelReadiness, ...]
     database: DatabaseReadiness
+    # PHX-092 (ADR-127); null only while the backend services are unavailable.
+    prerequisites: PrerequisiteReadiness | None
+
+
+OLLAMA_PROVIDER_ID = "ollama"
+
+
+def ollama_installed() -> bool:
+    """An Ollama executable on PATH or at the per-user installer's default path.
+
+    Only a boolean leaves this function; the path is never reported.
+    """
+    if shutil.which("ollama") is not None:
+        return True
+    local = os.environ.get("LOCALAPPDATA")
+    if not local:
+        return False
+    return Path(local, "Programs", "Ollama", "ollama.exe").is_file()
+
+
+def prerequisites(
+    services: BackendServices,
+    statuses: Sequence[ProviderHealthStatus],
+) -> PrerequisiteReadiness:
+    running = any(
+        provider.provider_id == OLLAMA_PROVIDER_ID
+        and status != ProviderHealthStatus.UNAVAILABLE
+        for provider, status in zip(services.providers, statuses, strict=True)
+    )
+    if running:
+        ollama = OllamaPrerequisite.RUNNING
+    elif ollama_installed():
+        ollama = OllamaPrerequisite.NOT_RUNNING
+    else:
+        ollama = OllamaPrerequisite.NOT_FOUND
+    registered = {
+        (record.provider_id, record.model_id)
+        for record in services.capability_registry.list_records()
+    }
+    return PrerequisiteReadiness(
+        ollama=ollama,
+        missing_models=tuple(
+            ModelReadiness(provider_id=provider_id, model_id=model_id)
+            for provider_id, model_id in tier_models(services.tier_table)
+            if (provider_id, model_id) not in registered
+        ),
+    )
 
 
 def tier_models(table: ModelTierTable) -> tuple[tuple[str, str], ...]:
@@ -494,6 +562,7 @@ async def readiness(
             providers=(),
             models=(),
             database=DatabaseReadiness(at_head=False),
+            prerequisites=None,  # not checked before the services exist
         )
     statuses = await asyncio.gather(
         *(probe_provider(provider, timeout) for provider in services.providers)
@@ -519,6 +588,7 @@ async def readiness(
         ),
         models=models,
         database=DatabaseReadiness(at_head=at_head),
+        prerequisites=prerequisites(services, statuses),
     )
 
 
