@@ -14,8 +14,10 @@ Every record is one JSON object per line with a closed set of keys:
 Any other ``extra`` key is dropped. ``redact`` removes credential shapes
 (bearer tokens, ``key=value`` secrets, private key blocks, well-known token
 prefixes) and every secret registered with ``register_secret`` (the launcher
-registers the per-launch API token). Redaction is defence in depth: PHOENIX
-code logs IDs, closed codes and timings only (RULES security 6, INV-018).
+registers the per-launch API token). HTTP client libraries that log request
+URLs (``QUIET_LOGGERS``) keep only warnings (PHX-123, ADR-180). Redaction is
+defence in depth: PHOENIX code logs IDs, closed codes and timings only (RULES
+security 6, INV-018).
 
 ``configure_logging`` writes to stderr and to a size-rotated file in the data
 directory (``logs/phoenix.jsonl``, 5 MiB x 5 backups) through a queue, so the
@@ -43,6 +45,9 @@ LOG_BACKUPS: Final = 5
 MAX_MESSAGE: Final = 1000
 MAX_FRAMES: Final = 12
 REDACTED: Final = "[REDACTED]"
+# PHX-123 (ADR-180): third-party HTTP clients log full request URLs (query
+# strings included) at INFO; PHOENIX keeps only their warnings (INV-018).
+QUIET_LOGGERS: Final = ("httpx", "httpcore", "hpack", "urllib3")
 SAFE_FIELDS: Final = (
     "correlation_id",
     "mission_id",
@@ -62,10 +67,13 @@ _PATTERNS: Final = (
         re.DOTALL,
     ),
     re.compile(r"(?i)\bbearer\s+[^\s\"',;]+"),
+    # PHX-123 (ADR-182): a quoted key ({"api_key": "..."}) and an authorization
+    # scheme with its credential (Basic, Digest, ...) are redacted whole.
     re.compile(
         r"(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret"
         r"|client[_-]?secret|password|passwd|pwd|authorization|cookie)"
-        r"(\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;&]+)"
+        r"([\"']?\s*[:=]\s*)"
+        r"(\"[^\"]*\"|'[^']*'|(?:(?:basic|digest|negotiate|ntlm)\s+)?[^\s,;&]+)"
     ),
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
@@ -185,6 +193,7 @@ class LoggingHandle:
     targets: tuple[logging.Handler, ...]
     previous_level: int
     log_path: Path
+    quiet_levels: dict[str, int] = field(default_factory=dict)
     _closed: bool = field(default=False, repr=False)
 
     def close(self) -> None:
@@ -194,6 +203,8 @@ class LoggingHandle:
         root = logging.getLogger()
         root.removeHandler(self.queue_handler)
         root.setLevel(self.previous_level)
+        for name, previous in self.quiet_levels.items():
+            logging.getLogger(name).setLevel(previous)
         self.listener.stop()  # flushes every queued record first
         for handler in self.targets:
             handler.close()
@@ -227,6 +238,11 @@ def configure_logging(
     previous = root.level
     root.addHandler(queue_handler)
     root.setLevel(level)
+    quiet_levels: dict[str, int] = {}
+    for name in QUIET_LOGGERS:
+        quiet = logging.getLogger(name)
+        quiet_levels[name] = quiet.level
+        quiet.setLevel(max(logging.WARNING, level))
     listener.start()
     return LoggingHandle(
         listener=listener,
@@ -234,4 +250,5 @@ def configure_logging(
         targets=(to_file, to_stream),
         previous_level=previous,
         log_path=path,
+        quiet_levels=quiet_levels,
     )

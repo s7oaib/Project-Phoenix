@@ -21,7 +21,7 @@
 
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -40,6 +40,9 @@ pub const LOOPBACK: &str = "127.0.0.1";
 pub const READY_TIMEOUT: Duration = Duration::from_secs(90);
 pub const LOCK_FILE: &str = "phoenix.desktop.lock";
 pub const LOG_FILE: &str = "phoenix.desktop-backend.log";
+/// PHX-123 (ADR-186): at most this much backend stderr is kept per launch (the file is
+/// truncated at each launch); anything after it is drained and discarded.
+pub const MAX_LOG_BYTES: u64 = 4 * 1024 * 1024;
 const TOKEN_BYTES: usize = 32;
 const MAX_READY_LINE: usize = 4096;
 const WATCH_INTERVAL: Duration = Duration::from_millis(500);
@@ -345,10 +348,19 @@ impl Backend {
             .current_dir(&config.root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::from(log));
+            .stderr(Stdio::piped());
         let (mut child, job) = spawn(command)?;
         let mut stdin = child.stdin.take().ok_or("spawn_failed")?;
         let stdout = child.stdout.take().ok_or("spawn_failed")?;
+        let stderr = child.stderr.take().ok_or("spawn_failed")?;
+        if thread::Builder::new()
+            .name("phoenix-backend-stderr".into())
+            .spawn(move || capped_copy(stderr, log, MAX_LOG_BYTES))
+            .is_err()
+        {
+            let _ = child.kill();
+            return Err("spawn_failed");
+        }
         {
             let mut inner = self.lock();
             if inner.stopping {
@@ -438,6 +450,27 @@ impl Backend {
         self.kill_child();
         self.lock().lock = None;
     }
+}
+
+/// Copies at most `limit` bytes of `source` into `sink`, then keeps draining `source` so the
+/// child never blocks on a full pipe.
+fn capped_copy(mut source: impl Read, mut sink: impl Write, limit: u64) {
+    let mut buffer = [0u8; 8192];
+    let mut kept: u64 = 0;
+    loop {
+        let read = match source.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => read,
+        };
+        if kept < limit {
+            let take = usize::try_from(limit - kept).map_or(read, |room| room.min(read));
+            kept = match sink.write_all(&buffer[..take]) {
+                Ok(()) => kept + take as u64,
+                Err(_) => limit,
+            };
+        }
+    }
+    let _ = sink.flush();
 }
 
 /// Reads stdout lines on a helper thread until the ready line, EOF or the deadline.
@@ -608,6 +641,23 @@ pub fn backend_status(backend: tauri::State<'_, Arc<Backend>>) -> BackendStatus 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backend_stderr_log_is_capped_and_the_rest_drained() {
+        let input = vec![b'x'; 50_000];
+        let mut source = std::io::Cursor::new(input);
+        let mut sink = Vec::new();
+        capped_copy(&mut source, &mut sink, 20_000);
+        assert_eq!(sink.len(), 20_000);
+        assert_eq!(source.position(), 50_000); // fully drained
+        let mut small = Vec::new();
+        capped_copy(
+            std::io::Cursor::new(b"short".to_vec()),
+            &mut small,
+            MAX_LOG_BYTES,
+        );
+        assert_eq!(small, b"short");
+    }
 
     #[test]
     fn ready_line_yields_the_loopback_port() {

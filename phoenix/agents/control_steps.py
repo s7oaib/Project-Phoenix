@@ -375,6 +375,16 @@ _SECRET_PREFIXES = (
 )
 
 
+class SecretTextRefused(ToolStepRejected):
+    """PHX-123 (ADR-185): PHOENIX never types secret-looking text.
+
+    A P4 ``browser.fill`` or ``windows.set_text`` whose text looks like a
+    password, key or token fails the step before any approval is asked for
+    (mission failure ``secret_text_refused``); the owner types it themselves.
+    An approval the owner cannot read is not informed consent.
+    """
+
+
 def looks_like_secret(text: str) -> bool:
     """A display heuristic that errs toward hiding; it authorizes nothing.
 
@@ -1020,6 +1030,9 @@ class ControlStepRunner:
         ):
             # P5 is blocked outright (INV-006); P0 has no place in a control step.
             raise ToolStepRejected("Control action is blocked")
+        text = getattr(item.call, "text", None)
+        if risk == ToolRiskLevel.P4 and type(text) is str and looks_like_secret(text):
+            raise SecretTextRefused("PHOENIX does not type secret-looking text")
         item.tool_id = tool_id
         scope = (CONTROL_ACTOR_ID, tool_id, action, resource, CONTROL_TOOL_REASON)
         if risk == ToolRiskLevel.P4:

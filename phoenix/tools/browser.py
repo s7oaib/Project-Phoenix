@@ -41,6 +41,7 @@ from phoenix.security.permissions import (
     PermissionStatus,
     UserPermissionDecision,
 )
+from phoenix.tools.browser_setup import BrowserNotTrusted, verify_launch_browsers
 from phoenix.tools.registry import (
     ToolDefinition,
     ToolRegistry,
@@ -100,6 +101,8 @@ class BrowserErrorCode(StrEnum):
     BLOCKED_URL = "blocked_url"
     PAGE_CHANGED = "page_changed"
     BROWSER_UNAVAILABLE = "browser_unavailable"
+    # PHX-123 (ADR-184): the browser folder differs from the owner's manifest.
+    BROWSER_UNVERIFIED = "browser_unverified"
     NAVIGATION_FAILURE = "navigation_failure"
     SELECTOR_INVALID = "selector_invalid"
     ELEMENT_NOT_FOUND = "element_not_found"
@@ -656,6 +659,11 @@ def browser_tool_definitions() -> tuple[ToolDefinition, ...]:
 
 def _start_playwright() -> Playwright:
     # Lazy dependency import; only an authorized session_open reaches this boundary.
+    # PHX-123 (ADR-184): never launch a browser folder the owner did not record.
+    try:
+        verify_launch_browsers()
+    except BrowserNotTrusted:
+        raise _Failure(BrowserErrorCode.BROWSER_UNVERIFIED) from None
     from playwright.sync_api import sync_playwright
 
     return sync_playwright().start()
@@ -943,6 +951,9 @@ class BrowserTool:
             page.on("download", session.detected_download)
             page.on("crash", session.crashed)
             object.__setattr__(self, "_session", session)
+        except _Failure:
+            _cleanup(context, browser, runtime)
+            raise
         except Exception:
             _cleanup(context, browser, runtime)
             raise _Failure(BrowserErrorCode.BROWSER_UNAVAILABLE) from None

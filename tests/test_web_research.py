@@ -413,6 +413,152 @@ def test_page_fetch_caps_body_bytes() -> None:
     assert page.text == "a" * 1000
 
 
+# PHX-123 (SR-02, ADR-181): DNS rebinding. The fake resolver answers public
+# first and private afterwards; PHOENIX must connect to the vetted address
+# (no second lookup at connect) and re-vet every redirect hop.
+def rebinding() -> tuple[Callable[[str], Any], list[str]]:
+    asked: list[str] = []
+
+    async def resolver(host: str) -> tuple[str, ...]:
+        asked.append(host)
+        return ("93.184.216.34",) if len(asked) == 1 else ("127.0.0.1",)
+
+    return resolver, asked
+
+
+def test_page_fetch_connects_to_the_vetted_address_with_the_hostname() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200, text="pinned", headers={"content-type": "text/plain"}
+        )
+
+    resolver, asked = rebinding()
+    page = run(
+        fetcher(handler, resolver).fetch("https://example.org/p?q=1", max_chars=99)
+    )
+    assert (page.final_url, page.text) == ("https://example.org/p?q=1", "pinned")
+    assert asked == ["example.org"]  # one lookup: the connection never re-resolves
+    [request] = seen
+    assert request.url.host == "93.184.216.34" and request.url.scheme == "https"
+    assert request.url.raw_path == b"/p?q=1"
+    assert request.headers["host"] == "example.org"
+    assert request.extensions["sni_hostname"] == "example.org"
+
+
+def test_page_fetch_pins_ipv6_and_keeps_an_explicit_port_in_the_host() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, text="ok", headers={"content-type": "text/plain"})
+
+    async def resolver(host: str) -> tuple[str, ...]:
+        return ("2606:2800:220:1:248:1893:25c8:1946",)
+
+    run(fetcher(handler, resolver).fetch("http://example.org:80/x", max_chars=9))
+    [request] = seen
+    assert request.url.host == "2606:2800:220:1:248:1893:25c8:1946"
+    assert request.headers["host"] == "example.org:80"
+
+
+def test_page_fetch_revets_every_redirect_hop_against_rebinding() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(302, headers={"location": "/next"})
+
+    resolver, asked = rebinding()
+    with pytest.raises(PageFetchError) as raised:
+        run(fetcher(handler, resolver).fetch("https://example.org/a", max_chars=9))
+    assert raised.value.code == PageFetchErrorCode.BLOCKED_URL
+    assert asked == ["example.org", "example.org"] and len(seen) == 1
+
+
+# PHX-123 (SR-05, ADR-183): ranges Python's is_global admits.
+@pytest.mark.parametrize(
+    "address",
+    [
+        "2002:7f00:1::1",  # 6to4 wrapping 127.0.0.1
+        "2002:a9fe:a9fe::1",  # 6to4 wrapping 169.254.169.254
+        "2002:5db8:d822::1",  # 6to4 even for a public IPv4
+        "2001:0:4136:e378:8000:63bf:3fff:fdd2",  # Teredo
+        "192.0.0.8",
+        "192.0.0.170",
+        "::ffff:10.0.0.1",
+    ],
+)
+def test_page_fetch_refuses_embedded_and_protocol_ranges(address: str) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, text="secret")
+
+    async def resolver(host: str) -> tuple[str, ...]:
+        return (address,)
+
+    with pytest.raises(PageFetchError) as raised:
+        run(fetcher(handler, resolver).fetch("https://example.org/", max_chars=9))
+    assert raised.value.code == PageFetchErrorCode.BLOCKED_URL and seen == []
+    literal = f"[{address}]" if ":" in address else address
+    with pytest.raises(PageFetchError):
+        run(fetcher(handler).fetch(f"https://{literal}/", max_chars=9))
+    assert seen == []
+
+
+# PHX-123 (SR-07, ADR-183): no https -> http downgrade; ports 80 and 443 only.
+def test_page_fetch_refuses_downgrades_and_other_ports() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url.path))
+        if request.url.path == "/down":
+            return httpx.Response(302, headers={"location": "http://example.org/x"})
+        if request.url.path == "/port":
+            return httpx.Response(302, headers={"location": "https://example.org:22/"})
+        if request.url.path == "/up":
+            return httpx.Response(302, headers={"location": "https://example.org/x"})
+        return httpx.Response(200, text="ok", headers={"content-type": "text/plain"})
+
+    for url in (
+        "https://example.org/down",
+        "https://example.org/port",
+        "https://example.org:8443/x",
+        "http://example.org:22/x",
+    ):
+        with pytest.raises(PageFetchError) as raised:
+            run(fetcher(handler).fetch(url, max_chars=9))
+        assert raised.value.code == PageFetchErrorCode.BLOCKED_URL, url
+    assert seen == ["/down", "/port"]
+    page = run(fetcher(handler).fetch("http://example.org/up", max_chars=9))
+    assert page.final_url == "https://example.org/x"
+    page = run(fetcher(handler).fetch("https://example.org:443/x", max_chars=9))
+    assert page.text == "ok"
+
+
+# PHX-123 (SR-06): one deadline bounds the whole fetch, even a drip-fed body.
+def test_page_fetch_total_deadline_stops_a_drip_fed_page() -> None:
+    async def drip() -> Any:
+        while True:
+            yield b"a"
+            await asyncio.sleep(0.02)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, content=drip(), headers={"content-type": "text/plain"}
+        )
+
+    with pytest.raises(PageFetchError) as raised:
+        run(fetcher(handler, deadline_seconds=0.2).fetch(URL1, max_chars=9))
+    assert raised.value.code == PageFetchErrorCode.TIMEOUT
+    with pytest.raises(ValueError):
+        HttpPageFetcher(deadline_seconds=0)
+
+
 # ---- the web research tool
 
 

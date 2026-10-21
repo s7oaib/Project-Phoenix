@@ -44,11 +44,15 @@ export function KaidoBanner({ connection }: { connection: Pick<ConnectionView, '
 const triageText: Readonly<Record<string, string>> = {
   decided: 'PHOENIX decided', fallback: 'triage fallback', client: 'your override',
 };
+/** PHX-123 (ADR-185): PHOENIX refuses to type secret-looking text; the owner types it. */
+const failureText: Readonly<Record<string, string>> = {
+  secret_text_refused: 'secret_text_refused: PHOENIX does not type passwords, keys or other secrets; type it yourself',
+};
 /** Review M1: a completed mission always states whether LEVI verified it, in text; a direct
  *  fallback is never described as planned steps. */
 export function missionLine(mission: MissionView): string {
   const status = missionText[mission.status] ?? mission.status;
-  const failure = mission.failureCode ? ` (${mission.failureCode})` : '';
+  const failure = mission.failureCode ? ` (${failureText[mission.failureCode] ?? mission.failureCode})` : '';
   const verification = mission.verification ? ` · ${verificationText[mission.verification]}` : '';
   const fallback = mission.verification === 'unverified_direct_fallback';
   const path = !mission.path || fallback || mission.verification === 'unverified_direct' ? '' :

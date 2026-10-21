@@ -42,6 +42,7 @@ from phoenix.api.server import ProviderSet, ServerConfig, build_server_app
 from phoenix.api.structured_logging import (
     LOG_DIRECTORY,
     LOG_FILE,
+    QUIET_LOGGERS,
     REDACTED,
     JsonLogFormatter,
     configure_logging,
@@ -94,6 +95,11 @@ SECRET_TEXT = "PROMPT-SENTINEL-42 the user's private question"
         "xox" + "b-1234567890-abcdef",
         "AKIA" + "ABCDEFGHIJKLMNOP",
         "-----BEGIN " + "PRIVATE KEY-----\nMIIEv\n-----END PRIVATE KEY-----",
+        # PHX-123 (ADR-182): JSON-quoted keys and authorization schemes.
+        '{"api_key": "abcDEF0123456789"}',
+        "{'password': 'hunter2-very-secret'}",
+        "Authorization: Basic abcDEF0123456789==",
+        '"authorization": "Basic abcDEF0123456789"',
     ],
 )
 def test_redact_removes_credential_shapes(raw: str) -> None:
@@ -207,6 +213,34 @@ def test_configure_logging_writes_rotating_json_and_restores_the_root(
     assert len(streamed) == 61
     assert streamed[0]["mission_id"] == MISSION and streamed[0]["step_id"] == "final"
     assert streamed[0]["message"] == f"record 0 with {REDACTED}"
+
+
+def test_http_client_request_urls_never_reach_the_log(tmp_path: Path) -> None:
+    # PHX-123 (SR-01, ADR-180): httpx logs "HTTP Request: GET <full URL>" at
+    # INFO; query strings (search terms, reset codes, emails) must stay out.
+    before = {name: logging.getLogger(name).level for name in QUIET_LOGGERS}
+    stream = io.StringIO()
+    handle = configure_logging(tmp_path, stream)
+    url = "https://example.org/reset?code=abc123XYZ&email=a@b.c"
+    try:
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="ok")
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            assert client.get(url).status_code == 200
+        logging.getLogger("httpx").info("HTTP Request: GET %s", url)
+        logging.getLogger("httpcore.connection").info("connect %s", url)
+        logging.getLogger("phoenix.test.quiet").info("phoenix still logs")
+        logging.getLogger("httpx").warning("client warning")
+    finally:
+        handle.close()
+    assert {name: logging.getLogger(name).level for name in QUIET_LOGGERS} == before
+    log_file = tmp_path / LOG_DIRECTORY / LOG_FILE
+    for text in (stream.getvalue(), log_file.read_text("utf-8")):
+        assert "abc123XYZ" not in text and "a@b.c" not in text
+        assert "example.org" not in text
+        assert "phoenix still logs" in text and "client warning" in text
 
 
 # ---- the collector
