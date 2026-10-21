@@ -110,6 +110,30 @@ and `windows-sys` were already locked through Tauri and are now direct. The
 webview gains `@tauri-apps/api` **2.12.1** (Apache-2.0 OR MIT), matching the
 `tauri` crate, for `invoke` and `listen` only.
 
+### Local voice (Phase 10)
+
+Owner-approved on 2026-10-21 (PHX-114) as required Python runtime
+dependencies. Everything runs offline on the CPU.
+
+- **faster-whisper.** `faster-whisper>=1.2.1,<2`, locked **1.2.1** (MIT;
+  ADR-105). It brings CTranslate2 4.8.3, ONNX Runtime 1.31.0, PyAV 18.1.0,
+  tokenizers 0.23.3, huggingface-hub, tqdm and PyYAML. huggingface-hub is
+  constrained to `<1` (`[tool.uv] constraint-dependencies`; locked 0.36.2 with
+  requests and urllib3), because 2.x pulls in `httpx2`, which replaces
+  Starlette's TestClient transport. faster-whisper never downloads: models
+  load from a local directory with `local_files_only=True`.
+- **piper-tts.** `piper-tts>=1.8,<2`, locked **1.8.0** (**GPL-3.0-or-later**;
+  ADR-106; review before any distribution), with pathvalidate.
+- **sounddevice.** `sounddevice>=0.5.6,<0.6`, locked **0.5.6** (MIT; bundled
+  PortAudio on Windows; ADR-107), with cffi and pycparser.
+- **numpy.** `numpy>=2,<3`, locked **2.4.6**, now used directly.
+
+The lock gains exactly 21 package records; no existing record changes except
+`phoenix`. Engines are imported lazily (`importlib`), only when voice starts.
+Models are pinned files (Hugging Face commit, size, SHA-256) that the explicit
+`scripts/voice_setup.py` fetches into `D:\Phoenix\models\voice` (ADR-109).
+They are never auto-downloaded. Coqui XTTS remains an optional candidate.
+
 ## Optional V1 runtime
 
 ### Colibri

@@ -116,7 +116,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-111 Web research — TODO
 - PHX-112 Computer control steps — TODO
 - PHX-113 Media and documents steps — TODO
-- PHX-114 Voice pipeline — TODO
+- PHX-114 Voice pipeline — DONE (backend: wake, STT, TTS, barge-in, /voice API, ADR-105–109; desktop mic toggle is a follow-up)
 - PHX-115 Observability — TODO
 - PHX-116 Colibri deep tier — TODO
 - PHX-117 Metric datasets — TODO

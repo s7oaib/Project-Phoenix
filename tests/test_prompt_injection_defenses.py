@@ -1805,7 +1805,6 @@ PHX_118B_PATHS = (
 PHX_108_COMMIT = "f70b201a42338cc3c38c2159d2b2ee5d1c84e416"
 PHX_108_PATHS = (
     "phoenix/api/missions.py",
-    "phoenix/api/routes/__init__.py",
     "phoenix/api/routes/system.py",
     "phoenix/persistence/settings.py",
     "apps/desktop/src-tauri/src/proxy.rs",
@@ -1825,6 +1824,16 @@ PHX_119_PATHS = (
     "phoenix/api/server.py",
     "phoenix/api/routes/missions.py",
     "phoenix/api/routes/schemas.py",
+)
+# PHX-114 (ADR-108) intentionally changed server.py (VoiceService wiring, merged
+# with PHX-108's ModelRegistrar), routes/__init__.py (voice routes, merged with
+# PHX-108's setup routes) and mission_events.py (voice.* allowlist); all three
+# stay pinned, at the PHX-114 resolution commit.
+PHX_114_COMMIT = "fc08a14b74fec8d590753b406afa5ac5651ee0f0"
+PHX_114_PATHS = (
+    "phoenix/api/server.py",
+    "phoenix/api/routes/__init__.py",
+    "phoenix/agents/mission_events.py",
 )
 
 
@@ -1851,6 +1860,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_118_PATHS
         and path not in PHX_119_PATHS
         and path not in PHX_118B_PATHS
+        and path not in PHX_114_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1865,6 +1875,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_118B_COMMIT, path) for path in PHX_118B_PATHS]
     baselines += [(PHX_108_COMMIT, path) for path in PHX_108_PATHS]
     baselines += [(PHX_119_COMMIT, path) for path in PHX_119_PATHS]
+    baselines += [(PHX_114_COMMIT, path) for path in PHX_114_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

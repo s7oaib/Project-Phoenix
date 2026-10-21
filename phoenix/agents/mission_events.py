@@ -178,6 +178,39 @@ KAIDO_TRIGGERS: Final = frozenset(
 KAIDO_SCOPES: Final = frozenset({"process", "mission"})
 _KAIDO: dict[str, _Kind] = {"failsafe_id": UUID, "kaido_scope": KAIDO_SCOPES}
 
+# PHX-114 (ADR-108): the voice pipeline's state with IDs and closed codes only;
+# never a transcript, an answer or audio. Mirrors
+# phoenix.voice.engines.pipeline (VoicePipelineState, VoiceFailureCode); tests
+# assert equality. The correlation ID is the voice session ID.
+VOICE_STATES: Final = frozenset(
+    {
+        "off",
+        "starting",
+        "sleeping",
+        "listening",
+        "thinking",
+        "speaking",
+        "degraded_voice",
+        "text_only",
+        "unavailable",
+    }
+)
+VOICE_CODES: Final = frozenset(
+    {
+        "models_missing",
+        "dependency_unavailable",
+        "microphone_unavailable",
+        "voice_failure",
+    }
+)
+_VOICE: dict[str, _Kind] = {
+    "state": VOICE_STATES,
+    "session_id": UUID,
+    "turn_id": UUID,
+    "mission_id": UUID,
+    "code": VOICE_CODES,
+}
+
 # Every event type PHX-103 publishes, with its complete payload allowlist.
 PAYLOAD_FIELDS: Final[Mapping[EventType, Mapping[str, _Kind]]] = MappingProxyType(
     {
@@ -258,6 +291,9 @@ PAYLOAD_FIELDS: Final[Mapping[EventType, Mapping[str, _Kind]]] = MappingProxyTyp
         EventType.RECOVERY_EXHAUSTED: _RECOVERY,
         EventType.PHOENIX_DEGRADED: {**_KAIDO, "trigger": KAIDO_TRIGGERS},
         EventType.PHOENIX_READY: _KAIDO,
+        EventType.VOICE_LISTENING: _VOICE,
+        EventType.VOICE_SPEAKING: _VOICE,
+        EventType.VOICE_INTERRUPTED: _VOICE,
     }
 )
 _WARNING_TYPES: Final = frozenset(

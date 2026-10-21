@@ -37,6 +37,28 @@ default 50) and `offset` (0-1,000,000) and return
 | `GET /onboarding` | 200 | | PHX-108 (ADR-113) setup checks, in order: `runtimes` (`provider_id`, `display_name`, `state`: `running`, `degraded`, `not_running` or `not_detected`), `models` (each tier model: `required`, `registered`, `install_command` while missing), `storage` (`data_dir`, `free_bytes`, `database_ready`), `workspace` (as in settings) and `complete` (runtime running, required models registered, database ready, workspace active). Missing tier models are registered first if their provider now answers. Nothing is persisted. |
 | `GET /capabilities` | 200 | | PHX-108 (ADR-112) fixed capability flags: `capabilities` of `capability_id`, `enabled`, `ticket`, `agent_id`. A later ticket enables its capability by flipping its flag. Flags grant no permission. |
 
+Voice (PHX-114, ADR-108): voice is off until requested. Each route returns the
+voice status `{"state", "code", "wake_phrase", "session_id", "conversation_id",
+"mission_id", "components"}`:
+
+- `state`: off, starting, sleeping, listening, thinking, speaking,
+  degraded_voice, text_only or unavailable.
+- `code`: `null`, `models_missing`, `dependency_unavailable`,
+  `microphone_unavailable` or `voice_failure`.
+- `components`: six `{"id", "status"}` entries for `wake_word`, `vad`, `stt`,
+  `tts`, `conversation` and `audio_output`, each `available`, `degraded` or
+  `unavailable`.
+
+The status never holds a transcript or answer text. A spoken request becomes a
+normal chat mission in `conversation_id`, so its text and answer are read like
+any chat.
+
+| Route | Success | Body / query | Notes |
+| --- | --- | --- | --- |
+| `GET /voice/status` | 200 | | The current voice status. |
+| `POST /voice/start` | 202 | none | Starts listening for "Rise, Phoenix"; models load in the background (`starting`). Idempotent while running. A failure shows as `unavailable` with its code, never as an HTTP error. |
+| `POST /voice/stop` | 200 | none | Stops listening and speaking and releases the microphone (`off`). |
+
 Workspace validation (422, code per rule): `workspace_invalid` (not absolute,
 UNC or device path, a `..` segment, control characters, over 4,096
 characters), `workspace_not_found`, `workspace_not_directory`, `workspace_link`

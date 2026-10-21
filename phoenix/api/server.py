@@ -27,11 +27,16 @@ only once at startup. A bounded background loop, the start of each
 mission (while a required model is missing), ``GET /ready`` and
 ``GET /onboarding`` register any tier model that is still missing once its
 provider answers, so starting Ollama after PHOENIX no longer leaves every
-mission failing ``no_eligible_model`` until a restart.
+mission failing ``no_eligible_model`` until a restart. PHX-114 (ADR-108) adds
+the voice service (``/voice`` routes): off until requested (``POST
+/voice/start`` or ``PHOENIX_VOICE_AUTOSTART=1``), it submits spoken requests
+through MissionService like ``POST /chat``, and it stops first at shutdown; a
+voice failure never stops the backend (INV-016).
 """
 
 import asyncio
 import contextlib
+import os
 import sys
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -77,6 +82,7 @@ from phoenix.api.security import (
     error_response,
     install_local_api_security,
 )
+from phoenix.api.voice import ComponentFactory, VoiceService, health_probes
 from phoenix.api.workspace import WorkspaceService
 from phoenix.core.config import AppSettings
 from phoenix.core.event_bus import EventBus
@@ -164,6 +170,11 @@ class ServerConfig(BaseModel):
     # (psutil, no subprocess) can be turned off, then only provider health counts.
     kaido_policy: KaidoPolicy = KaidoPolicy()
     kaido_ram_probe: bool = True
+    # PHX-114: listen for "Rise, Phoenix" from launch (explicit owner opt-in).
+    voice_autostart: bool = Field(
+        default_factory=lambda: os.environ.get("PHOENIX_VOICE_AUTOSTART", "") == "1"
+    )
+    voice_models_dir: Path | None = None  # None: phoenix.voice.engines.models
 
 
 class MigrationLockTimeout(TimeoutError):
@@ -248,6 +259,27 @@ class BackendServices:
     workspace: WorkspaceService
     kaido: KaidoMonitor  # PHX-119: shared by readiness and every runtime
     model_registrar: "ModelRegistrar"  # PHX-108: late provider start
+    voice: VoiceService  # PHX-114
+
+
+@dataclass(frozen=True)
+class _BackendHealth:
+    """The startup ritual's bounded database and provider checks (PHX-114)."""
+
+    probe: DatabaseProbe
+    model_providers: tuple[ModelProvider, ...]
+    timeout: float
+
+    async def database_ok(self) -> bool:
+        return await self.probe.at_head(self.timeout)
+
+    async def providers_ok(self) -> bool:
+        statuses = await asyncio.gather(
+            *(probe_provider(p, self.timeout) for p in self.model_providers)
+        )
+        return bool(statuses) and all(
+            status == ProviderHealthStatus.HEALTHY for status in statuses
+        )
 
 
 class ReadinessStatus(StrEnum):
@@ -488,7 +520,11 @@ async def cancel_active_missions(services: BackendServices) -> int:
 
 @asynccontextmanager
 async def open_services(
-    settings: AppSettings, config: ServerConfig, factory: ProviderFactory
+    settings: AppSettings,
+    config: ServerConfig,
+    factory: ProviderFactory,
+    *,
+    voice_factory: ComponentFactory | None = None,
 ) -> AsyncIterator[BackendServices]:
     """Build the services once; on exit (or failed startup) close what was opened."""
     async with AsyncExitStack() as stack:
@@ -551,12 +587,28 @@ async def open_services(
             before_run=registrar.refresh_required,
         )
         settings_store = SettingsStore(session_factory)
+        database_probe = DatabaseProbe(engine, heads)
+        voice = VoiceService(
+            missions,
+            stream,
+            probes=health_probes(
+                _BackendHealth(
+                    database_probe,
+                    provider_set.providers,
+                    config.probe_timeout_seconds,
+                ),
+                tools,
+                agents,
+            ),
+            factory=voice_factory,
+            models_dir=config.voice_models_dir,
+        )
         services = BackendServices(
             settings=settings,
             engine=engine,
             session_factory=session_factory,
             migration_heads=heads,
-            database_probe=DatabaseProbe(engine, heads),
+            database_probe=database_probe,
             agent_registry=agents,
             tier_table=table,
             capability_registry=capabilities,
@@ -579,6 +631,7 @@ async def open_services(
             ),
             kaido=kaido,
             model_registrar=registrar,
+            voice=voice,
         )
         refresher: asyncio.Task[None] | None = None
         try:
@@ -589,9 +642,12 @@ async def open_services(
                     config.model_refresh_seconds, config.model_refresh_idle_seconds
                 )
             )
+            if config.voice_autostart:
+                await services.voice.start()  # never raises (INV-016)
             yield services
         finally:
             try:
+                await services.voice.aclose()  # voice first: no new missions
                 if refresher is not None:
                     refresher.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
@@ -699,6 +755,7 @@ def build_server_app(
     security: LocalApiSecurity,
     config: ServerConfig | None = None,
     provider_factory: ProviderFactory | None = None,
+    voice_factory: ComponentFactory | None = None,
 ) -> FastAPI:
     """create_app() plus the owning lifespan, GET /ready, WS /events and the
     PHX-104 REST routes.
@@ -721,7 +778,9 @@ def build_server_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        async with open_services(settings, options, factory) as services:
+        async with open_services(
+            settings, options, factory, voice_factory=voice_factory
+        ) as services:
             setattr(app.state, STATE_KEY, services)
             try:
                 yield

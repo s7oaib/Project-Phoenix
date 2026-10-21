@@ -433,7 +433,7 @@ EXPECTED_FLAGS = [
     ("computer_control", False, "PHX-112", "computer_control"),
     ("media", False, "PHX-113", "media"),
     ("document_generation", False, "PHX-113", "document_analyst"),
-    ("voice", False, "PHX-114", "voice"),
+    ("voice", True, "PHX-114", "voice"),  # PHX-114 (ADR-108)
 ]
 
 

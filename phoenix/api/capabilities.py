@@ -56,8 +56,11 @@ CAPABILITY_FLAGS = MappingProxyType(
         CapabilityId.DOCUMENT_GENERATION: CapabilityFlag(
             enabled=False, ticket="PHX-113", agent_id="document_analyst"
         ),
+        # PHX-114 (ADR-108): this build has the voice pipeline. Whether it is
+        # running or its models and devices are available right now is
+        # runtime state, reported by GET /voice/status, not by this flag.
         CapabilityId.VOICE: CapabilityFlag(
-            enabled=False, ticket="PHX-114", agent_id="voice"
+            enabled=True, ticket="PHX-114", agent_id="voice"
         ),
     }
 )
