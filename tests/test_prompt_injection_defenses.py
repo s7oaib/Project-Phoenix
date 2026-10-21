@@ -1742,22 +1742,19 @@ PHX_103_PATHS = (
 # store and workspace wiring), missions.py (use_runtime; a mission keeps its
 # runtime) and alembic/env.py (settings row registration); all three stay
 # pinned, at the latest PHX-104 implementation commit (review fixes; the first
-# round was f9a075c). PHX-105 moved missions.py to its own pin (below).
+# round was f9a075c). PHX-105 moved missions.py, and PHX-111 server.py, to
+# their own pins (below).
 PHX_104_COMMIT = "7af605e26afcaf0e7000ee44d312e741a9107b2b"
-PHX_104_PATHS = (
-    "phoenix/api/server.py",
-    "alembic/env.py",
-)
+PHX_104_PATHS = ("alembic/env.py",)
 # PHX-105 (ADR-090) intentionally changed prompts.py (v4 TRIAGE_SYSTEM),
 # runtime.py (triage, trace fields), mission_events.py (triage allowlist),
 # api/missions.py (optional path, decisions, re-runs), persistence/missions.py
 # (nullable path, triage_outcome) and the REST routes and schemas; all stay
 # pinned, at the PHX-105 implementation commit. PHX-109 moved runtime.py and
-# mission_events.py to its own pin (below).
+# mission_events.py, and PHX-111 prompts.py and api/missions.py, to their own
+# pins (below).
 PHX_105_COMMIT = "e34142ca0062dc14c05a5a1d18720b64446cdaa7"
 PHX_105_PATHS = (
-    "phoenix/agents/prompts.py",
-    "phoenix/api/missions.py",
     "phoenix/api/routes/missions.py",
     "phoenix/api/routes/schemas.py",
     "phoenix/persistence/missions.py",
@@ -1783,11 +1780,24 @@ PHX_048_COMMIT = "2e04e22f361f64110742dd8974dece216d567a7f"
 PHX_048_PATHS = ("phoenix/tools/filesystem.py",)
 # PHX-109 (ADR-093) intentionally changed runtime.py (bounded MAHORAGA
 # recovery, MissionTrace.recoveries) and mission_events.py (recovery.*
-# allowlist); both stay pinned, at the PHX-109 implementation commit.
+# allowlist); PHX-111 moved both to its own pin (below).
 PHX_109_COMMIT = "2cf01ae286b4b74140769fba925a1b46a1a255e3"
-PHX_109_PATHS = (
+PHX_109_PATHS: tuple[str, ...] = ()
+# PHX-111 (ADR-135 to ADR-139) intentionally changed runtime.py (research
+# steps, research_calls, rate_limited), mission_events.py (research
+# allowlist values), prompts.py (v5 research prompts), api/missions.py and
+# api/routes/permissions.py (research grants), api/server.py (wiring) and
+# core/config.py (web_research_enabled); all stay pinned, at the PHX-111
+# implementation commit.
+PHX_111_COMMIT = "4a844623e48a1ad8acf39bae2a042e2bd1d58a33"
+PHX_111_PATHS = (
     "phoenix/agents/runtime.py",
     "phoenix/agents/mission_events.py",
+    "phoenix/agents/prompts.py",
+    "phoenix/api/missions.py",
+    "phoenix/api/routes/permissions.py",
+    "phoenix/api/server.py",
+    "phoenix/core/config.py",
 )
 
 
@@ -1810,6 +1820,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_106_PATHS
         and path not in PHX_048_PATHS
         and path not in PHX_109_PATHS
+        and path not in PHX_111_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1821,6 +1832,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_106_COMMIT, path) for path in PHX_106_PATHS]
     baselines += [(PHX_048_COMMIT, path) for path in PHX_048_PATHS]
     baselines += [(PHX_109_COMMIT, path) for path in PHX_109_PATHS]
+    baselines += [(PHX_111_COMMIT, path) for path in PHX_111_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
