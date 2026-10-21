@@ -1848,6 +1848,16 @@ PHX_115_PATHS = (
     "apps/desktop/src-tauri/src/proxy.rs",
     "apps/desktop/src/adapters/core.ts",
 )
+# PHX-092 (ADR-125, ADR-127) intentionally changed server.py (/ready
+# prerequisites) and the desktop backend sidecar (installed-mode resolution,
+# isolated bundled interpreter); both stay pinned, at the PHX-092 merge
+# resolution commit with PHX-108 (ModelRegistrar and /ready prerequisites
+# combined; the first implementation commit was 43c9c39).
+PHX_092_COMMIT = "9d50200e39cee06cd045371149731c39b49a9909"
+PHX_092_PATHS = (
+    "phoenix/api/server.py",
+    "apps/desktop/src-tauri/src/backend.rs",
+)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -1875,6 +1885,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_118B_PATHS
         and path not in PHX_114_PATHS
         and path not in PHX_115_PATHS
+        and path not in PHX_092_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1891,6 +1902,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_119_COMMIT, path) for path in PHX_119_PATHS]
     baselines += [(PHX_114_COMMIT, path) for path in PHX_114_PATHS]
     baselines += [(PHX_115_COMMIT, path) for path in PHX_115_PATHS]
+    baselines += [(PHX_092_COMMIT, path) for path in PHX_092_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

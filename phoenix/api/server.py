@@ -42,7 +42,7 @@ import contextlib
 import os
 import sys
 import time
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -83,7 +83,7 @@ from phoenix.api.observability import (
     VramReport,
     probe_ollama_vram,
 )
-from phoenix.api.onboarding import REQUIRED_MODELS
+from phoenix.api.onboarding import REQUIRED_MODELS, runtime_installed
 from phoenix.api.security import (
     LocalApiSecurity,
     accept_websocket,
@@ -315,6 +315,26 @@ class DatabaseReadiness(_Contract):
     at_head: bool
 
 
+class OllamaPrerequisite(StrEnum):
+    """PHX-092 (ADR-127): first-run check; Ollama is never installed by PHOENIX."""
+
+    RUNNING = "running"  # the Ollama provider answered the bounded probe
+    NOT_RUNNING = "not_running"  # an Ollama executable exists but does not answer
+    NOT_FOUND = "not_found"  # no Ollama executable on PATH or in its default place
+
+
+class PrerequisiteReadiness(_Contract):
+    """What the user must install or start; models are never pulled by PHOENIX.
+
+    ``missing_models`` are tier-table models that are not registered yet; the
+    model registrar (PHX-108, ADR-110) registers a model once it is pulled, so
+    no restart is needed.
+    """
+
+    ollama: OllamaPrerequisite
+    missing_models: tuple[ModelReadiness, ...]
+
+
 class ReadinessResponse(_Contract):
     """Statuses and IDs plus the PHOENIX version only.
 
@@ -330,6 +350,49 @@ class ReadinessResponse(_Contract):
     database: DatabaseReadiness
     # PHX-119: KAIDO's state after this probe; null when no backend runs.
     kaido: KaidoStatus | None
+    # PHX-092 (ADR-127); null only while the backend services are unavailable.
+    prerequisites: PrerequisiteReadiness | None
+
+
+OLLAMA_PROVIDER_ID = "ollama"
+
+
+def ollama_installed() -> bool:
+    """An Ollama executable on PATH or at the per-user installer's default path.
+
+    The same detection as ``GET /onboarding`` (PHX-108, ADR-113). Only a boolean
+    leaves this function; the path is never reported.
+    """
+    return runtime_installed(OLLAMA_PROVIDER_ID)
+
+
+def prerequisites(
+    services: BackendServices,
+    statuses: Sequence[ProviderHealthStatus],
+) -> PrerequisiteReadiness:
+    running = any(
+        provider.provider_id == OLLAMA_PROVIDER_ID
+        and status != ProviderHealthStatus.UNAVAILABLE
+        for provider, status in zip(services.providers, statuses, strict=True)
+    )
+    if running:
+        ollama = OllamaPrerequisite.RUNNING
+    elif ollama_installed():
+        ollama = OllamaPrerequisite.NOT_RUNNING
+    else:
+        ollama = OllamaPrerequisite.NOT_FOUND
+    registered = {
+        (record.provider_id, record.model_id)
+        for record in services.capability_registry.list_records()
+    }
+    return PrerequisiteReadiness(
+        ollama=ollama,
+        missing_models=tuple(
+            ModelReadiness(provider_id=provider_id, model_id=model_id)
+            for provider_id, model_id in tier_models(services.tier_table)
+            if (provider_id, model_id) not in registered
+        ),
+    )
 
 
 def tier_models(table: ModelTierTable) -> tuple[tuple[str, str], ...]:
@@ -703,6 +766,7 @@ async def readiness(
             models=(),
             database=DatabaseReadiness(at_head=False),
             kaido=None,
+            prerequisites=None,  # not checked before the services exist
         )
     statuses = await asyncio.gather(
         *(probe_provider(provider, timeout) for provider in services.providers)
@@ -746,6 +810,7 @@ async def readiness(
         models=models,
         database=DatabaseReadiness(at_head=at_head),
         kaido=kaido,
+        prerequisites=prerequisites(services, statuses),
     )
 
 

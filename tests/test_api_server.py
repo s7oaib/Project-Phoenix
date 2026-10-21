@@ -10,6 +10,7 @@ import io
 import json
 import os
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
@@ -31,6 +32,7 @@ from alembic import command
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
 from phoenix.agents.runtime import MissionKind, PhoenixRuntimeError
 from phoenix.api import launcher
+from phoenix.api import server as server_module
 from phoenix.api.launcher import (
     LaunchOptions,
     PhoenixServer,
@@ -300,7 +302,72 @@ def test_ready_when_provider_and_database_are_healthy(settings: AppSettings) -> 
             "clear_observations": 0,
             "release_after": 2,
         },
+        # PHX-092 (ADR-127): first-run prerequisites; never installed or pulled.
+        "prerequisites": {
+            "ollama": "running",
+            "missing_models": [
+                {"provider_id": "ollama", "model_id": "qwen3.5:9b"},
+                {"provider_id": "ollama", "model_id": "qwen2.5-coder:7b"},
+            ],
+        },
     }
+
+
+@pytest.mark.parametrize(
+    ("installed", "expected"), [(True, "not_running"), (False, "not_found")]
+)
+def test_prerequisites_report_ollama_not_running_or_not_found(
+    settings: AppSettings,
+    monkeypatch: pytest.MonkeyPatch,
+    installed: bool,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(server_module, "ollama_installed", lambda: installed)
+    fakes = factory(status=ProviderHealthStatus.UNAVAILABLE)
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=fakes
+    )
+    with client_for(app) as client:
+        body = client.get("/ready").json()
+    assert body["status"] == "degraded"
+    assert body["prerequisites"] == {
+        "ollama": expected,
+        "missing_models": [
+            {"provider_id": "ollama", "model_id": model}
+            for model in ("qwen3.5:4b", "qwen3.5:2b", "qwen3.5:9b", "qwen2.5-coder:7b")
+        ],
+    }
+
+
+def test_degraded_ollama_still_counts_as_running(
+    settings: AppSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(server_module, "ollama_installed", lambda: False)
+    fakes = factory(status=ProviderHealthStatus.DEGRADED)
+    app = build_server_app(
+        settings, security=SECURITY, config=FAST, provider_factory=fakes
+    )
+    with client_for(app) as client:
+        body = client.get("/ready").json()
+    assert body["prerequisites"]["ollama"] == "running"
+
+
+def test_ollama_installed_checks_path_then_the_default_location(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    found: list[str] = []
+    monkeypatch.setattr(shutil, "which", lambda name: found.pop())
+    found.append("C:/tools/ollama.exe")
+    assert server_module.ollama_installed() is True
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    assert server_module.ollama_installed() is False
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert server_module.ollama_installed() is False
+    executable = tmp_path / "Programs" / "Ollama" / "ollama.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"")
+    assert server_module.ollama_installed() is True
 
 
 def test_missing_tier_models_are_skipped(settings: AppSettings) -> None:

@@ -263,6 +263,28 @@ test('desktop grants exactly the PHX-106 proxy commands and event listening, wit
   assert.equal(readJson('../apps/desktop/package.json').dependencies['@tauri-apps/api'], '2.12.1');
 });
 
+test('PHX-092 installer config only bundles: per-user NSIS, the staged backend, no capability, CSP or plugin', () => {
+  // Merged over tauri.conf.json by `tauri build --config` for the installer only (ADR-128).
+  const installer = readJson('../packaging/windows/tauri.installer.conf.json');
+  assert.deepEqual(Object.keys(installer).sort(), ['$schema', 'bundle']);
+  assert.deepEqual(installer.bundle, {
+    active: true,
+    targets: ['nsis'],
+    publisher: 'PHOENIX',
+    shortDescription: 'PHOENIX local-first desktop assistant',
+    resources: { '../../../build/phoenix-runtime/': 'backend/' },
+    windows: { nsis: { installMode: 'currentUser', installerHooks: '../../../packaging/windows/installer-hooks.nsh' } },
+  });
+  // The app's own config keeps the exe-only build; the bundle is never active without the installer config.
+  const config = readJson('../apps/desktop/src-tauri/tauri.conf.json');
+  assert.equal(config.bundle.active, false);
+  assert.equal(readJson('../apps/desktop/package.json').scripts['tauri:build'], 'tauri build --no-bundle');
+  // The shell resolves the installed backend next to the executable and starts it isolated (ADR-125).
+  const backend = readFileSync(new URL('../apps/desktop/src-tauri/src/backend.rs', import.meta.url), 'utf8');
+  assert.match(backend, /pub const BUNDLED_BACKEND_DIR: &str = "backend";/);
+  assert.match(backend, /if self\.isolated \{ &\["-I"\] \}/);
+});
+
 test('development CSP allows only the React refresh preamble as an inline script', () => {
   const config = readJson('../apps/desktop/src-tauri/tauri.conf.json');
   const preamble = react.preambleCode.replace('__BASE__', '/');

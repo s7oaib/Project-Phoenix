@@ -14,8 +14,10 @@
 //! The token never leaves Rust: it is not on any command line, not in any environment, not
 //! logged, and no Tauri command or event returns it. `Token`'s Debug output is redacted.
 //!
-//! Demo/dev launch mode: the backend runs from the repository's own virtual environment
-//! (`<root>/.venv`). PHX-092 packaging replaces this with a bundled backend.
+//! Installed mode (PHX-092, ADR-125): the installer puts a self-contained backend next to the
+//! executable (`backend/python/python.exe`, the embeddable CPython with the locked wheels, and
+//! `backend/app/`, the PHOENIX package and migrations). Demo/dev launch mode: without that
+//! directory the backend runs from the repository's own virtual environment (`<root>/.venv`).
 
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
@@ -101,13 +103,19 @@ pub fn parse_ready_line(line: &str) -> Option<u16> {
     (ready.event == READY_EVENT && ready.host == LOOPBACK && ready.port != 0).then_some(ready.port)
 }
 
-/// How the demo/dev backend is started.
+/// How the backend is started (installed or demo/dev launch mode).
 #[derive(Clone, Debug)]
 pub struct LaunchConfig {
     pub root: PathBuf,
     pub python: PathBuf,
     pub data_dir: PathBuf,
+    /// The bundled interpreter runs isolated (`-I`): no environment variables, no user
+    /// site-packages; its import path comes only from its `python311._pth` file.
+    pub isolated: bool,
 }
+
+/// The installer's backend directory, next to the executable (PHX-092).
+pub const BUNDLED_BACKEND_DIR: &str = "backend";
 
 fn env_path(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
@@ -116,14 +124,43 @@ fn env_path(name: &str) -> Option<PathBuf> {
 }
 
 impl LaunchConfig {
-    /// Repository root: `PHOENIX_BACKEND_ROOT` at run time, else the same variable at build
-    /// time, else the checkout this binary was built from (dev). Python: `PHOENIX_BACKEND_PYTHON`,
-    /// else the root's `.venv`. Data: `PHOENIX_DATA_DIR` (the backend's own setting), else the
-    /// backend's default `~/.phoenix/data`.
+    /// Backend root and interpreter, in order:
+    /// 1. `PHOENIX_BACKEND_ROOT` at run time (explicit developer override), with
+    ///    `PHOENIX_BACKEND_PYTHON` or the root's `.venv`;
+    /// 2. installed mode: `<exe dir>/backend` exists, so the root is `backend/app` and the
+    ///    interpreter `backend/python/python.exe` (or `PHOENIX_BACKEND_PYTHON`). An incomplete
+    ///    installation is an error; it never falls back to a checkout;
+    /// 3. demo/dev mode: `PHOENIX_BACKEND_ROOT` at build time, else the checkout this binary was
+    ///    built from, with `PHOENIX_BACKEND_PYTHON` or the root's `.venv`.
+    ///
+    /// Data: `PHOENIX_DATA_DIR` (the backend's own setting), else the backend's default
+    /// `~/.phoenix/data`, in every mode (ADR-126).
     pub fn resolve() -> Result<Self, &'static str> {
-        let root = env_path("PHOENIX_BACKEND_ROOT")
-            .or_else(|| option_env!("PHOENIX_BACKEND_ROOT").map(PathBuf::from))
-            .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.."));
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(Path::to_path_buf));
+        Self::resolve_with(
+            &env_path,
+            exe_dir.as_deref(),
+            option_env!("PHOENIX_BACKEND_ROOT").map(PathBuf::from),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.."),
+        )
+    }
+
+    fn resolve_with(
+        env: &dyn Fn(&str) -> Option<PathBuf>,
+        exe_dir: Option<&Path>,
+        build_root: Option<PathBuf>,
+        checkout: PathBuf,
+    ) -> Result<Self, &'static str> {
+        let bundle = exe_dir
+            .map(|dir| dir.join(BUNDLED_BACKEND_DIR))
+            .filter(|dir| dir.is_dir());
+        let (root, bundled_python) = match (env("PHOENIX_BACKEND_ROOT"), bundle) {
+            (Some(root), _) => (root, None),
+            (None, Some(bundle)) => (bundle.join("app"), Some(bundled_python(&bundle))),
+            (None, None) => (build_root.unwrap_or(checkout), None),
+        };
         let root = root.canonicalize().map_err(|_| "backend_not_found")?;
         if !root
             .join("phoenix")
@@ -133,13 +170,17 @@ impl LaunchConfig {
         {
             return Err("backend_not_found");
         }
-        let python = env_path("PHOENIX_BACKEND_PYTHON").unwrap_or_else(|| venv_python(&root));
+        let override_python = env("PHOENIX_BACKEND_PYTHON");
+        let isolated = override_python.is_none() && bundled_python.is_some();
+        let python = override_python
+            .or(bundled_python)
+            .unwrap_or_else(|| venv_python(&root));
         if !python.is_file() {
             return Err("python_not_found");
         }
-        let data_dir = match env_path("PHOENIX_DATA_DIR") {
+        let data_dir = match env("PHOENIX_DATA_DIR") {
             Some(dir) => dir,
-            None => home_dir()
+            None => home_dir(env)
                 .ok_or("data_dir_unavailable")?
                 .join(".phoenix")
                 .join("data"),
@@ -148,25 +189,36 @@ impl LaunchConfig {
             root,
             python,
             data_dir,
+            isolated,
         })
     }
 
     /// The exact argument array; never a shell string.
     pub fn args(&self) -> Vec<std::ffi::OsString> {
-        let mut args: Vec<std::ffi::OsString> = [
-            "-m",
-            "phoenix.api",
-            "--host",
-            LOOPBACK,
-            "--port",
-            "0",
-            "--data-dir",
-        ]
-        .iter()
-        .map(Into::into)
-        .collect();
+        let isolation: &[&str] = if self.isolated { &["-I"] } else { &[] };
+        let mut args: Vec<std::ffi::OsString> = isolation
+            .iter()
+            .chain(&[
+                "-m",
+                "phoenix.api",
+                "--host",
+                LOOPBACK,
+                "--port",
+                "0",
+                "--data-dir",
+            ])
+            .map(Into::into)
+            .collect();
         args.push(self.data_dir.clone().into_os_string());
         args
+    }
+}
+
+fn bundled_python(bundle: &Path) -> PathBuf {
+    if cfg!(windows) {
+        bundle.join("python").join("python.exe")
+    } else {
+        bundle.join("python").join("bin").join("python3")
     }
 }
 
@@ -178,11 +230,11 @@ fn venv_python(root: &Path) -> PathBuf {
     }
 }
 
-fn home_dir() -> Option<PathBuf> {
+fn home_dir(env: &dyn Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
     if cfg!(windows) {
-        env_path("USERPROFILE")
+        env("USERPROFILE")
     } else {
-        env_path("HOME")
+        env("HOME")
     }
 }
 
@@ -632,29 +684,34 @@ mod tests {
 
     #[test]
     fn launch_arguments_are_an_explicit_loopback_array() {
-        let config = LaunchConfig {
+        let mut config = LaunchConfig {
             root: PathBuf::from("root"),
             python: PathBuf::from("python"),
             data_dir: PathBuf::from("data dir; rm -rf /"),
+            isolated: false,
         };
-        let args: Vec<String> = config
-            .args()
-            .into_iter()
-            .map(|a| a.into_string().unwrap())
-            .collect();
-        assert_eq!(
-            args,
-            [
-                "-m",
-                "phoenix.api",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "0",
-                "--data-dir",
-                "data dir; rm -rf /"
-            ]
-        );
+        let args = |config: &LaunchConfig| -> Vec<String> {
+            config
+                .args()
+                .into_iter()
+                .map(|a| a.into_string().unwrap())
+                .collect()
+        };
+        let expected = [
+            "-m",
+            "phoenix.api",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+            "--data-dir",
+            "data dir; rm -rf /",
+        ];
+        assert_eq!(args(&config), expected);
+        // PHX-092: the bundled interpreter is started isolated, before the module.
+        config.isolated = true;
+        assert_eq!(args(&config)[0], "-I");
+        assert_eq!(args(&config)[1..], expected);
     }
 
     #[test]
@@ -681,6 +738,157 @@ mod tests {
         assert_eq!(
             wait_ready(Silent, Duration::from_millis(100)),
             Err("ready_timeout")
+        );
+    }
+
+    /// A scratch tree under the temp directory, removed on drop.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("phoenix-desktop-{name}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn file(&self, relative: &str) -> PathBuf {
+            let path = self.0.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, b"").unwrap();
+            path
+        }
+
+        /// A backend root (`<root>/phoenix/api/__main__.py`), canonical as resolve returns it.
+        fn backend(&self, root: &str) -> PathBuf {
+            self.file(&format!("{root}/phoenix/api/__main__.py"));
+            self.0.join(root).canonicalize().unwrap()
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn env_of(pairs: &[(&str, PathBuf)]) -> impl Fn(&str) -> Option<PathBuf> {
+        let pairs: Vec<(String, PathBuf)> = pairs
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.clone()))
+            .collect();
+        move |name| {
+            pairs
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.clone())
+        }
+    }
+
+    const PYTHON_IN_BUNDLE: &str = if cfg!(windows) {
+        "app-dir/backend/python/python.exe"
+    } else {
+        "app-dir/backend/python/bin/python3"
+    };
+    const PYTHON_IN_VENV: &str = if cfg!(windows) {
+        ".venv/Scripts/python.exe"
+    } else {
+        ".venv/bin/python"
+    };
+    const HOME: &str = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+
+    #[test]
+    fn installed_mode_uses_the_bundled_runtime_next_to_the_executable() {
+        let scratch = Scratch::new("bundled");
+        let app = scratch.backend("app-dir/backend/app");
+        let python = scratch.file(PYTHON_IN_BUNDLE);
+        let checkout = scratch.backend("checkout");
+        scratch.file(&format!("checkout/{PYTHON_IN_VENV}"));
+        let env = env_of(&[(HOME, scratch.0.join("home"))]);
+        let exe_dir = scratch.0.join("app-dir");
+        let config = LaunchConfig::resolve_with(&env, Some(&exe_dir), None, checkout).unwrap();
+        assert_eq!(config.root, app);
+        assert_eq!(config.python, python);
+        assert!(config.isolated);
+        assert_eq!(
+            config.data_dir,
+            scratch.0.join("home").join(".phoenix").join("data")
+        );
+    }
+
+    #[test]
+    fn an_incomplete_installation_never_falls_back_to_a_checkout() {
+        let scratch = Scratch::new("incomplete");
+        let checkout = scratch.backend("checkout");
+        scratch.file(&format!("checkout/{PYTHON_IN_VENV}"));
+        let env = env_of(&[(HOME, scratch.0.join("home"))]);
+        let exe_dir = scratch.0.join("app-dir");
+        fs::create_dir_all(exe_dir.join(BUNDLED_BACKEND_DIR)).unwrap();
+        let resolve = || LaunchConfig::resolve_with(&env, Some(&exe_dir), None, checkout.clone());
+        assert_eq!(resolve().map(|c| c.root), Err("backend_not_found"));
+        let app = scratch.backend("app-dir/backend/app");
+        assert_eq!(resolve().map(|c| c.root), Err("python_not_found"));
+        let python = scratch.file(PYTHON_IN_BUNDLE);
+        assert_eq!(resolve().map(|c| (c.root, c.python)), Ok((app, python)));
+    }
+
+    #[test]
+    fn explicit_overrides_win_over_the_installation() {
+        let scratch = Scratch::new("overrides");
+        scratch.backend("app-dir/backend/app");
+        scratch.file(PYTHON_IN_BUNDLE);
+        let dev = scratch.backend("dev");
+        scratch.file(&format!("dev/{PYTHON_IN_VENV}"));
+        let dev_python = venv_python(&dev);
+        let custom_python = scratch.file("custom/python.exe");
+        let data = scratch.0.join("D Phoenix data");
+        let exe_dir = scratch.0.join("app-dir");
+        let env = env_of(&[
+            ("PHOENIX_BACKEND_ROOT", scratch.0.join("dev")),
+            ("PHOENIX_DATA_DIR", data.clone()),
+        ]);
+        let config =
+            LaunchConfig::resolve_with(&env, Some(&exe_dir), None, scratch.0.clone()).unwrap();
+        assert_eq!(
+            (config.root, config.python, config.data_dir, config.isolated),
+            (dev, dev_python, data, false)
+        );
+        // The interpreter override also applies to the bundled root.
+        let env = env_of(&[
+            ("PHOENIX_BACKEND_PYTHON", custom_python.clone()),
+            (HOME, scratch.0.join("home")),
+        ]);
+        let config =
+            LaunchConfig::resolve_with(&env, Some(&exe_dir), None, scratch.0.clone()).unwrap();
+        assert!(config.root.ends_with("app"));
+        assert_eq!(config.python, custom_python);
+        assert!(!config.isolated);
+    }
+
+    #[test]
+    fn without_an_installation_the_dev_checkout_and_venv_are_used() {
+        let scratch = Scratch::new("dev");
+        let checkout = scratch.backend("checkout");
+        scratch.file(&format!("checkout/{PYTHON_IN_VENV}"));
+        let venv = venv_python(&checkout);
+        let built = scratch.backend("built");
+        scratch.file(&format!("built/{PYTHON_IN_VENV}"));
+        let built_venv = venv_python(&built);
+        let exe_dir = scratch.0.join("target");
+        fs::create_dir_all(&exe_dir).unwrap();
+        let env = env_of(&[(HOME, scratch.0.join("home"))]);
+        let config =
+            LaunchConfig::resolve_with(&env, Some(&exe_dir), None, checkout.clone()).unwrap();
+        assert_eq!((config.root, config.python), (checkout.clone(), venv));
+        let built_root = Some(scratch.0.join("built"));
+        let config =
+            LaunchConfig::resolve_with(&env, Some(&exe_dir), built_root, checkout.clone()).unwrap();
+        assert_eq!((config.root, config.python), (built, built_venv));
+        // No home directory and no PHOENIX_DATA_DIR: an explicit, closed error.
+        assert_eq!(
+            LaunchConfig::resolve_with(&env_of(&[]), None, None, checkout).map(|c| c.data_dir),
+            Err("data_dir_unavailable")
         );
     }
 

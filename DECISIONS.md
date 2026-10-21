@@ -5591,3 +5591,177 @@ event logs fill the `logs` collection (at most 64), with correlation, task and
 step IDs. Malformed snapshots are ignored and the last good one stays. App.tsx
 is unchanged (ADR-092), so its captions still call the evidence
 caller-supplied; the copy update stays with PHX-108.
+## ADR-125 — A self-contained bundled backend: embeddable CPython 3.11 plus the locked wheels
+
+Status: Accepted (owner decisions for PHX-092, 2026-10-21: bundled embeddable
+Python 3.11 with the locked wheels, launched by the Rust shell as the sidecar)
+Date: 2026-10-21
+Ticket: PHX-092
+
+Context: PHX-106 (ADR-091) started the backend from the repository's `.venv`
+(demo/dev launch mode), so a release build only ran on the machine that built
+it. An installed app needs its own interpreter and dependencies, and later
+tickets add native wheels (faster-whisper, piper, playwright's driver).
+
+Decision:
+
+- **Runtime.** `scripts/build_installer.py` stages `build/phoenix-runtime/`:
+  `python/` is the official python.org embeddable package, CPython **3.11.9**
+  (the last 3.11 release with Windows binaries), pinned by SHA-256
+  `009d6bf7e3b2ddca3d784fa09f90fe54336d5b60f0e0f305c37f400bf83cfd3b` (its MD5
+  matches python.org's published checksum) and cached under `build/`.
+  `python311._pth` is `python311.zip`, `.`, `Lib\site-packages`, `..\app`,
+  `import site`.
+- **Wheels from the lock, generically.** `uv export --frozen --no-dev
+  --no-emit-project` produces the hashed runtime closure of `uv.lock`, and
+  `uv pip install --target python/Lib/site-packages --python-version 3.11
+  --python-platform x86_64-pc-windows-msvc --only-binary :all: --no-deps
+  --require-hashes --no-config` installs it. A dependency added to the lock is
+  bundled with no script change; an sdist-only dependency fails the build
+  instead of compiling on the build machine.
+- **PHOENIX itself.** `app/` is the contents of PHOENIX's own wheel
+  (`uv build --wheel`: the package and its `dist-info`, so
+  `importlib.metadata.version("phoenix")` works) plus the git-tracked
+  `alembic/` and `alembic.ini`, the layout `phoenix.api.server` expects
+  (`ROOT = parents[2]`).
+- **Smoke and manifest.** The build imports `phoenix.api.server` with the staged
+  interpreter under `-I` and fails unless it reports 3.11.9, a PHOENIX version,
+  isolation and no user site-packages. `runtime-manifest.json` records the
+  Python source and digest and every `name==version`.
+- **Launch.** Tauri maps the staged directory to `backend/` next to the
+  executable. `LaunchConfig::resolve` order: a run-time `PHOENIX_BACKEND_ROOT`
+  (explicit developer override); else, when `<exe dir>/backend` exists,
+  installed mode (`backend/app`, `backend/python/python.exe` unless
+  `PHOENIX_BACKEND_PYTHON`), which never falls back to a checkout when
+  incomplete (`backend_not_found` / `python_not_found`); else the PHX-106
+  demo/dev mode. The bundled interpreter starts with `-I` before `-m
+  phoenix.api`: environment variables (`PYTHONPATH`, `PYTHONHOME`, …) and user
+  site-packages are ignored. Everything else in ADR-091 (token on stdin, ready
+  line, job object, lock, 90 s bound) is unchanged.
+
+Consequences: no new Python or Rust dependency; `uv` (already required) does
+the export and install. The installed backend is about 220 MB in about 3,700
+files (playwright's driver, pywin32, lxml and Pillow dominate); the LZMA
+installer is about 56 MiB. The runtime is
+deliberately not compiled to bytecode at build time; Python writes caches
+under `backend/` at run time, which the uninstaller removes (ADR-128).
+`apps/desktop/src-tauri/src/backend.rs` moves from the `origin/main` guard,
+and `phoenix/api/server.py` from the PHX-104 pin, to the PHX-092 pin.
+
+## ADR-126 — Data stays at `~/.phoenix/data` unless the user chooses another location
+
+Status: Accepted (owner decision for PHX-092, 2026-10-21: keep the default
+unless the docs require `D:\Phoenix`)
+Date: 2026-10-21
+Ticket: PHX-092
+
+Context: `docs/06_HARDWARE_PROFILE.md` lists `D:\Phoenix\` as the *preferred*
+location for large model and data storage on the BLAZE-6 development machine.
+It is a hardware-profile preference, not a requirement: a generic installer
+cannot assume a D: drive, and the large files (models) belong to Ollama, which
+has its own `OLLAMA_MODELS` setting.
+
+Decision: the installed app uses the backend's existing data setting:
+`PHOENIX_DATA_DIR` if the user sets it (a per-user environment variable; the
+user's chosen location), else `%USERPROFILE%\.phoenix\data`, exactly as in
+dev mode. On BLAZE-6 the documented choice is `PHOENIX_DATA_DIR=D:\Phoenix\data`
+and, for models, Ollama's `OLLAMA_MODELS=D:\Phoenix\models`. The program
+itself installs per user to `%LOCALAPPDATA%\PHOENIX` by default, and the NSIS
+directory page lets the user choose another folder (for example
+`D:\Phoenix\app`). Program files and user data never share a directory, so
+uninstalling never touches data by accident.
+
+Consequences: no installer page or new setting is added; PHX-108 may later
+offer a data-location setting. A custom `PHOENIX_DATA_DIR` is never removed by
+the uninstaller (ADR-128).
+
+## ADR-127 — First-run prerequisites are reported by `GET /ready`
+
+Status: Accepted (owner decision for PHX-092, 2026-10-21: expose the
+prerequisite checks as backend readiness; PHX-108 owns the UI)
+Date: 2026-10-21
+Ticket: PHX-092
+
+Context: Ollama and the tier models are prerequisites that PHOENIX never
+installs or downloads (owner policy; `docs/25_DEPENDENCIES.md`). A fresh
+install needs to tell the user what is missing. `/ready` already reports the
+provider probe and the registered models, but not whether Ollama is installed
+but stopped, nor which tier models are missing.
+
+Decision: `ReadinessResponse` gains `prerequisites`:
+`{"ollama": "running" | "not_running" | "not_found", "missing_models":
+[{"provider_id", "model_id"}, …]}`. `running` means the `ollama` provider's
+bounded probe (the one `/ready` already runs) was not `unavailable`;
+otherwise `not_running` if an `ollama` executable is on `PATH` or at the
+per-user installer's default `%LOCALAPPDATA%\Programs\Ollama\ollama.exe`, else
+`not_found` (the same detection as PHX-108's `GET /onboarding`, ADR-113).
+`missing_models` are tier-table models not registered yet (in tier-table
+order); PHX-108's model registrar (ADR-110) registers a model once it is
+pulled, so no restart is needed. `GET /onboarding` remains the richer
+first-run view (required models, install commands, storage); `/ready` carries
+the compact prerequisite summary. Only enums and model IDs are returned, never a path,
+URL or detail. `prerequisites` is `null` only while the services are
+unavailable. The overall `status` rules are unchanged. No new route: the
+desktop already forwards `GET /ready` (ADR-091).
+
+Consequences: one additive response field (docs/13); no extra network I/O
+(one `shutil.which` and one file check when Ollama does not answer).
+
+## ADR-128 — Unsigned per-user NSIS installer; uninstall keeps user data unless opted in
+
+Status: Accepted (owner decisions for PHX-092, 2026-10-21: NSIS via the Tauri
+bundler, unsigned with the SmartScreen warning documented, clean uninstall that
+leaves user data unless the user opts in)
+Date: 2026-10-21
+Ticket: PHX-092
+
+Decision:
+
+- **Bundle.** `packaging/windows/tauri.installer.conf.json` is merged over the
+  app's `tauri.conf.json` only for the installer build (`tauri build --bundles
+  nsis --config …`): `bundle.active`, target `nsis`, the staged runtime as the
+  one resource (`backend/`), `installMode: currentUser` (no elevation, no
+  machine-wide install) and the hooks file. It adds no window, capability, CSP
+  or plugin; `tauri.conf.json` and the exe-only `tauri:build` script are
+  unchanged, so dev and CI builds without a staged runtime still work.
+- **WebView2.** Tauri's default `downloadBootstrapper` runs only when WebView2
+  is missing (it ships with Windows 11); it is the only download an
+  installation may make.
+- **Unsigned.** No code-signing certificate exists. Windows SmartScreen shows
+  "Windows protected your PC" for the installer; the user chooses *More info*,
+  then *Run anyway*. The build prints the installer's SHA-256 for verification.
+- **Uninstall.** Tauri's uninstaller removes the files it installed, the
+  shortcuts and the HKCU uninstall key. `NSIS_HOOK_POSTUNINSTALL` then removes
+  `$INSTDIR\backend` recursively (it holds run-time bytecode caches; removed on
+  updates too, so no stale module survives) and the then-empty install folder.
+  User data is kept unless the user ticks Tauri's "Delete the application
+  data" box on the confirmation page (never in silent `/S` or update mode);
+  then the default `%USERPROFILE%\.phoenix\data` is removed along with Tauri's
+  WebView data under `%LOCALAPPDATA%\io.github.s7oaib.phoenix` and the
+  remembered install folder (`HKCU\Software\PHOENIX\PHOENIX`, which Tauri
+  otherwise keeps so a reinstall offers the same folder). A custom
+  `PHOENIX_DATA_DIR` is never deleted.
+
+Consequences: Ollama and its models are untouched by install and uninstall.
+Signing can be added later (`bundle.windows.certificateThumbprint` or a sign
+command) without changing the layout.
+
+## ADR-129 — A release-build CI job builds and uploads the installer
+
+Status: Accepted (owner decision for PHX-092, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-092
+
+Decision: `.github/workflows/release-installer.yml` runs on `windows-latest`
+for manual dispatch, pushes to `main`, `v*` tags and pull requests that touch
+packaging, the desktop, the backend or the locks. It sets up Python, uv 0.12.10,
+Node 22 and stable Rust as the test matrix does, runs
+`uv run --locked python scripts/build_installer.py`, and uploads the NSIS
+installer and `runtime-manifest.json` as the `phoenix-installer-windows-x64`
+artifact (30 days). Permissions are `contents: read`; it creates no release and
+uses no secret. The test matrix stays the merge gate; this job proves that the
+installer still builds.
+
+Consequences: each run downloads the embeddable Python (verified by its pinned
+digest) and the locked wheels (verified by the lock's hashes). Build outputs are
+never committed (`build/` and `target/` are ignored).

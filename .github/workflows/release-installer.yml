@@ -1,0 +1,69 @@
+# PHX-092 (ADR-129): build the unsigned per-user NSIS installer on Windows and upload it.
+# It never publishes a release; the artifact is for review and manual distribution.
+name: release-installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/release-installer.yml"
+      - "packaging/**"
+      - "scripts/build_installer.py"
+      - "apps/desktop/**"
+      - "phoenix/**"
+      - "alembic/**"
+      - "alembic.ini"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.10"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Build installer
+        run: uv run --locked python scripts/build_installer.py
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: phoenix-installer-windows-x64
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+            build/phoenix-runtime/runtime-manifest.json
+          if-no-files-found: error
+          retention-days: 30

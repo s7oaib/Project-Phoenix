@@ -29,7 +29,7 @@ timeout = 1200
 [[gate]]
 # pyproject.toml is guard-pinned, so scripts/ get their own strict mypy gate.
 id = "mypy-scripts"
-command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py", "scripts/voice_setup.py", "scripts/voice_smoke.py", "scripts/metric_datasets.py", "scripts/metric_benchmark.py", "scripts/fyp_adaptive_deep.py", "scripts/colibri_gate.py"]
+command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py", "scripts/voice_setup.py", "scripts/voice_smoke.py", "scripts/metric_datasets.py", "scripts/metric_benchmark.py", "scripts/fyp_adaptive_deep.py", "scripts/colibri_gate.py", "scripts/build_installer.py"]
 timeout = 600
 
 [[gate]]
@@ -142,6 +142,12 @@ categories = ["unit", "integration", "tools", "permissions", "permission_bypass"
 # permission_bypass: test_p4_grants_policy_cannot_allow
 # prompt_injection: test_output_is_inert_no_second_action
 # forged_tool_results: test_success_result_contradictions
+
+[[file]]
+path = "tests/test_build_installer.py"
+categories = ["unit", "path_traversal"]
+# PHX-092 installer build script with fakes;
+# path_traversal: test_unsafe_archive_members_are_refused
 
 [[file]]
 path = "tests/test_colibri_provider.py"
