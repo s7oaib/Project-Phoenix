@@ -4596,3 +4596,166 @@ linked spelling. A swap between the root check and a later operation within one
 call stays outside the V1 threat model: the residual window shrinks from a
 whole mission to the inside of one call. No new dependencies and no new event
 types.
+
+## ADR-110 — Tier models register whenever their provider becomes available
+
+Status: Accepted (recommended option, under the owner's instruction "use
+recommended options for everything", 2026-10-21; the owner reviews it in the
+PHX-108 PR)
+Date: 2026-10-21
+Ticket: PHX-108
+
+The owner's rehearsal (2026-10-19) found that if PHOENIX starts before Ollama,
+`register_tier_models` runs once at startup, registers nothing, and every
+mission fails `no_eligible_model` until the app restarts. ADR numbers 095–109
+are reserved by other work; PHX-108 uses 110–114.
+
+Decision:
+
+- **ModelRegistrar in the composition root** (`phoenix/api/server.py`).
+  `refresh()` is single-flight (one `asyncio.Lock`; a waiter re-checks before
+  running), asks only for tier models that are still missing
+  (`register_tier_models` now skips registered pairs and reports whether every
+  provider was healthy) and bounds every provider call by the probe timeout.
+  Registered models are never removed; a provider that stops later is reported
+  by `/ready` and fails generations explicitly (INV-021).
+- **When it runs.** At startup, bounded by `startup_timeout_seconds` as before;
+  a background task (cancelled at shutdown) every `model_refresh_seconds`
+  (10 s) while a provider is unavailable and every
+  `model_refresh_idle_seconds` (60 s) while every provider answers but a tier
+  model is not installed, doing nothing once all are registered; before each
+  mission while a required model (ADR-113) is missing, through a new optional
+  `MissionService(before_run=...)` hook whose failure is ignored (the run
+  reports any gap); on `GET /ready` (only when some provider is healthy, within
+  one probe timeout), `GET /models` and `GET /onboarding`.
+- **Why the mission hook.** The loop alone leaves a window of up to 10 s after
+  Ollama starts; the hook closes it without delaying `POST /chat` (it runs on
+  the mission runner, after the 202). Only required models trigger it, so an
+  optional model that is not installed costs nothing per mission.
+
+Consequences: no restart is needed after starting Ollama. Readiness and
+onboarding reflect newly registered models at once. A mission that ran while
+the provider was down still fails explicitly (`provider_unavailable`). The
+background probe adds at most one health request per 10 s while Ollama is down.
+`server.py` and `missions.py` move to the PHX-108 hash pin (ADR-114).
+
+## ADR-111 — The default mission path is a saved setting
+
+Status: Accepted (recommended option, under the owner's instruction, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-108
+
+The Settings view must offer a writable mission-path default. Options were a
+per-launch value in the webview (lost on restart), browser storage (ruled out
+for the desktop by docs/21) or a backend setting.
+
+Decision:
+
+- `app_settings` accepts a second key, `default_mission_path`, with value
+  `auto`, `direct` or `complex` (migration `0009_default_mission_path` widens
+  `ck_app_settings_key` and adds `ck_app_settings_mission_path`; downgrade
+  deletes the row and restores the old check). `SettingsStore` gains
+  `get/set_default_mission_path`.
+- `GET /settings` returns `default_mission_path` (`auto` until saved).
+  `PATCH /settings` takes `workspace_root` and/or `default_mission_path`; an
+  empty body is 422. The workspace is applied first, so a refused workspace
+  saves nothing.
+- `POST /chat` is unchanged (omitted `path` still means triage). The desktop
+  reads the saved value at load, uses it as this launch's mission path and sends
+  it as `path` (`auto` omits it). The connection bar's selector overrides it for
+  the launch only; saving in Settings updates both.
+
+Consequences: one versioned migration (INV-020); every test that asserts the
+head moves to `0009_default_mission_path`. The backend never applies the
+default on its own, so API clients keep PHX-105 semantics.
+
+## ADR-112 — Capability flags drive the not-yet-enabled views
+
+Status: Accepted (recommended option, under the owner's instruction, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-108
+
+Computer Control, Research and Media need real views before PHX-111 to PHX-113
+land, without the frontend guessing what the backend can do.
+
+Decision:
+
+- `GET /capabilities` (read-only, authenticated, proxied) returns a fixed table
+  from `phoenix/api/capabilities.py`: `capability_id`, `enabled`, `ticket`,
+  `agent_id` for `workspace_documents` (enabled, PHX-046), `memory` (PHX-110),
+  `web_research` (PHX-111), `computer_control` (PHX-112), `media` and
+  `document_generation` (PHX-113) and `voice` (PHX-114).
+- A later ticket enables its capability by flipping `enabled` in that table in
+  the same change that wires it into missions. The desktop views and the
+  Settings voice/memory sections follow the flag with no frontend change.
+- A flag is a fact about the build, not a permission: enabled capabilities
+  still run only inside missions through ToolRegistry and PermissionEngine
+  (INV-004). The table is not writable over the API.
+
+Consequences: honest "not yet enabled — arrives with PHX-11x" states now; the
+capability tickets each own one boolean flip and its test update.
+
+## ADR-113 — First-run onboarding is derived from live checks
+
+Status: Accepted (recommended option, under the owner's instruction, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-108
+
+Decision:
+
+- `GET /onboarding` reports, in the order the user must act: each provider's
+  runtime state (`running`, `degraded`, `not_running` when its executable is
+  found on `PATH` or in the default per-user install folder, else
+  `not_detected`), each tier model with `required` (`qwen3.5:4b` and
+  `qwen3.5:9b`, the T1/T2 tiers PHOENIX's own roles run on), `registered` and,
+  while missing, a backend-built `install_command`, storage (`data_dir`,
+  `free_bytes`, `database_ready`) and the workspace. `complete` needs the
+  runtime running, required models registered, the database at head and an
+  active workspace. It registers late models first (ADR-110).
+- Nothing is persisted: the desktop shows the first-run screen whenever setup is
+  incomplete at launch, and the user may continue without finishing (text chat
+  needs no workspace, INV-015); dismissal lasts for the launch.
+- Provider names and install commands come from the backend, so webview code
+  keeps naming no provider (the INV-011/012 source guard is unchanged and now
+  also covers the new file). Nothing is started, installed or downloaded.
+- The native allowlist grows by exactly `GET /onboarding` and
+  `GET /capabilities` (18 → 20), with no query keys and no body; the exact table
+  is pinned by cargo and node tests. CSP, capability and command set are
+  unchanged.
+
+Consequences: a user who starts Ollama later sees the screen update (3 s
+re-check while shown). A custom Ollama install location reads "not found" while
+stopped. The data directory path appears in the response (it is the user's own
+folder; the API is token-protected).
+
+## ADR-114 — Setup views are supplied to App; frozen files re-pinned
+
+Status: Accepted (recommended option, under the owner's instruction, 2026-10-21)
+Date: 2026-10-21
+Ticket: PHX-108
+
+Decision:
+
+- `src/adapters/SetupViews.tsx` holds the first-run screen, Onboarding,
+  Settings and the three capability views, rendered from the store's state;
+  every action is a store method over an allowlisted route.
+- App.tsx changes only after `export const diagnosticMetricNames`, so every
+  historical prefix check holds: `ViewPanel` and `App` take optional `panels`
+  for exactly onboarding, settings, computer, research and media, and an
+  optional header `statusLine`. Without them App is unchanged (plain browser
+  and all prior tests). ConnectedApp renders the first-run screen instead of
+  App while setup is incomplete and not dismissed.
+- The workspace folder form moves from the connection bar to Settings and
+  Onboarding; the bar shows it read-only and labels its selector "Mission path
+  (this launch)".
+- Frozen files: `phoenix/api/server.py`, `phoenix/api/missions.py`,
+  `phoenix/api/routes/__init__.py`, `phoenix/api/routes/schemas.py`,
+  `phoenix/api/routes/system.py`, `phoenix/persistence/settings.py`,
+  `apps/desktop/src-tauri/src/proxy.rs`, `apps/desktop/src/adapters/core.ts`,
+  `ConnectedApp.tsx` and `connected.css` move to `PHX_108_COMMIT` /
+  `PHX_108_PATHS`, landed as an implementation commit then a pin commit; the PR
+  must merge with a merge commit. The two `git diff origin/main` guards
+  exclude the five new files.
+
+Consequences: no new dependency, command, event or plugin. Manual WebView2
+acceptance of the new views remains to be done.

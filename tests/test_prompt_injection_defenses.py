@@ -1833,10 +1833,11 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         assert actual == expected, path
     assert len(EventType) == 32
     # PHX-102 (ADR-086) adds migration 0006_missions; PHX-104 (ADR-089) adds
-    # 0007_app_settings; PHX-105 (ADR-090) adds 0008_mission_triage.
+    # 0007_app_settings; PHX-105 (ADR-090) adds 0008_mission_triage;
+    # PHX-108 (ADR-111) adds 0009_default_mission_path.
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0008_mission_triage"]
+    ).get_heads() == ["0009_default_mission_path"]
 
 
 def test_credential_signature_scan_new_sources() -> None:
