@@ -1811,7 +1811,7 @@ PHX_108_PATHS = (
 # route and schemas (MissionDetail.kaido). runtime.py, server.py and
 # schemas.py also carry PHX-118 and PHX-108 changes, so all five stay pinned
 # at the PHX-119 resolution commit that merged PHX-108 (with PHX-118).
-PHX_119_COMMIT = "5a497976b54e8e2fd008b1457a83fb900d4b7a77"
+PHX_119_COMMIT = "f378ac80951eb2d6b0f1f8fd86fe08fdc32c8c7b"
 PHX_119_PATHS = (
     "phoenix/agents/runtime.py",
     "phoenix/agents/mission_events.py",
