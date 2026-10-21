@@ -1753,14 +1753,13 @@ PHX_104_PATHS = (
 # api/missions.py (optional path, decisions, re-runs), persistence/missions.py
 # (nullable path, triage_outcome) and the REST routes and schemas; all stay
 # pinned, at the PHX-105 implementation commit. PHX-109 moved runtime.py and
-# mission_events.py to its own pin (below).
+# mission_events.py to its own pin (below); PHX-112 moved api/missions.py and
+# persistence/missions.py to its own pin (below).
 PHX_105_COMMIT = "e34142ca0062dc14c05a5a1d18720b64446cdaa7"
 PHX_105_PATHS = (
     "phoenix/agents/prompts.py",
-    "phoenix/api/missions.py",
     "phoenix/api/routes/missions.py",
     "phoenix/api/routes/schemas.py",
-    "phoenix/persistence/missions.py",
 )
 # PHX-106/107 (ADR-091, ADR-092) intentionally changed the desktop manifest,
 # entry point, Tauri config (capability and CSP) and native host (backend
@@ -1789,9 +1788,21 @@ PHX_109_COMMIT = "2cf01ae286b4b74140769fba925a1b46a1a255e3"
 PHX_109_PATHS = ("phoenix/agents/mission_events.py",)
 # PHX-118 (ADR-100) intentionally changed runtime.py (LEVI's grounded final
 # answer pre-check, StepVerification.grounded); it stays pinned, at the PHX-118
-# implementation commit.
+# implementation commit. PHX-112 moved runtime.py to its own pin (below).
 PHX_118_COMMIT = "d382b11a0528df5de41772e7697687b81b836de2"
-PHX_118_PATHS = ("phoenix/agents/runtime.py",)
+PHX_118_PATHS: tuple[str, ...] = ()
+# PHX-112 (ADR-150, ADR-151) intentionally changed runtime.py (optional
+# ControlStepRunner, approvals, MissionTrace.control_calls, kill switch),
+# api/missions.py (control grants and one-time P4 approvals in the approve ->
+# re-run loop) and persistence/missions.py (approve_once); all three stay
+# pinned, at the PHX-112 implementation commit (the PR must merge with a merge
+# commit so this commit stays reachable).
+PHX_112_COMMIT = "e25e91a8ffd2a976e8fc35fcbf6f7a48b03f34b8"
+PHX_112_PATHS = (
+    "phoenix/agents/runtime.py",
+    "phoenix/api/missions.py",
+    "phoenix/persistence/missions.py",
+)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -1814,6 +1825,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_048_PATHS
         and path not in PHX_109_PATHS
         and path not in PHX_118_PATHS
+        and path not in PHX_112_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1826,6 +1838,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_048_COMMIT, path) for path in PHX_048_PATHS]
     baselines += [(PHX_109_COMMIT, path) for path in PHX_109_PATHS]
     baselines += [(PHX_118_COMMIT, path) for path in PHX_118_PATHS]
+    baselines += [(PHX_112_COMMIT, path) for path in PHX_112_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
