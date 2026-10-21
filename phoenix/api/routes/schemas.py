@@ -12,11 +12,13 @@ the tool, action, resource and actor always come from the stored request
 """
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import StringConstraints
+from pydantic import StringConstraints, model_validator
 
 from phoenix.agents.task_graph import TaskState
+from phoenix.api.capabilities import CapabilityId
+from phoenix.api.onboarding import RuntimeState
 from phoenix.api.routes.common import UUID_PATTERN, Contract
 from phoenix.api.workspace import MAX_WORKSPACE_CHARS, WorkspaceStatus
 from phoenix.models.provider import ProviderHealthStatus
@@ -31,6 +33,8 @@ MAX_CHAT_CHARS = 16_000
 
 Uuid = Annotated[str, StringConstraints(strict=True, pattern=UUID_PATTERN)]
 GrantChoice = Literal["session", "always"]
+# PHX-108 (ADR-111): the saved default; "auto" means PHOENIX triages.
+MissionPathChoice = Literal["auto", "direct", "complex"]
 
 
 # ---- chat and missions
@@ -208,6 +212,8 @@ class ApiAddress(Contract):
 
 class SettingsOut(Contract):
     workspace: WorkspaceOut
+    # PHX-108 (ADR-111): writable; the desktop applies it to new missions.
+    default_mission_path: MissionPathChoice
     # Read-only in v1.
     model_tiers: dict[str, tuple[ModelRef, ...]]
     default_tier: tuple[ModelRef, ...]
@@ -216,7 +222,63 @@ class SettingsOut(Contract):
 
 
 class SettingsPatch(Contract):
-    workspace_root: Annotated[
-        str,
-        StringConstraints(strict=True, min_length=1, max_length=MAX_WORKSPACE_CHARS),
-    ]
+    """At least one writable setting; anything else is refused."""
+
+    workspace_root: (
+        Annotated[
+            str,
+            StringConstraints(
+                strict=True, min_length=1, max_length=MAX_WORKSPACE_CHARS
+            ),
+        ]
+        | None
+    ) = None
+    default_mission_path: MissionPathChoice | None = None
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> Self:
+        if self.workspace_root is None and self.default_mission_path is None:
+            raise ValueError("no setting given")
+        return self
+
+
+# ---- PHX-108 onboarding and capability flags
+
+
+class RuntimeCheck(Contract):
+    provider_id: str
+    display_name: str
+    state: RuntimeState
+
+
+class ModelCheck(Contract):
+    provider_id: str
+    model_id: str
+    required: bool
+    registered: bool
+    install_command: str | None  # only while the model is not registered
+
+
+class StorageCheck(Contract):
+    data_dir: str
+    free_bytes: int | None
+    database_ready: bool
+
+
+class OnboardingOut(Contract):
+    complete: bool
+    runtimes: tuple[RuntimeCheck, ...]
+    models: tuple[ModelCheck, ...]
+    storage: StorageCheck
+    workspace: WorkspaceOut
+
+
+class CapabilityOut(Contract):
+    capability_id: CapabilityId
+    enabled: bool
+    ticket: str
+    agent_id: str
+
+
+class CapabilitiesOut(Contract):
+    capabilities: tuple[CapabilityOut, ...]

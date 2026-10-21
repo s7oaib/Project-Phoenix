@@ -22,9 +22,16 @@ runtime that missions starting afterwards use (``WorkspaceService``).
 PHX-119 (ADR-155..158) adds one KaidoMonitor per backend, shared by every
 runtime: each ``/ready`` probe and each mission's probe is one observation, and
 ``/ready`` reports KAIDO's state (an engaged KAIDO makes the backend degraded).
+PHX-108 (ADR-110) adds the ModelRegistrar: tier models are no longer registered
+only once at startup. A bounded background loop, the start of each
+mission (while a required model is missing), ``GET /ready`` and
+``GET /onboarding`` register any tier model that is still missing once its
+provider answers, so starting Ollama after PHOENIX no longer leaves every
+mission failing ``no_eligible_model`` until a restart.
 """
 
 import asyncio
+import contextlib
 import sys
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -63,6 +70,7 @@ from phoenix.api.event_stream import (
     EventStream,
 )
 from phoenix.api.missions import MissionService
+from phoenix.api.onboarding import REQUIRED_MODELS
 from phoenix.api.security import (
     LocalApiSecurity,
     accept_websocket,
@@ -141,6 +149,15 @@ class ServerConfig(BaseModel):
     # PHX-103: concurrent WS /events connections; more are refused with 503.
     event_max_connections: int = Field(
         default=DEFAULT_MAX_CONNECTIONS, strict=True, ge=1, le=256
+    )
+    # PHX-108 (ADR-110): how often missing tier models are retried while a
+    # provider is unavailable, and (slower) while it answers but some tier
+    # model is still not installed.
+    model_refresh_seconds: float = Field(
+        default=10.0, gt=0, le=600, allow_inf_nan=False
+    )
+    model_refresh_idle_seconds: float = Field(
+        default=60.0, gt=0, le=3600, allow_inf_nan=False
     )
     alembic_ini: Path = ALEMBIC_INI
     # PHX-119: KAIDO's hysteresis and memory thresholds; the system RAM sample
@@ -230,6 +247,7 @@ class BackendServices:
     settings_store: SettingsStore
     workspace: WorkspaceService
     kaido: KaidoMonitor  # PHX-119: shared by readiness and every runtime
+    model_registrar: "ModelRegistrar"  # PHX-108: late provider start
 
 
 class ReadinessStatus(StrEnum):
@@ -352,14 +370,22 @@ async def register_tier_models(
     table: ModelTierTable,
     registry: ModelCapabilityRegistry,
     timeout: float,
-) -> None:
-    """Register installed tier models of healthy providers; skip the rest."""
+) -> bool:
+    """Register installed tier models of healthy providers; skip the rest.
+
+    Models already registered are not asked again (PHX-108). Returns True when
+    every provider answered healthy.
+    """
     wanted = tier_models(table)
+    all_healthy = True
     for provider in providers:
         if await probe_provider(provider, timeout) != ProviderHealthStatus.HEALTHY:
+            all_healthy = False
             continue
         for provider_id, model_id in wanted:
             if provider_id != provider.provider_id:
+                continue
+            if registry.get(provider_id, model_id) is not None:
                 continue
             try:
                 async with asyncio.timeout(timeout):
@@ -371,6 +397,70 @@ async def register_tier_models(
                 model_id,
             ):
                 registry.register(capabilities)
+    return all_healthy
+
+
+class ModelRegistrar:
+    """PHX-108 (ADR-110): registers tier models whenever they become available.
+
+    At startup a provider may not be running yet (the owner's rehearsal:
+    PHOENIX started before Ollama), so registration is retried. ``refresh``
+    is single-flight (concurrent callers share one pass) and asks only for
+    tier models that are still missing; every provider call is bounded by the
+    probe timeout. ``run`` is the background loop: it retries every
+    ``interval`` while a provider is unavailable and every ``idle_interval``
+    while every provider answers but some tier model is not installed, and it
+    does nothing once every tier model is registered. A registered model is
+    never removed here; a provider that stops later is reported by ``/ready``
+    and fails generations explicitly (INV-021).
+    """
+
+    def __init__(
+        self,
+        providers: tuple[ModelProvider, ...],
+        table: ModelTierTable,
+        registry: ModelCapabilityRegistry,
+        timeout: float,
+    ) -> None:
+        self._providers = providers
+        self._table = table
+        self._registry = registry
+        self._timeout = timeout
+        self._lock = asyncio.Lock()
+        self._all_healthy = False
+        self.passes = 0  # completed refresh passes (observable in tests)
+
+    def missing(self) -> tuple[tuple[str, str], ...]:
+        """Tier models of these providers that are not registered."""
+        ids = {provider.provider_id for provider in self._providers}
+        return tuple(
+            (provider_id, model_id)
+            for provider_id, model_id in tier_models(self._table)
+            if provider_id in ids and self._registry.get(provider_id, model_id) is None
+        )
+
+    async def refresh(self) -> None:
+        if not self.missing():
+            return
+        async with self._lock:
+            if not self.missing():
+                return  # a concurrent pass already registered them
+            self._all_healthy = await register_tier_models(
+                self._providers, self._table, self._registry, self._timeout
+            )
+            self.passes += 1
+
+    async def refresh_required(self) -> None:
+        """Before a mission: refresh only if a required model is missing, so
+        an optional model that is not installed costs nothing per mission."""
+        if set(self.missing()) & set(REQUIRED_MODELS):
+            await self.refresh()
+
+    async def run(self, interval: float, idle_interval: float) -> None:
+        while True:
+            await asyncio.sleep(idle_interval if self._all_healthy else interval)
+            with contextlib.suppress(Exception):
+                await self.refresh()
 
 
 async def _close_provider(provider: ModelProvider) -> None:
@@ -411,14 +501,12 @@ async def open_services(
         agents = build_default_agent_registry()
         table = default_tier_table()
         capabilities = ModelCapabilityRegistry()
+        registrar = ModelRegistrar(
+            provider_set.providers, table, capabilities, config.probe_timeout_seconds
+        )
         try:
             async with asyncio.timeout(config.startup_timeout_seconds):
-                await register_tier_models(
-                    provider_set.providers,
-                    table,
-                    capabilities,
-                    config.probe_timeout_seconds,
-                )
+                await registrar.refresh()
         except TimeoutError:
             pass  # keep what registered; readiness reports the gap (INV-022)
         lifecycle = ModelLifecycleManager()
@@ -460,6 +548,7 @@ async def open_services(
             store=MissionStore(session_factory),
             tool_registry=tools,
             events=stream,
+            before_run=registrar.refresh_required,
         )
         settings_store = SettingsStore(session_factory)
         services = BackendServices(
@@ -489,13 +578,24 @@ async def open_services(
                 data_dir=settings.data_dir,
             ),
             kaido=kaido,
+            model_registrar=registrar,
         )
+        refresher: asyncio.Task[None] | None = None
         try:
             await services.workspace.load()  # before the first mission runs
             await services.missions.start()
+            refresher = asyncio.create_task(
+                registrar.run(
+                    config.model_refresh_seconds, config.model_refresh_idle_seconds
+                )
+            )
             yield services
         finally:
             try:
+                if refresher is not None:
+                    refresher.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await refresher
                 await cancel_active_missions(services)
             finally:
                 await stream.close()  # 1001 to every remaining client
@@ -522,6 +622,12 @@ async def readiness(
     statuses = await asyncio.gather(
         *(probe_provider(provider, timeout) for provider in services.providers)
     )
+    # PHX-108 (ADR-110): a provider that started after PHOENIX gets its tier
+    # models registered now, bounded, so readiness reflects them at once.
+    if ProviderHealthStatus.HEALTHY in statuses and services.model_registrar.missing():
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout(timeout):
+                await services.model_registrar.refresh()
     at_head = await services.database_probe.at_head(timeout)
     # PHX-119: the same provider-health signal drives KAIDO's hysteresis.
     kaido = await services.kaido.observe(

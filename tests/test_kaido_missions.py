@@ -316,7 +316,7 @@ def test_no_healthy_provider_engages(status: ProviderHealthStatus) -> None:
 
 def test_hysteresis_releases_only_after_consecutive_clear_observations() -> None:
     sink = RecordingSink()
-    kaido = monitor(events=sink)
+    kaido = monitor(events=sink, policy=KaidoPolicy(provider_release_after=2))
 
     async def exercise() -> list[KaidoStatus]:
         seen = [await kaido.observe({"ollama": UNAVAILABLE})]
@@ -341,9 +341,21 @@ def test_hysteresis_releases_only_after_consecutive_clear_observations() -> None
     assert kaido.decision is None
 
 
+def test_provider_release_is_immediate_by_default() -> None:
+    # PHX-108: a provider started late is used on the first healthy probe.
+    kaido = monitor()
+    assert run(kaido.observe({"ollama": UNAVAILABLE})).release_after == 1
+    assert not run(kaido.observe({"ollama": HEALTHY})).engaged
+    # Memory pressure keeps the two-observation hysteresis.
+    kaido = monitor(PRESSURE, PLENTY)
+    assert run(kaido.observe({"ollama": HEALTHY})).release_after == 2
+    assert run(kaido.observe({"ollama": HEALTHY})).engaged
+    assert not run(kaido.observe({"ollama": HEALTHY})).engaged
+
+
 def test_release_after_is_configurable() -> None:
-    kaido = monitor(policy=KaidoPolicy(release_after=1))
-    run(kaido.observe({"ollama": UNAVAILABLE}))
+    kaido = monitor(PRESSURE, PLENTY, policy=KaidoPolicy(release_after=1))
+    run(kaido.observe({"ollama": HEALTHY}))
     assert not run(kaido.observe({"ollama": HEALTHY})).engaged
 
 
@@ -898,7 +910,10 @@ def test_ready_reports_kaido_and_releases_with_hysteresis(tmp_path: Path) -> Non
     provider = QueueProvider()
     # Healthy for startup registration, down twice, then healthy again.
     provider.health_replies = [HEALTHY, UNAVAILABLE, UNAVAILABLE, HEALTHY]
-    with backend_client(tmp_path, provider, kaido_ram_probe=False) as client:
+    policy = KaidoPolicy(provider_release_after=2)
+    with backend_client(
+        tmp_path, provider, kaido_ram_probe=False, kaido_policy=policy
+    ) as client:
         first = client.get("/ready").json()
         assert first["status"] == "degraded"
         assert first["kaido"]["engaged"] is True

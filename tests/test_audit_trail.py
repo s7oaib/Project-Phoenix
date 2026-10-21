@@ -908,7 +908,7 @@ def test_migration_lifecycle_preserves_earlier_schema(tmp_path: Path) -> None:
     path = tmp_path / "lifecycle.db"
     cfg = config(path)
     scripts = ScriptDirectory.from_config(cfg)
-    assert scripts.get_heads() == ["0008_mission_triage"]
+    assert scripts.get_heads() == ["0009_default_mission_path"]
     revision = scripts.get_revision("0005_audit_events")
     assert revision is not None and revision.down_revision == "0004_embedding_records"
     engine = create_engine(f"sqlite:///{path}")

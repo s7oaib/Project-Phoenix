@@ -68,8 +68,11 @@ released state. Every engagement is a PHX-028 `KaidoFailSafe` decision.
 | `resource_pressure` | Free RAM below 2,048 MiB (psutil), or free VRAM below 512 MiB when a caller's probe reports it | Process |
 | `recovery_exhausted` | MAHORAGA reported the mission's budget exhausted (`RecoveryResult` with `status=exhausted`) | One mission |
 
-- **Hysteresis.** KAIDO engages on the first bad observation and releases only
-  after two consecutive clear ones (`KaidoPolicy.release_after`). Memory counts
+- **Hysteresis.** KAIDO engages on the first bad observation. A memory
+  engagement releases only after two consecutive clear observations
+  (`KaidoPolicy.release_after`); a provider engagement releases on the first
+  probe with a `HEALTHY` provider (`provider_release_after`, default 1), the
+  probe on which PHX-108's `ModelRegistrar` registers its tier models. Memory counts
   as clear only at or above 3,072 MiB RAM and 1,024 MiB VRAM, so a value
   between the thresholds never flaps it. A failing memory probe is no evidence.
 - **The KAIDO answer.** One generation of T0 (`qwen3.5:2b`, the tier row

@@ -27,7 +27,7 @@ Each item is applied under the coordinator's brief, pending the owner's review.
   - `recovery_exhausted`: MAHORAGA's mission budget is spent (R8).
 
   `deep_provider_unavailable` and `critical_subsystem_degradation` have no mission signal yet.
-- **R4 — Hysteresis.** KAIDO engages on the first bad observation. It releases only after `release_after` (default 2) consecutive clear observations. Memory counts as clear only above the release threshold. A bad observation resets the count, and the trigger stays the engaging one.
+- **R4 — Hysteresis.** KAIDO engages on the first bad observation. A memory engagement releases only after `release_after` (default 2) consecutive clear observations. A provider engagement releases after `provider_release_after` (default 1; changed when PHX-108 merged, so a mission right after a late Ollama start runs normally, on the same probe where `ModelRegistrar` registers the tier models). Memory counts as clear only above the release threshold. A bad observation resets the count, and the trigger stays the engaging one.
 - **R5 — The KAIDO reply.** A mission is exactly one generation:
   - T0 (`qwen3.5:2b`, new tier-table row `failsafe`) on the structured think:false provider;
   - at most 1,024 output tokens;
@@ -63,6 +63,7 @@ Each item is applied under the coordinator's brief, pending the owner's review.
 - **R13 — Pins.**
   - `runtime.py` and `mission_events.py` move from the PHX-109 pin to the PHX-119 implementation commit.
   - `server.py` moves from the PHX-104 pin, and `routes/missions.py` and `routes/schemas.py` move from the PHX-105 pin, to the same commit (`PHX_119_COMMIT` / `PHX_119_PATHS`), in a separate pin commit.
+  - After PHX-118 (`ac86366`) and PHX-108 (`3876657`) were merged in, all five paths are pinned at the PHX-119 resolution commit (`runtime.py` also carries PHX-118, `server.py` and `routes/schemas.py` also carry PHX-108). `PHX_118_PATHS` and `PHX_109_PATHS` are empty; `PHX_108_PATHS` drops `server.py` and `schemas.py`.
   - `kaido.py` is new, so it is protected once it is on `origin/main`.
   - The branch merges with a merge commit.
 - **R14 — Existing tests.** Two exact-shape assertions change:

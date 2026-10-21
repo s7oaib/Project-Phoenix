@@ -4,7 +4,10 @@ KAIDO is degraded/fail-safe mode only (INV-010). ``KaidoMonitor`` turns the
 same provider-health signal readiness and missions already probe, plus an
 optional cheap resource sample, into an engaged/released state with
 hysteresis: it engages on the first bad observation and releases only after
-``release_after`` consecutive clear ones (resources above the release band).
+``release_after`` consecutive clear ones (resources above the release band);
+an engagement for a provider that was down releases after
+``provider_release_after`` (default 1), so a provider started late (PHX-108's
+ModelRegistrar registers its models on the same probe) is used at once.
 Every engagement is a PHX-028 ``KaidoFailSafe`` decision, so the trigger, the
 reason and the capability list stay explicit and immutable (INV-022).
 
@@ -150,6 +153,9 @@ class KaidoPolicy(_Value):
     """Engage below ``engage_*``; count clear only at or above ``release_*``."""
 
     release_after: int = Field(default=2, ge=1, le=10, strict=True)
+    # PHX-108 merge: a provider that answers HEALTHY again is unambiguous, and
+    # its tier models are re-registered on that same probe.
+    provider_release_after: int = Field(default=1, ge=1, le=10, strict=True)
     engage_free_ram_mib: int = Field(default=2048, ge=0, strict=True)
     release_free_ram_mib: int = Field(default=3072, ge=0, strict=True)
     engage_free_vram_mib: int = Field(default=512, ge=0, strict=True)
@@ -251,8 +257,17 @@ class KaidoMonitor:
             trigger=None if decision is None else decision.trigger,
             capabilities=() if decision is None else decision.enabled_capabilities,
             clear_observations=self._clear if decision is not None else 0,
-            release_after=self._policy.release_after,
+            release_after=self._release_after(),
         )
+
+    def _release_after(self) -> int:
+        decision = self._decision
+        if (
+            decision is not None
+            and decision.trigger == FailSafeTrigger.PRIMARY_MODEL_PROVIDER_UNAVAILABLE
+        ):
+            return self._policy.provider_release_after
+        return self._policy.release_after
 
     def _sample(self) -> ResourceSample | None:
         if self._probe is None:
@@ -299,7 +314,7 @@ class KaidoMonitor:
             return self.status()
         clear = sample is not None and not self._pressure(sample, engage=False)
         self._clear = self._clear + 1 if clear else 0
-        if self._clear >= self._policy.release_after:
+        if self._clear >= self._release_after():
             released = self._decision
             self._decision = None
             self._clear = 0

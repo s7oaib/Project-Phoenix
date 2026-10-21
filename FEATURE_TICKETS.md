@@ -110,7 +110,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-105 Request triage — DONE
 - PHX-106 Tauri backend sidecar — DONE (R1–R12 confirmed by the owner 2026-10-18)
 - PHX-107 Frontend port adapters — DONE (R1–R11 confirmed by the owner 2026-10-18)
-- PHX-108 Settings and onboarding — TODO
+- PHX-108 Settings and onboarding — DONE (ADR-110–114; late Ollama start fixed; owner review in the PR)
 - PHX-109 MAHORAGA/KAIDO in missions — DONE (MAHORAGA bounded recovery, ADR-093; KAIDO deferred)
 - PHX-110 Memory and RAG in missions — TODO
 - PHX-111 Web research — TODO
@@ -120,4 +120,5 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-115 Observability — TODO
 - PHX-116 Colibri deep tier — TODO
 - PHX-117 Metric datasets — TODO
+- PHX-118 LEVI final-verifier reliability — DONE (deterministic grounding pre-check, ADR-100; proposed v5 prompt text awaits owner approval)
 - PHX-119 KAIDO fail-safe in missions — DONE (ADR-155–ADR-158; owner reviews R1–R14 and the KAIDO prompt text)
