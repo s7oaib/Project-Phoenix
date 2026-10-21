@@ -604,10 +604,11 @@ reaches JavaScript.
 
 Webview access is exactly:
 
-- `invoke('api_request', { method, path, body })` — 20 allowlisted REST v1 routes (18 from
-  PHX-106 plus PHX-108's read-only `GET /onboarding` and `GET /capabilities`)
-  (docs/13), canonical UUID segments, listed query keys, JSON bodies up to 64 KiB;
-  anything else is `route_not_allowed`;
+- `invoke('api_request', { method, path, body })` — 31 allowlisted REST v1 routes (18 from
+  PHX-106, PHX-108's read-only `GET /onboarding` and `GET /capabilities`, PHX-115's
+  `GET /metrics` and PHX-122's ten voice and knowledge routes, below)
+  (docs/13), canonical UUID segments, listed query keys, JSON bodies up to 64 KiB (the
+  upload: up to 8 MiB decoded); anything else is `route_not_allowed`;
 - `invoke('backend_status')` — `starting`, `ready` or `degraded` with a closed code;
 - `listen` on `phoenix:event` (content-free event envelopes from `WS /events`),
   `phoenix:events-status` and `phoenix:backend-status`.
@@ -622,7 +623,8 @@ requests, P1–P4 `approval_required` evidence, approve with `session` or deny; 
 linked re-run is followed), Task Graph and Agent Network (live step and agent states
 from events; objectives and dependencies are not published), Models and Observability
 (recent events and timings, plus the backend's `GET /metrics` snapshot and recent
-structured event logs since PHX-115, ADR-148). Memory, Files and Voice stay unconnected. `main.tsx`
+structured event logs since PHX-115, ADR-148). Memory, Files and Voice are connected by
+PHX-122 (below) through caller-supplied panels, not App's read-only ports. `main.tsx`
 renders `ConnectedApp` only inside the native shell; a plain browser keeps the honest
 unconnected App. App.tsx is unchanged by PHX-107, so its captions still describe ports as
 caller-supplied; PHX-108 adds only the header status line (below).
@@ -717,3 +719,45 @@ removes the default `%USERPROFILE%\.phoenix\data` (a custom
 `PHOENIX_DATA_DIR` is never deleted), Tauri's WebView data and the remembered
 install folder (`HKCU\Software\PHOENIX`). Silent uninstall (`uninstall.exe /S`)
 always keeps user data. Ollama and its models are never touched.
+
+## PHX-122 Desktop capability UI (ADR-170 to ADR-174)
+
+The desktop now shows the capabilities the backend already serves. Every value comes from
+the store's backend state; every action is a store method over an allowlisted route.
+
+- **Proxy (ADR-170, ADR-171).** `api_request` admits 31 routes: PHX-115's 21 plus
+  `GET /voice/status`, `POST /voice/start`, `POST /voice/stop`, `POST /files/upload`
+  (`filename`), `GET /files`, `DELETE /files/{id}`, `GET /memory`, `POST /memory`,
+  `GET /memory/search` (`q`, `limit`) and `DELETE /memory/{id}`. `DELETE` exists for those
+  two user-owned deletes only, with no body. `filename` and `q` take `encodeURIComponent`
+  text (unreserved bytes and `%XX` only); other keys keep the plain rule. The upload is the
+  one raw-body route: the webview sends `{"content_base64": ...}`, Rust decodes strict base64
+  and forwards at most 8 MiB as the raw file with no declared media type. No new command,
+  capability, permission, plugin or CSP source.
+- **Voice (ADR-170).** A mic toggle above Chat and in the Voice view: "Start listening"
+  (`POST /voice/start`) / "Stop listening" (`POST /voice/stop`), the state from
+  `GET /voice/status` and `voice.listening` / `voice.speaking` / `voice.interrupted` events,
+  the wake phrase, and "Text fallback: type your request in Chat" whenever voice is
+  unavailable, text-only or unknown. Voice never approves permissions (the view says so and
+  calls no permission route). App's old static voice aside is hidden by `connected.css`.
+- **Files and Memory (ADR-171).** Files: upload (limit 8 MiB stated, larger files refused
+  before sending), list and delete. Memory: add a note (up to 2,000 characters), search
+  notes and uploads, list and delete. Backend codes (`payload_too_large`,
+  `unsupported_format`, `secret_rejected`, `knowledge_unavailable`, ...) are explained.
+- **Sources and KAIDO (ADR-172).** A completed answer ends with "Sources:" and one
+  "[n] label" line per cited source (`GET /missions/{id}` `sources`). A mission with `kaido`
+  is labelled `[Unverified · KAIDO degraded mode]`. The connection bar shows "Degraded mode
+  (KAIDO) — answers unverified" while `GET /ready` reports `kaido.engaged`; `/ready` is read
+  on connect, on `phoenix.degraded` / `phoenix.ready` and every 15 s only while engaged.
+- **Approvals (ADR-173).** Above App's Permissions cards, "What PHOENIX is asking to do"
+  shows each request's display-only `summary` (action; page URL or element; window title
+  with the real process, executable and PID; command; text to type or `[hidden]`), and P4
+  requests say "One-time approval (P4)". App's card reason for P4 says the same; no grant
+  is stored. The decision still binds to the stored request.
+- **Settings (ADR-174).** "Web research is enabled for this launch" or "off — start PHOENIX
+  with PHOENIX_WEB_RESEARCH_ENABLED=true", read-only; the Research view says the same
+  instead of "arrives with PHX-111".
+
+App.tsx again changes only after `export const diagnosticMetricNames`: `ConnectedPanels`
+adds `memory`, `files` and `voice`, and `above.home` / `above.permissions`, rendered above
+App's own Chat and Permissions views (never in place of them).

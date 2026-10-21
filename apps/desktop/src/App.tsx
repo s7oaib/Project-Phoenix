@@ -1332,18 +1332,22 @@ export function ObservabilityWorkspace({ diagnostics }: { diagnostics: Observabi
   </section>;
 }
 
-/** PHX-108 (ADR-114): caller-rendered panels for the five views App has no port for. The native
- *  shell's adapters supply them; without one, App keeps its honest default for that view. */
-export type ConnectedPanels = Partial<Record<'onboarding' | 'settings' | 'computer' | 'research' | 'media', ReturnType<typeof ChatWorkspace>>>;
+/** PHX-108 (ADR-114): caller-rendered panels for the views App has no live port for. The native
+ *  shell's adapters supply them; without one, App keeps its honest default for that view.
+ *  PHX-122 (ADR-174): Memory, Files and Voice join them, and `above` adds a caller panel above
+ *  App's own Home / Chat and Permissions views (never in place of them). */
+type SuppliedPanel = ReturnType<typeof ChatWorkspace>;
+export type ConnectedPanels = Partial<Record<'onboarding' | 'settings' | 'computer' | 'research' | 'media' | 'memory' | 'files' | 'voice', SuppliedPanel>> & { readonly above?: Partial<Record<'home' | 'permissions', SuppliedPanel>> };
 export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, permissions, memory, files, models, voice, diagnostics, panels }: { view: ViewDefinition; chatPort?: ChatPort; chat?: ChatDraft; agentPort?: AgentPort; directory?: AgentDirectory; task?: TaskPresentation; permissions?: PermissionPresentation; memory?: EvidenceBrowser<MemoryPresentationRecord>; files?: EvidenceBrowser<FilePresentationRecord>; models?: ModelBrowser; voice?: VoiceBrowser; diagnostics?: ObservabilityPresentation; panels?: ConnectedPanels }) {
-  const supplied = panels && (view.id === 'onboarding' || view.id === 'settings' || view.id === 'computer' || view.id === 'research' || view.id === 'media') ? panels[view.id] : undefined;
+  const supplied = panels && (view.id === 'onboarding' || view.id === 'settings' || view.id === 'computer' || view.id === 'research' || view.id === 'media' ||
+    view.id === 'memory' || view.id === 'files' || view.id === 'voice') ? panels[view.id] : undefined;
   if (supplied !== undefined) return <>{supplied}</>;
   if (view.id === 'home') {
-    return chat ? <ChatWorkspace chatPort={chatPort} chat={chat} /> : null;
+    return chat ? <>{panels?.above?.home}<ChatWorkspace chatPort={chatPort} chat={chat} /></> : null;
   }
   if (view.id === 'agents') return directory ? <AgentNetwork agentPort={agentPort} directory={directory} /> : null;
   if (view.id === 'tasks') return task ? <TaskWorkspace task={task} /> : null;
-  if (view.id === 'permissions') return permissions ? <PermissionCenter permissions={permissions} /> : null;
+  if (view.id === 'permissions') return permissions ? <>{panels?.above?.permissions}<PermissionCenter permissions={permissions} /></> : null;
   if (view.id === 'memory') return memory ? <MemoryWorkspace memory={memory} /> : null;
   if (view.id === 'files') return files ? <FilesWorkspace files={files} /> : null;
   if (view.id === 'models') return models ? <ModelsWorkspace models={models} /> : null;

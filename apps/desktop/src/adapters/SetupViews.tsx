@@ -4,6 +4,7 @@
 // Presentation only: every value comes from GET /onboarding, /settings and /capabilities, and
 // every action is a store method that calls an allowlisted route through the native proxy. No
 // view starts, installs or downloads anything; a disabled capability says so plainly.
+// PHX-122 (ADR-174): web research is a launch opt-in, shown read-only as on or off for this launch.
 
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { agentRoster } from '../App';
@@ -172,12 +173,23 @@ export function SettingsPanel({ connection, store }: { connection: ConnectionVie
         <section aria-labelledby="settings-memory"><h4 id="settings-memory">Memory and retention</h4>
           <p>{capabilityLine(memory, 'Long-term memory')} Mission history is kept for {settings.retentionDays ?? 'an unreported number of'} days.</p>
         </section>
+        <section aria-labelledby="settings-research"><h4 id="settings-research">Web research</h4>
+          <p>{webResearchLine(connection.capabilities?.find((capability) => capability.capabilityId === 'web_research'))}</p>
+        </section>
         <section aria-labelledby="settings-permissions"><h4 id="settings-permissions">Privacy and permissions</h4>
           <p>PermissionEngine alone authorizes actions. Approve or deny requests in Permissions; nothing here changes a permission.</p>
         </section>
       </div>
     </section>
   );
+}
+
+export const WEB_RESEARCH_SWITCH = 'PHOENIX_WEB_RESEARCH_ENABLED=true';
+/** Web research is enabled per launch by an environment opt-in (ADR-161); read-only here. */
+export function webResearchLine(capability: CapabilityView | undefined): string {
+  if (!capability) return 'Web research: status unavailable.';
+  return capability.enabled ? 'Web research is enabled for this launch. Missions may search the web and cite their sources.'
+    : `Web research is off — start PHOENIX with ${WEB_RESEARCH_SWITCH} to enable it for that launch.`;
 }
 
 function capabilityLine(capability: CapabilityView | undefined, label: string): string {
@@ -209,8 +221,9 @@ export function CapabilityPanel({ view, connection }: { view: keyof typeof capab
             const agent = agentRoster.find((item) => item.internalId === flag?.agentId);
             const owner = agent ? ` Carried by ${agent.alias} (${agent.professionalRole}).` : '';
             return <li key={id}>
-              <strong>{capabilityNames[id]}: {flag ? (flag.enabled ? 'enabled' : 'not yet enabled') : 'status unavailable'}</strong>
-              {flag && !flag.enabled && <> — arrives with {flag.ticket}. PHOENIX does not attempt it in missions until then.</>}
+              <strong>{capabilityNames[id]}: {flag ? (flag.enabled ? 'enabled' : id === 'web_research' ? 'off' : 'not yet enabled') : 'status unavailable'}</strong>
+              {flag && !flag.enabled && id === 'web_research' && <> — off for this launch. Start PHOENIX with {WEB_RESEARCH_SWITCH} to enable it.</>}
+              {flag && !flag.enabled && id !== 'web_research' && <> — arrives with {flag.ticket}. PHOENIX does not attempt it in missions until then.</>}
               {flag?.enabled && <> — ask PHOENIX in Home / Chat; steps appear in Task Graph and each action asks in Permissions.</>}
               {owner}
             </li>;

@@ -6,6 +6,11 @@
 //! and only listed query keys with plain values pass. Rust adds the bearer token; the webview
 //! never sees it. Responses carry only the status and the backend's JSON body; failures are
 //! closed codes with no free text. No proxy from the environment, no redirects.
+//!
+//! PHX-122 (ADR-170, ADR-171): voice and knowledge (files and memory) routes, `DELETE` for the
+//! two user-owned deletes, percent-encoded text values for exactly the `filename` and `q` query
+//! keys, and one raw-body route: `POST /files/upload` takes `{"content_base64": "..."}`, which
+//! Rust decodes and forwards as the raw file (at most `MAX_UPLOAD` bytes, no declared media type).
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -18,6 +23,11 @@ use crate::backend::{Backend, Endpoint, LOOPBACK};
 pub const MAX_PATH: usize = 512;
 pub const MAX_BODY: usize = 64 * 1024;
 pub const MAX_RESPONSE: u64 = 4 * 1024 * 1024;
+/// PHX-122: the backend's own cap for `POST /files/upload` (`MAX_UPLOAD_BYTES`, ADR-133).
+pub const MAX_UPLOAD: usize = 8 * 1024 * 1024;
+pub const UPLOAD_ROUTE: &str = "/files/upload";
+/// Query keys whose value is user text, percent-encoded by the webview (`encodeURIComponent`).
+const TEXT_KEYS: &[&str] = &["filename", "q"];
 const TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,6 +35,7 @@ pub enum Method {
     Get,
     Post,
     Patch,
+    Delete,
 }
 
 /// Exact (method, route) pairs; `{id}` is one canonical lowercase UUID segment. Destructive
@@ -66,6 +77,18 @@ pub const ROUTES: &[(Method, &str, &[&str])] = &[
     (Method::Get, "/capabilities", &[]),
     // PHX-115 (ADR-147): read-only runtime metrics, no query.
     (Method::Get, "/metrics", &[]),
+    // PHX-122 (ADR-170): voice status and the mic toggle (no body).
+    (Method::Get, "/voice/status", &[]),
+    (Method::Post, "/voice/start", &[]),
+    (Method::Post, "/voice/stop", &[]),
+    // PHX-122 (ADR-170, ADR-171): the user's uploads and memory notes.
+    (Method::Post, "/files/upload", &["filename"]),
+    (Method::Get, "/files", &["limit", "offset"]),
+    (Method::Delete, "/files/{id}", &[]),
+    (Method::Get, "/memory", &["limit", "offset"]),
+    (Method::Post, "/memory", &[]),
+    (Method::Get, "/memory/search", &["q", "limit"]),
+    (Method::Delete, "/memory/{id}", &[]),
 ];
 
 /// Closed failure codes returned to the webview.
@@ -86,11 +109,13 @@ pub struct ApiResponse {
 }
 
 /// A request that passed the allowlist: the method, the exact path (with query) and body bytes.
+/// `raw` marks the decoded upload, which is sent without a JSON content type.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Admitted {
     pub method: Method,
     pub path: String,
     pub body: Option<Vec<u8>>,
+    pub raw: bool,
 }
 
 fn is_uuid(segment: &str) -> bool {
@@ -115,6 +140,28 @@ fn route_matches(template: &str, path: &str) -> bool {
     }
 }
 
+/// `encodeURIComponent` output: unreserved bytes and complete `%XX` escapes only, so no raw
+/// `&`, `=`, `+`, `#`, `/`, space or control byte reaches the backend's query parser.
+fn encoded_text_ok(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == b'%' {
+            let hex = bytes.get(index + 1..index + 3);
+            if !hex.is_some_and(|pair| pair.iter().all(u8::is_ascii_hexdigit)) {
+                return false;
+            }
+            index += 3;
+        } else if byte.is_ascii_alphanumeric() || b"-._~!*'()".contains(&byte) {
+            index += 1;
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
 fn query_ok(query: &str, keys: &[&str]) -> bool {
     let mut seen: Vec<&str> = Vec::new();
     query.split('&').all(|pair| {
@@ -123,14 +170,73 @@ fn query_ok(query: &str, keys: &[&str]) -> bool {
         };
         let fresh = !seen.contains(&key);
         seen.push(key);
-        fresh
-            && keys.contains(&key)
-            && !value.is_empty()
-            && value.len() <= 64
-            && value
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        let value_ok = if TEXT_KEYS.contains(&key) {
+            encoded_text_ok(value)
+        } else {
+            value.len() <= 64
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        };
+        fresh && keys.contains(&key) && !value.is_empty() && value_ok
     })
+}
+
+fn sextet(byte: u8) -> Option<u32> {
+    match byte {
+        b'A'..=b'Z' => Some(u32::from(byte - b'A')),
+        b'a'..=b'z' => Some(u32::from(byte - b'a') + 26),
+        b'0'..=b'9' => Some(u32::from(byte - b'0') + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    }
+}
+
+/// Strict standard base64 (RFC 4648, padded, no whitespace, canonical); `None` otherwise.
+pub fn decode_base64(text: &str) -> Option<Vec<u8>> {
+    let bytes = text.as_bytes();
+    if !bytes.len().is_multiple_of(4) {
+        return None;
+    }
+    let quads = bytes.len() / 4;
+    let mut out = Vec::with_capacity(quads * 3);
+    for (number, quad) in bytes.as_chunks::<4>().0.iter().enumerate() {
+        let pad = quad.iter().rev().take_while(|byte| **byte == b'=').count();
+        if pad > 2 || (pad > 0 && number + 1 != quads) {
+            return None;
+        }
+        let mut value = 0u32;
+        for byte in &quad[..4 - pad] {
+            value = (value << 6) | sextet(*byte)?;
+        }
+        value <<= 6 * pad as u32;
+        let decoded = [(value >> 16) as u8, (value >> 8) as u8, value as u8];
+        // Non-zero trailing bits (e.g. "QR==") are refused, so one text has one meaning.
+        if decoded[3 - pad..].iter().any(|byte| *byte != 0) {
+            return None;
+        }
+        out.extend_from_slice(&decoded[..3 - pad]);
+    }
+    Some(out)
+}
+
+/// The upload body: exactly `{"content_base64": "<1..=MAX_UPLOAD bytes, base64>"}`.
+fn upload_bytes(body: Option<Value>) -> Result<Vec<u8>, ProxyError> {
+    let Some(Value::Object(fields)) = body else {
+        return Err(ProxyError::InvalidBody);
+    };
+    let text = match (fields.len(), fields.get("content_base64")) {
+        (1, Some(Value::String(text))) => text,
+        _ => return Err(ProxyError::InvalidBody),
+    };
+    if text.len() > MAX_UPLOAD.div_ceil(3) * 4 {
+        return Err(ProxyError::InvalidBody);
+    }
+    match decode_base64(text) {
+        Some(bytes) if !bytes.is_empty() && bytes.len() <= MAX_UPLOAD => Ok(bytes),
+        _ => Err(ProxyError::InvalidBody),
+    }
 }
 
 /// The allowlist decision. Anything not exactly listed is refused before any I/O.
@@ -139,6 +245,7 @@ pub fn admit(method: &str, path: &str, body: Option<Value>) -> Result<Admitted, 
         "GET" => Method::Get,
         "POST" => Method::Post,
         "PATCH" => Method::Patch,
+        "DELETE" => Method::Delete,
         _ => return Err(ProxyError::RouteNotAllowed),
     };
     if path.len() > MAX_PATH || !path.starts_with('/') || !path.is_ascii() {
@@ -158,9 +265,17 @@ pub fn admit(method: &str, path: &str, body: Option<Value>) -> Result<Admitted, 
             return Err(ProxyError::RouteNotAllowed);
         }
     }
+    if method == Method::Post && route == UPLOAD_ROUTE {
+        return Ok(Admitted {
+            method,
+            path: path.to_owned(),
+            body: Some(upload_bytes(body)?),
+            raw: true,
+        });
+    }
     let body = match (method, body) {
-        (Method::Get, None) => None,
-        (Method::Get, Some(_)) => return Err(ProxyError::InvalidBody),
+        (Method::Get | Method::Delete, None) => None,
+        (Method::Get | Method::Delete, Some(_)) => return Err(ProxyError::InvalidBody),
         (_, None) => None,
         (_, Some(value)) => {
             if !value.is_object() {
@@ -177,6 +292,7 @@ pub fn admit(method: &str, path: &str, body: Option<Value>) -> Result<Admitted, 
         method,
         path: path.to_owned(),
         body,
+        raw: false,
     })
 }
 
@@ -208,6 +324,12 @@ pub fn forward(endpoint: &Endpoint, request: &Admitted) -> Result<ApiResponse, P
     let agent = agent();
     let result = match (request.method, &request.body) {
         (Method::Get, _) => agent.get(&url).header("Authorization", &auth).call(),
+        (Method::Delete, _) => agent.delete(&url).header("Authorization", &auth).call(),
+        // PHX-122: the raw upload declares no media type; the backend infers it from the name.
+        (Method::Post, Some(body)) if request.raw => agent
+            .post(&url)
+            .header("Authorization", &auth)
+            .send(&body[..]),
         (Method::Post, None) => agent.post(&url).header("Authorization", &auth).send_empty(),
         (Method::Patch, None) => agent
             .patch(&url)
@@ -290,6 +412,17 @@ mod tests {
             ("GET", "/onboarding".to_owned()),
             ("GET", "/capabilities".to_owned()),
             ("GET", "/metrics".to_owned()),
+            ("GET", "/voice/status".to_owned()),
+            ("POST", "/voice/start".to_owned()),
+            ("POST", "/voice/stop".to_owned()),
+            ("GET", "/files?limit=64&offset=0".to_owned()),
+            ("DELETE", format!("/files/{ID}")),
+            ("GET", "/memory?limit=64".to_owned()),
+            (
+                "GET",
+                "/memory/search?q=caf%C3%A9%20notes&limit=5".to_owned(),
+            ),
+            ("DELETE", format!("/memory/{ID}")),
         ] {
             let admitted =
                 admit(method, &path, None).unwrap_or_else(|e| panic!("{method} {path}: {e:?}"));
@@ -322,7 +455,13 @@ mod tests {
             Some(json!({"default_mission_path": "direct"}))
         )
         .is_ok());
-        assert_eq!(ROUTES.len(), 21);
+        assert!(admit(
+            "POST",
+            "/memory",
+            Some(json!({"content": "I prefer short answers"}))
+        )
+        .is_ok());
+        assert_eq!(ROUTES.len(), 31);
     }
 
     #[test]
@@ -369,6 +508,36 @@ mod tests {
             ("GET", format!("/metrics/{ID}")),
             ("POST", "/metrics".to_owned()),
             ("PATCH", "/metrics".to_owned()),
+            // PHX-122: only the listed methods, exact paths and query keys.
+            ("GET", "/voice/start".to_owned()),
+            ("POST", "/voice/status".to_owned()),
+            ("PATCH", "/voice/start".to_owned()),
+            ("DELETE", "/voice/stop".to_owned()),
+            ("GET", "/voice/status?verbose=1".to_owned()),
+            ("POST", "/voice/start/x".to_owned()),
+            ("DELETE", "/files".to_owned()),
+            ("DELETE", "/memory".to_owned()),
+            ("DELETE", "/files/not-a-uuid".to_owned()),
+            ("DELETE", format!("/memory/{}", ID.to_uppercase())),
+            ("DELETE", format!("/missions/{ID}")),
+            ("DELETE", format!("/permissions/{ID}")),
+            ("GET", format!("/files/{ID}")),
+            ("GET", format!("/memory/{ID}")),
+            ("POST", format!("/memory/{ID}")),
+            ("PATCH", "/memory".to_owned()),
+            ("POST", "/files".to_owned()),
+            ("GET", "/files?filename=a".to_owned()),
+            ("GET", "/memory/search?query=a".to_owned()),
+            ("GET", "/memory/search?q=a&q=b".to_owned()),
+            ("GET", "/memory/search?q=a+b".to_owned()),
+            ("GET", "/memory/search?q=a b".to_owned()),
+            ("GET", "/memory/search?q=a%2".to_owned()),
+            ("GET", "/memory/search?q=a%zz".to_owned()),
+            ("GET", "/memory/search?q=a#b".to_owned()),
+            ("GET", "/memory/search?q=a/b".to_owned()),
+            ("GET", "/memory/search?q=".to_owned()),
+            ("GET", "/memory/search?limit=a%20b".to_owned()),
+            ("GET", "/memory?q=a".to_owned()),
             ("GET", "/health\r\nX: y".to_owned()),
             ("GET", "/héalth".to_owned()),
             ("GET", format!("/missions?offset={}", "1".repeat(MAX_PATH))),
@@ -411,6 +580,83 @@ mod tests {
                 .body,
             None
         );
+    }
+
+    #[test]
+    fn delete_routes_take_no_body() {
+        assert_eq!(
+            admit("DELETE", &format!("/files/{ID}"), Some(json!({}))),
+            Err(ProxyError::InvalidBody)
+        );
+        let admitted = admit("DELETE", &format!("/memory/{ID}"), None).unwrap();
+        assert_eq!(admitted.method, Method::Delete);
+        assert_eq!((admitted.body, admitted.raw), (None, false));
+    }
+
+    #[test]
+    fn upload_is_one_decoded_raw_body_within_the_backend_cap() {
+        let path = "/files/upload?filename=notes%20(final).md";
+        let admitted = admit("POST", path, Some(json!({"content_base64": "aGVsbG8="}))).unwrap();
+        assert_eq!(admitted.path, path);
+        assert_eq!(admitted.body.as_deref(), Some(&b"hello"[..]));
+        assert!(admitted.raw);
+        let full = "A".repeat(MAX_UPLOAD / 3 * 4) + "AAA=";
+        assert_eq!(
+            admit("POST", path, Some(json!({ "content_base64": full })))
+                .unwrap()
+                .body
+                .unwrap()
+                .len(),
+            MAX_UPLOAD / 3 * 3 + 2
+        );
+        let over = "A".repeat((MAX_UPLOAD + 3) / 3 * 4);
+        for body in [
+            None,
+            Some(json!("aGVsbG8=")),
+            Some(json!({})),
+            Some(json!({"content_base64": ""})),
+            Some(json!({"content_base64": 7})),
+            Some(json!({"content_base64": "aGVsbG8"})),
+            Some(json!({"content_base64": "aGVs bG8="})),
+            Some(json!({"content_base64": "aGVsbG8=", "media_type": "text/plain"})),
+            Some(json!({ "content_base64": over })),
+        ] {
+            assert_eq!(admit("POST", path, body), Err(ProxyError::InvalidBody));
+        }
+        // Other routes never take the raw form; the upload takes no other method or key.
+        assert!(
+            !admit("POST", "/memory", Some(json!({"content": "x"})))
+                .unwrap()
+                .raw
+        );
+        for (method, path) in [
+            ("GET", "/files/upload?filename=a"),
+            ("POST", "/files/upload?name=a"),
+            ("POST", "/files/upload?filename=a&filename=b"),
+            ("POST", "/files/upload?filename=a&b"),
+            ("POST", "/files/upload?filename=..%2F..%2Fx&limit=1"),
+            ("POST", "/files/upload/x?filename=a"),
+        ] {
+            assert_eq!(
+                admit(method, path, Some(json!({"content_base64": "aGVsbG8="}))),
+                Err(ProxyError::RouteNotAllowed),
+                "{method} {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn base64_is_strict_and_canonical() {
+        assert_eq!(decode_base64("").unwrap(), b"");
+        assert_eq!(decode_base64("Zg==").unwrap(), b"f");
+        assert_eq!(decode_base64("Zm8=").unwrap(), b"fo");
+        assert_eq!(decode_base64("Zm9v").unwrap(), b"foo");
+        assert_eq!(decode_base64("+/+/").unwrap(), [0xfb, 0xff, 0xbf]);
+        for bad in [
+            "Zg", "Zg=", "Zg===", "Z===", "Zg==Zg==", "Zm9v\n", "Zm-v", "Zm_v", "Zh==", "Zm9=",
+        ] {
+            assert_eq!(decode_base64(bad), None, "{bad}");
+        }
     }
 
     #[test]

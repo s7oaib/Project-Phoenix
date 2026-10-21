@@ -3,10 +3,14 @@
 // active mission's cancel / run-again). While setup is incomplete, a first-run screen shows the
 // onboarding steps instead of App until the user continues. App's Onboarding, Settings,
 // Computer Control, Research and Media views are supplied from SetupViews.
+// PHX-122 (ADR-170 to ADR-174): the bar shows KAIDO's degraded mode; Memory, Files and Voice
+// come from CapabilityViews, with the mic toggle above Chat and approval summaries above
+// Permissions.
 
 import { useSyncExternalStore } from 'react';
 import App from '../App';
 import { verificationText, type ConnectionView, type MissionPath, type MissionView, type PhoenixStore } from './core';
+import { ApprovalSummaries, FilesPanel, MemoryPanel, VoiceControl } from './CapabilityViews';
 import { CapabilityPanel, FirstRunScreen, OnboardingPanel, SettingsPanel } from './SetupViews';
 import './connected.css';
 
@@ -26,6 +30,17 @@ const degradedText: Readonly<Record<string, string>> = {
   backend_exited: 'The backend process exited. Restart PHOENIX.',
   ipc_unavailable: 'The native shell did not answer.',
 };
+const kaidoTriggerText: Readonly<Record<string, string>> = {
+  primary_model_provider_unavailable: 'The main model runtime is unavailable.',
+  resource_pressure: 'The computer is low on memory.',
+  recovery_exhausted: 'Recovery was exhausted.',
+};
+/** PHX-122 (ADR-172): KAIDO engaged means degraded answers that no one verified. */
+export function KaidoBanner({ connection }: { connection: Pick<ConnectionView, 'backend' | 'kaido'> }) {
+  if (connection.backend.state !== 'ready' || !connection.kaido?.engaged) return null;
+  const trigger = connection.kaido.trigger ? ` ${kaidoTriggerText[connection.kaido.trigger] ?? connection.kaido.trigger}` : '';
+  return <p className="kaido-banner" role="alert">Degraded mode (KAIDO) — answers unverified.{trigger} PHOENIX gives short, unchecked answers and runs no tools until it recovers.</p>;
+}
 const triageText: Readonly<Record<string, string>> = {
   decided: 'PHOENIX decided', fallback: 'triage fallback', client: 'your override',
 };
@@ -55,6 +70,7 @@ export function ConnectionBar({ connection, store }: { connection: ConnectionVie
         {backendText[backend.state]}{backend.state === 'degraded' && backend.code ? ` ${degradedText[backend.code] ?? backend.code}` : ''}
         {ready ? (stream.connected ? ' Live progress connected.' : ' Live progress reconnecting; views reload from the backend.') : ''}
       </p>
+      <KaidoBanner connection={connection} />
       {ready && <>
         <p className="connection-row">
           <span className="connection-label">Document workspace</span>
@@ -92,6 +108,13 @@ export function ConnectedApp({ store }: { store: PhoenixStore }) {
     computer: <CapabilityPanel view="computer" connection={connection} />,
     research: <CapabilityPanel view="research" connection={connection} />,
     media: <CapabilityPanel view="media" connection={connection} />,
+    memory: <MemoryPanel connection={connection} store={store} />,
+    files: <FilesPanel connection={connection} store={store} />,
+    voice: <VoiceControl connection={connection} store={store} detailed />,
+    above: {
+      home: <VoiceControl connection={connection} store={store} />,
+      permissions: <ApprovalSummaries approvals={connection.approvals} />,
+    },
   };
   return (
     <>

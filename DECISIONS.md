@@ -6593,3 +6593,82 @@ research on it never planned document writes or media.
 - **Backend.** No server change: the backend wires capability tools (YouTube,
   documents with a workspace) and the browser/Windows control runner, so the
   desktop backend now plans with the combined planner.
+
+## ADR-170 — Desktop voice and knowledge routes on the existing proxy
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-122
+
+The desktop needs ten backend routes it could not reach: voice status/start/stop,
+upload/list/delete files, and list/add/search/delete memory. They are added to the
+exact `api_request` allowlist (31 routes). `DELETE` is admitted for `/files/{id}` and
+`/memory/{id}` only (no body); conversation, grant and other deletes stay absent. The
+user text keys `filename` and `q` accept `encodeURIComponent` output only (unreserved
+bytes and complete `%XX` escapes, no `&`, `=`, `+`, `#`, `/`, space or control byte), and
+the whole path stays within 512 characters, so the webview caps an encoded name or query
+at 400 characters. Alternative rejected: a second Tauri command per capability (more ACL
+surface for no gain).
+
+## ADR-171 — Uploads cross the IPC as base64 and leave Rust as raw bytes
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-122
+
+`POST /files/upload` takes the raw file (ADR-133). `api_request` carries JSON, so for
+exactly that route its body must be `{"content_base64": "<standard padded base64>"}`
+and nothing else; Rust decodes it strictly (canonical, no whitespace), refuses an empty
+or over-8-MiB result (`invalid_body`) and sends the bytes without a content type, so
+the backend infers and checks the type from the name and content. The webview reads the
+chosen file with `FileReader` (no file-system access) and refuses files over 8 MiB
+before sending. Alternatives rejected: a new raw-IPC command (new ACL permission,
+capability, `build.rs` and `main.rs` changes) and a base64 crate (new dependency for
+~30 lines). Only the user uploads, writes or deletes knowledge; missions never do.
+
+## ADR-172 — KAIDO and cited sources are shown, never inferred
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-122
+
+The connection bar shows "Degraded mode (KAIDO) — answers unverified" while `GET /ready`
+reports `kaido.engaged` (its body is read on 200 and 503). Because each `/ready` call is
+one KAIDO observation, the desktop reads it on connect and reconnect, on
+`phoenix.degraded` / `phoenix.ready` events, and every 15 s only while engaged, so the
+banner clears on release without adding observations in normal operation. A mission
+whose detail has `kaido` is labelled `unverified (KAIDO degraded mode)` in the bar and
+`[Unverified · KAIDO degraded mode]` in Chat, ahead of every other verification rule. A
+completed answer lists its `sources` as "[n] label" lines under the text, as plain text
+inside App's unchanged Chat (labels only; sources never carry source text).
+
+## ADR-173 — Approval summaries above the raw request; P4 says one-time
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-122
+
+App's Permissions view is frozen presentation. ConnectedApp renders "What PHOENIX is
+asking to do" above it: each pending request's display-only `summary` (ADR-151) in
+plain words — action, page URL, element, window title, program (process name,
+executable, PID), command, and the text to type or `[hidden]` when masked (a masked
+text is dropped by the reader even if sent) — and, for P4, "One-time approval (P4):
+approving allows this exact action once. Nothing is remembered". App's card reason for a
+P4 request says the same instead of "stores a grant for this launch". The summary never
+reaches a request body; Approve/Deny still bind to the stored request and
+PermissionEngine decides. Voice has no path to a permission decision.
+
+## ADR-174 — Caller panels for Memory, Files, Voice and above Chat/Permissions
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-122
+
+App.tsx stays network-free and changes only after `diagnosticMetricNames` (its frozen
+prefix and historical byte checks are unchanged). `ConnectedPanels` adds `memory`,
+`files` and `voice` (they replace App's read-only evidence views when supplied) and
+`above.home` / `above.permissions` (rendered above App's own Chat and Permissions, never
+in place of them). In the native shell the mic toggle sits above Chat and App's static
+"Voice unavailable" aside is hidden by `connected.css`. Web research is a launch opt-in
+(ADR-161), so Settings and the Research view show it read-only as "enabled for this
+launch" or "off — start PHOENIX with PHOENIX_WEB_RESEARCH_ENABLED=true".

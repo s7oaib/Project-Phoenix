@@ -377,14 +377,14 @@ test('PHX-106/107 tauri transport uses only the two allowlisted commands and thr
 });
 
 test('PHX-106/107 no credential, backend address or network primitive exists in webview code', () => {
-  for (const path of ['main.tsx', 'adapters/core.ts', 'adapters/tauri.ts', 'adapters/ConnectedApp.tsx', 'adapters/SetupViews.tsx']) {
+  for (const path of ['main.tsx', 'adapters/core.ts', 'adapters/tauri.ts', 'adapters/ConnectedApp.tsx', 'adapters/SetupViews.tsx', 'adapters/CapabilityViews.tsx']) {
     const text = source(path);
     assert.doesNotMatch(text, /\btoken|bearer|authorization|phoenix\.auth|sec-websocket/i, path);
     assert.doesNotMatch(text, /\bfetch\(|XMLHttpRequest|new WebSocket|EventSource|https?:\/\/|ws:\/\/|localhost|127\.0\.0\.1|ollama|colibri/i, path);
     assert.doesNotMatch(text, /localStorage|sessionStorage|dangerouslySetInnerHTML|eval\(|new Function/, path);
   }
   // Only tauri.ts touches the IPC package, and only invoke/listen/isTauri from it.
-  for (const path of ['main.tsx', 'adapters/core.ts', 'adapters/ConnectedApp.tsx', 'adapters/SetupViews.tsx', 'App.tsx']) assert.doesNotMatch(source(path), /@tauri-apps/, path);
+  for (const path of ['main.tsx', 'adapters/core.ts', 'adapters/ConnectedApp.tsx', 'adapters/SetupViews.tsx', 'adapters/CapabilityViews.tsx', 'App.tsx']) assert.doesNotMatch(source(path), /@tauri-apps/, path);
   const imports = [...source('adapters/tauri.ts').matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+'([^']+)'/g)].map((match) => [match[2], match[1].split(',').map((name) => name.trim()).sort()]);
   assert.deepEqual(imports, [['@tauri-apps/api/core', ['invoke', 'isTauri']], ['@tauri-apps/api/event', ['listen']], ['./core', ['ApiResult', 'HttpMethod', 'Transport', 'TransportHandlers']]]);
 });
@@ -732,7 +732,10 @@ test('PHX-108 Computer Control, Research and Media follow the backend capability
   const computer = render(setup.CapabilityPanel, { view: 'computer', connection });
   assert.match(computer, /Computer control: not yet enabled<\/strong> — arrives with PHX-112\. PHOENIX does not attempt it in missions until then\./);
   assert.match(computer, /Carried by KAKASHI \(Computer control\)\./);
-  assert.match(render(setup.CapabilityPanel, { view: 'research', connection }), /Web research: not yet enabled<\/strong> — arrives with PHX-111/);
+  // PHX-122 (ADR-174): web research is off only for want of the launch opt-in, never "arrives with".
+  const researchOff = render(setup.CapabilityPanel, { view: 'research', connection });
+  assert.match(researchOff, /Web research: off<\/strong> — off for this launch\. Start PHOENIX with PHOENIX_WEB_RESEARCH_ENABLED=true to enable it\./);
+  assert.doesNotMatch(researchOff, /arrives with/);
   const media = render(setup.CapabilityPanel, { view: 'media', connection });
   assert.match(media, /Spotify and YouTube: not yet enabled<\/strong> — arrives with PHX-113/);
   assert.match(media, /Document generation: not yet enabled/);
@@ -745,15 +748,24 @@ test('PHX-108 Computer Control, Research and Media follow the backend capability
   for (const markup of [computer, media, research, unknown]) assert.doesNotMatch(markup, /<(button|input|form)\b|style="/);
 });
 
-test('PHX-108 App renders caller-supplied panels only for the five views it has no port for', () => {
+test('PHX-108/122 App renders caller-supplied panels only for the views it has no live port for', () => {
   const supplied = createElement('p', null, 'SUPPLIED-PANEL');
-  const panels = { onboarding: supplied, settings: supplied, computer: supplied, research: supplied, media: supplied };
-  for (const id of ['onboarding', 'settings', 'computer', 'research', 'media']) {
+  const panels = { onboarding: supplied, settings: supplied, computer: supplied, research: supplied, media: supplied, memory: supplied, files: supplied, voice: supplied };
+  for (const id of ['onboarding', 'settings', 'computer', 'research', 'media', 'memory', 'files', 'voice']) {
     assert.match(renderToStaticMarkup(createElement(app.ViewPanel, { view: app.resolveView(id), panels })), /SUPPLIED-PANEL/, id);
   }
-  for (const id of ['home', 'agents', 'tasks', 'permissions', 'memory', 'files', 'models', 'voice', 'observability']) {
+  for (const id of ['home', 'agents', 'tasks', 'permissions', 'models', 'observability']) {
     assert.doesNotMatch(renderToStaticMarkup(createElement(app.ViewPanel, { view: app.resolveView(id), panels: { ...panels, [id]: supplied } })), /SUPPLIED-PANEL/, id);
   }
+  // PHX-122 (ADR-174): `above` adds a panel above Home / Chat and Permissions, never in place of them.
+  const above = { above: { home: createElement('p', null, 'ABOVE-HOME'), permissions: createElement('p', null, 'ABOVE-PERMISSIONS') } };
+  const chat = { draft: '', pending: false, feedback: '', setDraft() {}, submit() {}, cancel() {} };
+  const home = renderToStaticMarkup(createElement(app.ViewPanel, { view: app.resolveView('home'), chat, panels: above }));
+  assert.ok(home.indexOf('ABOVE-HOME') < home.indexOf('Conversation') && home.includes('ABOVE-HOME'));
+  const permissions = { snapshot: { status: 'connected', requests: [], rejected: false }, query: '', selected: undefined, matches: [], pending: false, submitted: false, feedback: '', search() {}, select() {}, submit() {} };
+  const center = renderToStaticMarkup(createElement(app.ViewPanel, { view: app.resolveView('permissions'), permissions, panels: above }));
+  assert.ok(center.indexOf('ABOVE-PERMISSIONS') >= 0 && center.indexOf('ABOVE-PERMISSIONS') < center.indexOf('permission'));
+  for (const id of ['agents', 'tasks', 'models', 'observability']) assert.doesNotMatch(renderToStaticMarkup(createElement(app.ViewPanel, { view: app.resolveView(id), panels: above })), /ABOVE-/, id);
   // Without panels the honest defaults remain.
   assert.match(renderToStaticMarkup(createElement(app.ViewPanel, { view: app.resolveView('computer') })), /This workspace is not connected yet\./);
   assert.match(renderToStaticMarkup(createElement(app.default)), /Interface shell — backend integration pending/);
@@ -768,6 +780,251 @@ test('PHX-108 the connection bar no longer edits the workspace; Settings and Onb
   await store.setWorkspace('D:\\link');
   const panel = render(setup.OnboardingPanel, { connection: store.getSnapshot().connection, store });
   assert.match(panel, /Links, junctions and reparse points are not accepted/);
+});
+
+// ---- PHX-122 (ADR-170 to ADR-174): voice, files and memory, KAIDO, approval summaries, web research
+
+const capabilityViews = load('adapters/CapabilityViews.tsx');
+const DOC = '88888888-8888-4888-8888-888888888888';
+const NOTE = '99999999-9999-4999-8999-999999999999';
+function voiceBody(state = 'off', code = null) {
+  return { state, code, wake_phrase: 'Rise, Phoenix', session_id: null, conversation_id: null, mission_id: null,
+    components: ['wake_word', 'vad', 'stt', 'tts', 'conversation', 'audio_output'].map((id) => ({ id, status: 'available' })) };
+}
+function readyBody(kaido = { engaged: false, failsafe_id: null, trigger: null, capabilities: [], clear_observations: 0, release_after: 3 }) {
+  return { status: kaido?.engaged ? 'degraded' : 'ready', service: 'phoenix-api', version: '0.1.0', providers: [], models: [], database: { status: 'ready' }, kaido, prerequisites: null };
+}
+const documentEntry = { document_id: DOC, filename: 'notes (final).md', media_type: 'text/markdown', chunk_count: 3, indexed_at: AT };
+const memoryEntry = { memory_id: NOTE, memory_type: 'user', scope: 'user', content: 'I prefer short answers.', created_at: AT };
+function capabilityRoutes(overrides = {}) {
+  return backendRoutes({
+    'GET /ready': { status: 200, body: readyBody() },
+    'GET /voice/status': { status: 200, body: voiceBody() },
+    'POST /voice/start': { status: 202, body: voiceBody('starting') },
+    'POST /voice/stop': { status: 200, body: voiceBody('off') },
+    'GET /files?limit=64': { status: 200, body: page([documentEntry]) },
+    'GET /memory?limit=64': { status: 200, body: page([memoryEntry]) },
+    'POST /files/upload?filename=notes%20(final).md': { status: 201, body: documentEntry },
+    [`DELETE /files/${DOC}`]: { status: 204, body: null },
+    'POST /memory': { status: 201, body: memoryEntry },
+    [`DELETE /memory/${NOTE}`]: { status: 204, body: null },
+    'GET /memory/search?q=short%20answers&limit=10': { status: 200, body: { items: [{ kind: 'memory', source_id: NOTE, document_id: null, title: null, text: 'I prefer short answers.', score: 0.9 }] } },
+    'GET /capabilities': { status: 200, body: capabilitiesBody(['memory', 'voice', 'computer_control']) },
+    ...overrides,
+  });
+}
+
+test('PHX-122 readers admit the documented voice, knowledge, readiness and summary shapes only', () => {
+  assert.deepEqual(plain(core.readVoice(voiceBody('listening'))), { state: 'listening', code: null, wakePhrase: 'Rise, Phoenix',
+    components: voiceBody().components.map(({ id, status }) => ({ id, status })) });
+  assert.equal(core.readVoice(voiceBody('unavailable', 'microphone_unavailable')).code, 'microphone_unavailable');
+  for (const bad of [undefined, {}, { ...voiceBody(), state: 'singing' }, { ...voiceBody(), wake_phrase: 7 }, { ...voiceBody(), code: 'a b' }]) assert.equal(core.readVoice(bad), undefined);
+  assert.deepEqual(plain(core.readDocuments(page([documentEntry, { ...documentEntry, document_id: 'x' }, 7]))), [{ documentId: DOC, filename: 'notes (final).md', mediaType: 'text/markdown', chunkCount: 3, indexedAt: AT }]);
+  assert.deepEqual(plain(core.readMemories(page([memoryEntry, { ...memoryEntry, content: '' }]))), [{ memoryId: NOTE, memoryType: 'user', content: 'I prefer short answers.', createdAt: AT }]);
+  assert.equal(core.readDocuments([]), undefined);
+  assert.deepEqual(plain(core.readSearch({ items: [{ kind: 'document_chunk', title: 'a.md', text: 'x', score: 0.5 }, { kind: 'web', title: null, text: 'y', score: 1 }] })), [{ kind: 'document_chunk', title: 'a.md', text: 'x', score: 0.5 }]);
+  assert.deepEqual(plain(core.readKaido(readyBody())), { engaged: false, trigger: null });
+  assert.deepEqual(plain(core.readKaido(readyBody(null))), { engaged: false, trigger: null });
+  assert.deepEqual(plain(core.readKaido(readyBody({ engaged: true, failsafe_id: MSG1, trigger: 'resource_pressure', capabilities: ['direct_answer'], clear_observations: 0, release_after: 3 }))), { engaged: true, trigger: 'resource_pressure' });
+  assert.equal(core.readKaido({ kaido: { engaged: 'yes' } }), undefined);
+});
+
+test('PHX-122 the mic toggle starts and stops voice; events drive the live state; voice never approves', async () => {
+  const { store, transport, scheduler } = await readyStore(capabilityRoutes());
+  assert.equal(store.getSnapshot().connection.voice.state, 'off');
+  const off = render(capabilityViews.VoiceControl, { connection: store.getSnapshot().connection, store });
+  assert.match(off, /Off — the microphone is closed\./);
+  assert.match(off, /aria-pressed="false"[^>]*>Start listening \(mic on\)</);
+  assert.match(off, /Voice never approves permissions\./);
+  await store.setVoice(true);
+  assert.deepEqual(plain(transport.calls.at(-1)), { method: 'POST', path: '/voice/start' });
+  assert.equal(store.getSnapshot().connection.voice.state, 'starting');
+  transport.handlers.event(envelope('voice.listening', { state: 'listening', session_id: MSG1 }, { correlation_id: MSG1 }));
+  let markup = render(capabilityViews.VoiceControl, { connection: store.getSnapshot().connection, store });
+  assert.match(markup, /Listening…/);
+  assert.match(markup, /Say “Rise, Phoenix”/);
+  assert.match(markup, /aria-pressed="true"[^>]*>Stop listening \(mic off\)</);
+  transport.handlers.event(envelope('voice.interrupted', { state: 'listening', session_id: MSG1 }, { correlation_id: MSG1 }));
+  assert.match(render(capabilityViews.VoiceControl, { connection: store.getSnapshot().connection, store }), /interrupted — you spoke over the answer/);
+  // Voice events never touch mission evidence, and they re-read the status over REST.
+  assert.equal(store.getSnapshot().taskPort.graph, undefined);
+  transport.calls.length = 0;
+  await scheduler.flush();
+  assert.ok(transport.calls.some((call) => call.path === '/voice/status'));
+  await store.setVoice(false);
+  assert.deepEqual(plain(transport.calls.at(-1)), { method: 'POST', path: '/voice/stop' });
+  assert.equal(store.getSnapshot().connection.voice.state, 'off');
+  assert.equal(store.getSnapshot().connection.voiceInterrupted, false);
+  // Nothing in the voice path calls a permission route.
+  assert.ok(transport.calls.every((call) => !call.path.startsWith('/permissions/')));
+  assert.doesNotMatch(source('adapters/CapabilityViews.tsx'), /submitDecision|\/approve|\/deny/);
+});
+
+test('PHX-122 unavailable voice shows a clear text fallback; a refused start says so', async () => {
+  const { store } = await readyStore(capabilityRoutes({
+    'GET /voice/status': { status: 200, body: voiceBody('unavailable', 'models_missing') },
+    'POST /voice/start': { status: 503, body: { error: { code: 'service_unavailable' } } },
+  }));
+  let markup = render(capabilityViews.VoiceControl, { connection: store.getSnapshot().connection, store, detailed: true });
+  assert.match(markup, /Voice unavailable\. The voice models are not installed\./);
+  assert.match(markup, /Text fallback: type your request in Chat — everything works without voice\./);
+  assert.match(markup, /wake word: available/);
+  await store.setVoice(true);
+  markup = render(capabilityViews.VoiceControl, { connection: store.getSnapshot().connection, store });
+  assert.match(markup, /Voice start was refused \(service_unavailable\)\. Text chat stays available\./);
+  const unknown = render(capabilityViews.VoiceControl, { connection: { ...store.getSnapshot().connection, voice: undefined }, store });
+  assert.match(unknown, /Voice status unavailable\./);
+  assert.match(unknown, /Text fallback/);
+  assert.match(unknown, /<button type="button" aria-pressed="false" disabled=""/);
+});
+
+test('PHX-122 ConnectedApp puts the mic toggle above Chat, hides the old voice aside and supplies Memory, Files and Voice', async () => {
+  const { store } = await readyStore(capabilityRoutes());
+  const markup = render(connectedModule.ConnectedApp, { store });
+  assert.ok(markup.indexOf('id="voice-bar-heading"') < markup.indexOf('id="conversation-heading"'));
+  assert.match(source('adapters/connected.css'), /\.connection-bar ~ \.app-shell \.voice-panel \{ display: none; \}/);
+  assert.doesNotMatch(markup, /style="/);
+  const panels = (view) => renderToStaticMarkup(createElement(app.ViewPanel, { view: app.resolveView(view), panels: {
+    memory: createElement(capabilityViews.MemoryPanel, { connection: store.getSnapshot().connection, store }),
+    files: createElement(capabilityViews.FilesPanel, { connection: store.getSnapshot().connection, store }),
+    voice: createElement(capabilityViews.VoiceControl, { connection: store.getSnapshot().connection, store, detailed: true }) } }));
+  assert.match(panels('memory'), /I prefer short answers\./);
+  assert.match(panels('files'), /notes \(final\)\.md · text\/markdown · 3 indexed chunk\(s\)/);
+  assert.match(panels('voice'), /id="voice-control-heading"/);
+});
+
+test('PHX-122 Files: upload states the 8 MiB limit, sends one encoded name and base64 body, lists and deletes', async () => {
+  const { store, transport } = await readyStore(capabilityRoutes());
+  const markup = render(capabilityViews.FilesPanel, { connection: store.getSnapshot().connection, store });
+  assert.match(markup, /Limit: 8\.0 MiB per file\./);
+  assert.match(markup, /<input id="upload-file" type="file"/);
+  assert.match(markup, />Delete notes \(final\)\.md</);
+  await store.uploadFile('notes (final).md', 5, 'aGVsbG8=');
+  assert.deepEqual(plain(transport.calls.at(-1)), { method: 'POST', path: '/files/upload?filename=notes%20(final).md', body: { content_base64: 'aGVsbG8=' } });
+  assert.equal(store.getSnapshot().connection.knowledgeMessage, 'Uploaded and indexed notes (final).md. Missions can now cite it.');
+  const calls = transport.calls.length;
+  await store.uploadFile('big.pdf', core.MAX_UPLOAD_BYTES + 1, 'x');
+  assert.equal(store.getSnapshot().connection.knowledgeMessage, 'The file is larger than 8 MiB; choose a smaller one.');
+  await store.uploadFile('empty.txt', 0, '');
+  await store.uploadFile('x'.repeat(256), 1, 'eA==');
+  await store.uploadFile('é'.repeat(140), 1, 'eA=='); // encoded name over the proxied path budget
+  assert.equal(transport.calls.length, calls); // refused before sending
+  await store.deleteFile(DOC);
+  assert.deepEqual(plain(transport.calls.at(-1)), { method: 'DELETE', path: `/files/${DOC}` });
+  await store.deleteFile('../x');
+  assert.equal(transport.calls.at(-1).path, `/files/${DOC}`);
+  // Backend refusals are explained in words; a proxy refusal (rejected invoke) too.
+  for (const [code, text] of [['payload_too_large', /larger than 8 MiB/], ['unsupported_format', /not supported/], ['secret_rejected', /credential/], ['knowledge_unavailable', /embedding model/]]) {
+    const refused = await readyStore(capabilityRoutes({ 'POST /files/upload?filename=a.txt': { status: 413, body: { error: { code } } } }));
+    await refused.store.uploadFile('a.txt', 1, 'eA==');
+    assert.match(refused.store.getSnapshot().connection.knowledgeMessage, text, code);
+  }
+  const rejecting = await readyStore(capabilityRoutes());
+  rejecting.transport.request = async () => { throw 'invalid_body'; };
+  await rejecting.store.uploadFile('a.txt', 1, 'eA==');
+  assert.match(rejecting.store.getSnapshot().connection.knowledgeMessage, /could not be sent/);
+  const tooLarge = render(capabilityViews.FilesPanel, { connection: { ...store.getSnapshot().connection, backend: { state: 'degraded' } }, store });
+  assert.match(tooLarge, /Uploads are unavailable until the local backend is connected\./);
+});
+
+test('PHX-122 Memory: add, search and delete notes through the allowlisted routes', async () => {
+  const { store, transport } = await readyStore(capabilityRoutes());
+  await store.addMemory('  I prefer short answers.  ');
+  assert.deepEqual(plain(transport.calls.at(-1)), { method: 'POST', path: '/memory', body: { content: 'I prefer short answers.' } });
+  assert.equal(store.getSnapshot().connection.knowledgeMessage, 'Note saved to memory.');
+  const calls = transport.calls.length;
+  await store.addMemory('   ');
+  await store.addMemory('x'.repeat(2001));
+  await store.searchMemory(' ');
+  assert.equal(transport.calls.length, calls);
+  await store.searchMemory('short answers');
+  assert.deepEqual(plain(transport.calls.at(-1)), { method: 'GET', path: '/memory/search?q=short%20answers&limit=10' });
+  const markup = render(capabilityViews.MemoryPanel, { connection: store.getSnapshot().connection, store });
+  assert.match(markup, /aria-label="Search results"/);
+  assert.match(markup, /Note: I prefer short answers\./);
+  assert.match(markup, /1 match\(es\)\./);
+  assert.match(markup, /Only you write memory; missions never do\./);
+  await store.deleteMemory(NOTE);
+  assert.deepEqual(plain(transport.calls.at(-1)), { method: 'DELETE', path: `/memory/${NOTE}` });
+  assert.equal(store.getSnapshot().connection.knowledgeMessage, 'Note deleted.');
+});
+
+test('PHX-122 answers list their cited sources under the text; KAIDO answers are labelled unverified', async () => {
+  const sources = [{ marker: '[1]', kind: 'document_chunk', source_id: 's1', document_id: DOC, title: 'notes.md', page: 2, section: null, chunk_index: 0, memory_type: null, label: 'notes.md, page 2' },
+    { marker: '[2]', kind: 'memory', source_id: 's2', document_id: null, title: null, page: null, section: null, chunk_index: null, memory_type: 'user', label: 'Your note' }];
+  const mission = core.readMission(completed({ path: 'complex', task_states: ['completed'], sources }));
+  assert.deepEqual(plain(mission.sources), [{ marker: '[1]', label: 'notes.md, page 2' }, { marker: '[2]', label: 'Your note' }]);
+  assert.deepEqual(plain(core.readMission(detail({ sources })).sources), []); // only a completed answer has sources
+  const kaido = core.readMission(completed({ path: 'complex', task_states: ['completed'], kaido: { failsafe_id: MSG1, trigger: 'resource_pressure', scope: 'process', outcome: 'answered', verified: false, recovery_id: null } }));
+  assert.equal(kaido.verification, 'unverified_kaido');
+  assert.match(connectedModule.missionLine(kaido), /unverified \(KAIDO degraded mode\)/);
+  const { store } = await readyStore(capabilityRoutes({ [`GET /missions/${RERUN}`]: { status: 200, body: completed({ mission_id: RERUN, rerun_of: MISSION, path: 'complex', task_states: ['completed'], sources }) } }));
+  const answer = store.getSnapshot().chatPort.messages.find((message) => message.role === 'assistant');
+  assert.equal(answer.content, '[Verified by LEVI]\nnotes.txt lists three tasks.\n\nSources:\n[1] notes.md, page 2\n[2] Your note');
+  const degraded = await readyStore(capabilityRoutes({ [`GET /missions/${RERUN}`]: { status: 200, body: completed({ mission_id: RERUN, path: 'direct', task_states: [], kaido: { failsafe_id: MSG1, trigger: 'resource_pressure', scope: 'mission', outcome: 'answered', verified: false, recovery_id: null } }) } }));
+  assert.match(degraded.store.getSnapshot().chatPort.messages.find((message) => message.role === 'assistant').content, /^\[Unverified · KAIDO degraded mode\]\n/);
+  assert.equal(app.readChatPort(degraded.store.getSnapshot().chatPort).messages.length, 2);
+});
+
+test('PHX-122 the connection bar shows a KAIDO banner while /ready reports it engaged, and clears on release', async () => {
+  const engaged = readyBody({ engaged: true, failsafe_id: MSG1, trigger: 'primary_model_provider_unavailable', capabilities: ['direct_answer'], clear_observations: 0, release_after: 3 });
+  const routes = capabilityRoutes({ 'GET /ready': { status: 200, body: engaged } });
+  const { store, transport, scheduler } = await readyStore(routes);
+  let bar = render(connectedModule.ConnectionBar, { connection: store.getSnapshot().connection, store });
+  assert.match(bar, /<p class="kaido-banner" role="alert">Degraded mode \(KAIDO\) — answers unverified\. The main model runtime is unavailable\./);
+  routes['GET /ready'] = { status: 200, body: readyBody() };
+  transport.handlers.event(envelope('phoenix.ready', { failsafe_id: MSG1, kaido_scope: 'process' }, { correlation_id: MSG1 }));
+  await scheduler.flush();
+  bar = render(connectedModule.ConnectionBar, { connection: store.getSnapshot().connection, store });
+  assert.doesNotMatch(bar, /kaido-banner/);
+  // A 503 /ready still carries KAIDO's state.
+  routes['GET /ready'] = { status: 503, body: { ...engaged, status: 'unavailable' } };
+  transport.handlers.event(envelope('phoenix.degraded', { failsafe_id: MSG1, kaido_scope: 'process', trigger: 'primary_model_provider_unavailable' }, { correlation_id: MSG1 }));
+  await scheduler.flush();
+  assert.equal(store.getSnapshot().connection.kaido.engaged, true);
+  assert.doesNotMatch(render(connectedModule.ConnectionBar, { connection: { ...store.getSnapshot().connection, backend: { state: 'degraded' } }, store }), /kaido-banner/);
+});
+
+test('PHX-122 approvals: the backend summary shows above the raw details; P4 is a one-time approval', async () => {
+  const summary = { action: 'Type text into a window', page_url: null, element: 'Search box', window_title: 'Untitled - Notepad', process_name: 'notepad.exe',
+    executable_path: 'C:\\Windows\\notepad.exe', process_id: 4242, command: null, text: null, text_masked: true, note: null };
+  const request = { ...detail().permission_request, tool_id: 'windows.type_text', action: 'type_text', resource: 'window:4242', risk_level: 'P4', summary };
+  const parsed = core.readPermission(request);
+  assert.deepEqual(plain(parsed.summary), { action: 'Type text into a window', pageUrl: null, element: 'Search box', windowTitle: 'Untitled - Notepad', processName: 'notepad.exe',
+    executablePath: 'C:\\Windows\\notepad.exe', processId: 4242, command: null, text: null, textMasked: true, note: null });
+  assert.equal(core.readPermission({ ...request, summary: { ...summary, process_id: 'x' } }).summary, undefined);
+  assert.equal(core.readPermission({ ...request, summary: { ...summary, text: 'secret words', text_masked: true } }).summary.text, null); // masked text never shows
+  const { store } = await readyStore(capabilityRoutes({ 'GET /permissions?limit=64': { status: 200, body: page([request]) } }));
+  const markup = render(capabilityViews.ApprovalSummaries, { approvals: store.getSnapshot().connection.approvals });
+  assert.match(markup, /<strong>Type text into a window<\/strong>/);
+  assert.match(markup, /One-time approval \(P4\): approving allows this exact action once\. Nothing is remembered/);
+  assert.match(markup, /<dt>Window<\/dt><dd>Untitled - Notepad<\/dd>/);
+  assert.match(markup, /<dt>Program<\/dt><dd>notepad\.exe · C:\\Windows\\notepad\.exe · PID 4242<\/dd>/);
+  assert.match(markup, /<dt>Text to type<\/dt><dd>\[hidden\]<\/dd>/);
+  assert.doesNotMatch(markup, /<button|secret words/);
+  const visible = render(capabilityViews.ApprovalSummaries, { approvals: [{ ...parsed, riskLevel: 'P3', summary: { ...parsed.summary, textMasked: false, text: 'hello', pageUrl: 'https://example.org/a' } }] });
+  assert.match(visible, /<dt>Page<\/dt><dd>https:\/\/example\.org\/a<\/dd>/);
+  assert.match(visible, /<dt>Text to type<\/dt><dd>hello<\/dd>/);
+  assert.doesNotMatch(visible, /One-time approval/);
+  assert.equal(render(capabilityViews.ApprovalSummaries, { approvals: [{ ...parsed, riskLevel: 'P2', summary: undefined }] }), '');
+  // The App card states the one-time rule too, and the summary renders above it in ConnectedApp.
+  const entries = app.readPermissionPort(store.getSnapshot().permissionPort);
+  assert.match(entries.requests[0].request.reason, /One-time approval \(P4\): Approve allows this exact action once/);
+  assert.doesNotMatch(entries.requests[0].request.reason, /grant for this launch/);
+  assert.match(core.toPermissionEntries([{ ...parsed, riskLevel: 'P2' }], new Map())[0].request.reason, /Approve stores a grant for this launch \(session\)/);
+});
+
+test('PHX-122 Settings shows web research as on or off for this launch (read-only)', async () => {
+  const off = await readyStore();
+  let markup = render(setup.SettingsPanel, { connection: off.store.getSnapshot().connection, store: off.store });
+  assert.ok(markup.includes('>Web research</h4>'));
+  assert.match(markup, /Web research is off — start PHOENIX with PHOENIX_WEB_RESEARCH_ENABLED=true to enable it for that launch\./);
+  const on = await readyStore(backendRoutes({ 'GET /capabilities': { status: 200, body: capabilitiesBody(['web_research']) } }));
+  markup = render(setup.SettingsPanel, { connection: on.store.getSnapshot().connection, store: on.store });
+  assert.match(markup, /Web research is enabled for this launch\./);
+  const section = markup.slice(markup.indexOf('>Web research</h4>'), markup.indexOf('</section>', markup.indexOf('>Web research</h4>')));
+  assert.doesNotMatch(section, /<(input|select|button)\b/);
+  assert.equal(setup.webResearchLine(undefined), 'Web research: status unavailable.');
 });
 
 export { loader };

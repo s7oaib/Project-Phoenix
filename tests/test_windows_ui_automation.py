@@ -1556,6 +1556,10 @@ def test_source_architecture_and_immutability() -> None:
         # hash-pinned in test_prompt_injection_defenses.py).
         ":(exclude)phoenix/api/knowledge.py",
         ":(exclude)phoenix/api/routes/knowledge.py",
+        # PHX-122 (ADR-170 to ADR-174) adds the desktop capability views (the
+        # changed proxy and adapters are excluded above and hash-pinned in
+        # test_prompt_injection_defenses.py).
+        ":(exclude)apps/desktop/src/adapters/CapabilityViews.tsx",
     ]
     assert not subprocess.check_output(
         ["git", "diff", "origin/main", "--", *paths], cwd=ROOT
