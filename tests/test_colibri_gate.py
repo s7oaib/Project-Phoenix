@@ -93,14 +93,16 @@ class FakeColibri(ModelProvider):
     async def stream(
         self, request: GenerationRequest
     ) -> AsyncIterator[GenerationChunk]:
-        ids = {
-            "provider_id": self.provider_id,
-            "model_id": request.model_id,
-            "operation_id": request.operation_id,
-        }
-        yield GenerationChunk(**ids, text=ANSWERS[request.messages[-1].text])
         yield GenerationChunk(
-            **ids,
+            provider_id=self.provider_id,
+            model_id=request.model_id,
+            operation_id=request.operation_id,
+            text=ANSWERS[request.messages[-1].text],
+        )
+        yield GenerationChunk(
+            provider_id=self.provider_id,
+            model_id=request.model_id,
+            operation_id=request.operation_id,
             text="",
             is_final=True,
             finish_reason="stop",
