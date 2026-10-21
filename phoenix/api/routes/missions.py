@@ -28,6 +28,7 @@ from phoenix.api.routes.schemas import (
     CancelResult,
     ChatRequest,
     ConversationOut,
+    KaidoOut,
     MessageOut,
     MissionAccepted,
     MissionDetail,
@@ -104,6 +105,21 @@ async def _detail(
             "permission_request": None
             if pending is None
             else permission_out(pending, tools),
+            "kaido": None
+            if trace is None or trace.kaido is None
+            else KaidoOut.model_validate(
+                trace.kaido.model_dump(
+                    mode="json",
+                    include={
+                        "failsafe_id",
+                        "trigger",
+                        "scope",
+                        "outcome",
+                        "verified",
+                        "recovery_id",
+                    },
+                )
+            ),
         }
     )
 

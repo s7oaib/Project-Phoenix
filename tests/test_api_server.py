@@ -291,6 +291,15 @@ def test_ready_when_provider_and_database_are_healthy(settings: AppSettings) -> 
             {"provider_id": "ollama", "model_id": "qwen3.5:4b"},
         ],
         "database": {"at_head": True},
+        # PHX-119: KAIDO stays released while the provider is healthy.
+        "kaido": {
+            "engaged": False,
+            "failsafe_id": None,
+            "trigger": None,
+            "capabilities": [],
+            "clear_observations": 0,
+            "release_after": 2,
+        },
     }
 
 

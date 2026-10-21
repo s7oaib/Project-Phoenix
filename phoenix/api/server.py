@@ -19,6 +19,9 @@ closes every connection when the backend stops. PHX-104 (ADR-089) adds the REST
 API v1 routes (``phoenix.api.routes``) and the document workspace: the stored
 root is re-validated at startup, and setting it builds a FilesystemTool and a
 runtime that missions starting afterwards use (``WorkspaceService``).
+PHX-119 (ADR-155..158) adds one KaidoMonitor per backend, shared by every
+runtime: each ``/ready`` probe and each mission's probe is one observation, and
+``/ready`` reports KAIDO's state (an engaged KAIDO makes the backend degraded).
 PHX-108 (ADR-110) adds the ModelRegistrar: tier models are no longer registered
 only once at startup. A bounded background loop, the start of each
 mission (while a required model is missing), ``GET /ready`` and
@@ -48,6 +51,12 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from alembic import command
+from phoenix.agents.kaido import (
+    KaidoMonitor,
+    KaidoPolicy,
+    KaidoStatus,
+    system_ram_sample,
+)
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.runtime import ModelTierTable, PhoenixRuntime, default_tier_table
 from phoenix.api.app import create_app
@@ -151,6 +160,10 @@ class ServerConfig(BaseModel):
         default=60.0, gt=0, le=3600, allow_inf_nan=False
     )
     alembic_ini: Path = ALEMBIC_INI
+    # PHX-119: KAIDO's hysteresis and memory thresholds; the system RAM sample
+    # (psutil, no subprocess) can be turned off, then only provider health counts.
+    kaido_policy: KaidoPolicy = KaidoPolicy()
+    kaido_ram_probe: bool = True
 
 
 class MigrationLockTimeout(TimeoutError):
@@ -233,6 +246,7 @@ class BackendServices:
     missions: MissionService
     settings_store: SettingsStore
     workspace: WorkspaceService
+    kaido: KaidoMonitor  # PHX-119: shared by readiness and every runtime
     model_registrar: "ModelRegistrar"  # PHX-108: late provider start
 
 
@@ -273,6 +287,8 @@ class ReadinessResponse(_Contract):
     providers: tuple[ProviderReadiness, ...]
     models: tuple[ModelReadiness, ...]
     database: DatabaseReadiness
+    # PHX-119: KAIDO's state after this probe; null when no backend runs.
+    kaido: KaidoStatus | None
 
 
 def tier_models(table: ModelTierTable) -> tuple[tuple[str, str], ...]:
@@ -504,6 +520,11 @@ async def open_services(
         )
         policy = PermissionPolicy()
         audit = AuditTrail(session_factory, tools)
+        kaido = KaidoMonitor(
+            policy=config.kaido_policy,
+            resource_probe=system_ram_sample if config.kaido_ram_probe else None,
+            events=stream,
+        )
 
         def build_runtime(workspace_root: str | None = None) -> PhoenixRuntime:
             """PHX-104: one runtime per workspace root; None has no documents."""
@@ -518,6 +539,7 @@ async def open_services(
                 if workspace_root is None
                 else FilesystemTool(workspace_root, tools, policy, audit),
                 events=stream,
+                kaido=kaido,
             )
 
         runtime = build_runtime()
@@ -555,6 +577,7 @@ async def open_services(
                 build_runtime=build_runtime,
                 data_dir=settings.data_dir,
             ),
+            kaido=kaido,
             model_registrar=registrar,
         )
         refresher: asyncio.Task[None] | None = None
@@ -594,6 +617,7 @@ async def readiness(
             providers=(),
             models=(),
             database=DatabaseReadiness(at_head=False),
+            kaido=None,
         )
     statuses = await asyncio.gather(
         *(probe_provider(provider, timeout) for provider in services.providers)
@@ -605,13 +629,24 @@ async def readiness(
             async with asyncio.timeout(timeout):
                 await services.model_registrar.refresh()
     at_head = await services.database_probe.at_head(timeout)
+    # PHX-119: the same provider-health signal drives KAIDO's hysteresis.
+    kaido = await services.kaido.observe(
+        {
+            provider.provider_id: health
+            for provider, health in zip(services.providers, statuses, strict=True)
+        }
+    )
     models = tuple(
         ModelReadiness(provider_id=record.provider_id, model_id=record.model_id)
         for record in services.capability_registry.list_records()
     )
     if not at_head:
         status = ReadinessStatus.UNAVAILABLE
-    elif not models or any(s != ProviderHealthStatus.HEALTHY for s in statuses):
+    elif (
+        kaido.engaged
+        or not models
+        or any(s != ProviderHealthStatus.HEALTHY for s in statuses)
+    ):
         status = ReadinessStatus.DEGRADED
     else:
         status = ReadinessStatus.READY
@@ -625,6 +660,7 @@ async def readiness(
         ),
         models=models,
         database=DatabaseReadiness(at_head=at_head),
+        kaido=kaido,
     )
 
 
