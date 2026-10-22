@@ -1900,13 +1900,10 @@ PHX_121_PATHS = ("phoenix/agents/combined_planning.py",)
 # adapters (store, connection bar, setup views and their styles); all stay
 # pinned, at the PHX-122 implementation commit (the PR must merge with a merge
 # commit so this commit stays reachable). PHX-123 moved proxy.rs and
-# ConnectedApp.tsx to its own pin (below).
+# ConnectedApp.tsx to its own pin (below); PHX-129 moved core.ts and
+# SetupViews.tsx to its own pin (below).
 PHX_122_COMMIT = "c39c1009bfcafe6c21e00c99c0d128f479a8d129"
-PHX_122_PATHS = (
-    "apps/desktop/src/adapters/core.ts",
-    "apps/desktop/src/adapters/SetupViews.tsx",
-    "apps/desktop/src/adapters/connected.css",
-)
+PHX_122_PATHS = ("apps/desktop/src/adapters/connected.css",)
 # PHX-123 (ADR-180 to ADR-189) intentionally changed the structured log
 # (quiet HTTP client loggers, redaction), page fetch and URL admission (pinned
 # vetted address, protocol ranges, no downgrade, ports, deadline), the browser
@@ -1918,8 +1915,6 @@ PHX_122_PATHS = (
 PHX_123_COMMIT = "f8c727a60e30861332e7f9f166dd0b654594c1f5"
 PHX_123_PATHS = (
     "apps/desktop/src-tauri/src/backend.rs",
-    "apps/desktop/src-tauri/src/proxy.rs",
-    "apps/desktop/src/adapters/ConnectedApp.tsx",
     "phoenix/agents/mission_events.py",
     "phoenix/api/structured_logging.py",
     "phoenix/tools/browser_setup.py",
@@ -1977,6 +1972,20 @@ PHX_128_PATHS = (
     "phoenix/agents/control_steps.py",
     "phoenix/agents/runtime.py",
 )
+# PHX-129 (ADR-215 to ADR-217; owner-approved 2026-10-23) intentionally changed
+# the desktop store (P1 "always", remembered grants, revoke), Settings
+# (Remembered permissions), ConnectedApp (the P1 choice above Permissions) and
+# the proxy allowlist (grant revoke); core.ts and SetupViews.tsx left the
+# PHX-122 block, proxy.rs and ConnectedApp.tsx the PHX-123 block. All stay
+# pinned, at the PHX-129 implementation commit (the PR must merge with a merge
+# commit so this commit stays reachable).
+PHX_129_COMMIT = "ba6bc6fc16c45dab498179244508b54dd576fb40"
+PHX_129_PATHS = (
+    "apps/desktop/src-tauri/src/proxy.rs",
+    "apps/desktop/src/adapters/ConnectedApp.tsx",
+    "apps/desktop/src/adapters/SetupViews.tsx",
+    "apps/desktop/src/adapters/core.ts",
+)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -2020,6 +2029,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_125B_PATHS
         and path not in PHX_126_PATHS
         and path not in PHX_128_PATHS
+        and path not in PHX_129_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2052,6 +2062,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_126_COMMIT, path) for path in PHX_126_PATHS]
     baselines += [(PHX_125B_COMMIT, path) for path in PHX_125B_PATHS]
     baselines += [(PHX_128_COMMIT, path) for path in PHX_128_PATHS]
+    baselines += [(PHX_129_COMMIT, path) for path in PHX_129_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
