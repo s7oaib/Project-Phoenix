@@ -660,6 +660,27 @@ def restore_logging() -> Iterator[None]:
     root.setLevel(level)
 
 
+LAUNCHER_STOP_SECONDS = 120  # a slow CI migration must finish, not leak
+
+
+def stop_launcher(
+    servers: list[launcher.PhoenixServer], thread: threading.Thread
+) -> None:
+    """Stop and join the in-process launcher before the test ends.
+
+    A thread left running (e.g. mid-migration) shares alembic's process-global
+    context with later tests' migrations and breaks them, so never let it leak.
+    """
+    deadline = time.monotonic() + LAUNCHER_STOP_SECONDS
+    while thread.is_alive() and time.monotonic() < deadline:
+        for server in servers:  # a server created late is stopped too
+            server.should_exit = True
+        thread.join(0.05)
+    assert not thread.is_alive(), (
+        f"launcher thread still alive after {LAUNCHER_STOP_SECONDS} s; it would leak"
+    )
+
+
 def test_real_server_streams_events_and_closes_sockets_on_shutdown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, restore_logging: None
 ) -> None:
@@ -684,21 +705,23 @@ def test_real_server_streams_events_and_closes_sockets_on_shutdown(
                 stderr=err,
             )
         ),
+        name="phoenix-launcher-under-test",
         daemon=True,
     )
     thread.start()
-    deadline = time.monotonic() + 15
-    while not (servers and servers[0].announced_port) and time.monotonic() < deadline:
-        time.sleep(0.02)
-    server = servers[0]
-    port = server.announced_port
-    assert port is not None and factory.loop is not None
-    loop = factory.loop
-    app = server.config.app
-    assert isinstance(app, FastAPI)
-    services = get_services(app)
-    assert services is not None
     try:
+        deadline = time.monotonic() + 15
+        while not (servers and servers[0].announced_port):
+            assert time.monotonic() < deadline, "launcher never announced its port"
+            time.sleep(0.02)
+        server = servers[0]
+        port = server.announced_port
+        assert port is not None and factory.loop is not None
+        loop = factory.loop
+        app = server.config.app
+        assert isinstance(app, FastAPI)
+        services = get_services(app)
+        assert services is not None
         # No token, or a foreign Origin: refused before the upgrade.
         for options in (
             {"subprotocols": None},
@@ -742,8 +765,7 @@ def test_real_server_streams_events_and_closes_sockets_on_shutdown(
             assert closed.value.rcvd is not None
             assert closed.value.rcvd.code in (1001, 1012)  # going away / restart
     finally:
-        server.should_exit = True
-        thread.join(15)
+        stop_launcher(servers, thread)
     assert result == [0]
     for text in (out.getvalue(), err.getvalue()):
         assert TOKEN not in text

@@ -59,6 +59,7 @@ BASE = f"http://{HOST}"
 WS_URL = f"ws://{HOST}/test-ws"
 FAST = ServerConfig(probe_timeout_seconds=0.2, startup_timeout_seconds=2)
 MARKER = "leak-marker-7f3a9c"
+LAUNCHER_STOP_SECONDS = 120  # a slow CI migration must finish, not leak
 REQUEST_ID = set("0123456789abcdef")
 
 
@@ -595,6 +596,24 @@ def restore_logging() -> Iterator[None]:
     root.setLevel(level)
 
 
+def stop_launcher(
+    servers: list[launcher.PhoenixServer], thread: threading.Thread
+) -> None:
+    """Stop and join the in-process launcher before the test ends.
+
+    A thread left running (e.g. mid-migration) shares alembic's process-global
+    context with later tests' migrations and breaks them, so never let it leak.
+    """
+    deadline = time.monotonic() + LAUNCHER_STOP_SECONDS
+    while thread.is_alive() and time.monotonic() < deadline:
+        for server in servers:  # a server created late is stopped too
+            server.should_exit = True
+        thread.join(0.05)
+    assert not thread.is_alive(), (
+        f"launcher thread still alive after {LAUNCHER_STOP_SECONDS} s; it would leak"
+    )
+
+
 def request(port: int, path: str, headers: dict[str, str]) -> tuple[int, str]:
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     try:
@@ -634,14 +653,16 @@ def test_real_launcher_with_stdin_token_serves_securely(
                 stderr=err,
             )
         ),
+        name="phoenix-launcher-under-test",
         daemon=True,
     )
     thread.start()
-    deadline = time.monotonic() + 15
-    while not (servers and servers[0].announced_port) and time.monotonic() < deadline:
-        time.sleep(0.02)
-    server = servers[0]
     try:
+        deadline = time.monotonic() + 15
+        while not (servers and servers[0].announced_port):
+            assert time.monotonic() < deadline, "launcher never announced its port"
+            time.sleep(0.02)
+        server = servers[0]
         port = server.announced_port
         assert port is not None
         host = f"127.0.0.1:{port}"
@@ -652,8 +673,7 @@ def test_real_launcher_with_stdin_token_serves_securely(
         status, body = request(port, "/health", {**bearer, "Host": f"evil:{port}"})
         assert status == 403 and json.loads(body)["error"]["code"] == "forbidden_host"
     finally:
-        server.should_exit = True
-        thread.join(15)
+        stop_launcher(servers, thread)
     assert result == [0]
     lines = out.getvalue().splitlines()
     assert len(lines) == 1 and json.loads(lines[0])["port"] == port

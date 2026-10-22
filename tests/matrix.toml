@@ -29,7 +29,7 @@ timeout = 1200
 [[gate]]
 # pyproject.toml is guard-pinned, so scripts/ get their own strict mypy gate.
 id = "mypy-scripts"
-command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py", "scripts/voice_setup.py", "scripts/voice_smoke.py", "scripts/metric_datasets.py", "scripts/metric_benchmark.py", "scripts/fyp_adaptive_deep.py", "scripts/colibri_gate.py", "scripts/build_installer.py", "scripts/phoenix_knowledge_smoke.py", "scripts/research_mission_smoke.py", "scripts/phoenix_control_smoke.py", "scripts/install_control_browser.py"]
+command = ["uv", "run", "--locked", "--no-sync", "mypy", "--strict", "scripts/test_matrix.py", "scripts/fyp_benchmark.py", "scripts/phoenix_mission_smoke.py", "scripts/routing_benchmark.py", "scripts/fyp_multi_agent.py", "scripts/voice_setup.py", "scripts/voice_smoke.py", "scripts/metric_datasets.py", "scripts/metric_benchmark.py", "scripts/fyp_adaptive_deep.py", "scripts/colibri_gate.py", "scripts/build_installer.py", "scripts/phoenix_knowledge_smoke.py", "scripts/research_mission_smoke.py", "scripts/phoenix_control_smoke.py", "scripts/install_control_browser.py", "scripts/demo_rehearsal.py"]
 timeout = 600
 
 [[gate]]
@@ -160,6 +160,16 @@ path = "tests/test_colibri_gate.py"
 categories = ["unit", "integration"]
 # PHX-116 deep-tier gate; integration: test_live_run_measures_the_served_model_without_content
 # (real BenchmarkRunner + ModelLifecycleManager driving a fake Colibri provider)
+
+[[file]]
+path = "tests/test_demo_rehearsal.py"
+categories = ["unit", "integration", "end_to_end", "permissions", "prompt_injection"]
+# PHX-093 demo rehearsal (scripts/demo_rehearsal.py) against the real composition root in process
+# (REST + MissionService + PhoenixRuntime + document/control/knowledge steps + PermissionEngine +
+# SQLite; scripted model, embeddings and Playwright)
+# end_to_end: test_demo5_reads_the_pdf_and_saves_the_summary
+# permissions: test_approval_gate_never_admits_p3_p4_or_p5, test_demo6_reads_example_com_and_denies_the_p4_click
+# prompt_injection: test_demo8_levi_rejects_the_injected_answer
 
 [[file]]
 path = "tests/test_computer_control_steps.py"

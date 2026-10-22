@@ -13,6 +13,7 @@ import json
 import socket
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -752,21 +753,25 @@ def test_tool_rejects_noncanonical_registry_and_uncorrelated_requests() -> None:
 
 
 def test_research_and_mission_grants_validate_scope() -> None:
-    assert research_grants([grant()]) == (grant(),)
-    assert mission_grants([grant()]) == (grant(),)
+    # One fixed issue time: grants built by separate grant() calls must compare
+    # equal, which a per-call datetime.now() breaks once the clock ticks.
+    scoped = partial(grant, issued_at=datetime.now(UTC) - timedelta(minutes=1))
+
+    assert research_grants([scoped()]) == (scoped(),)
+    assert mission_grants([scoped()]) == (scoped(),)
     for changes in (
         {"reason": "other"},
         {"actor_id": "document_analyst"},
         {"resource": "everything"},
     ):
         with pytest.raises(ValueError):
-            research_grants([grant(**changes)])
+            research_grants([scoped(**changes)])
         with pytest.raises(ValueError):
-            mission_grants([grant(**changes)])
+            mission_grants([scoped(**changes)])
     with pytest.raises(ValueError):
-        research_grants([grant(duration="once", request_id="r1")])
+        research_grants([scoped(duration="once", request_id="r1")])
     with pytest.raises(ValueError):
-        mission_grants([grant(), grant(grant_id="Grant.Other")])  # duplicate scope
+        mission_grants([scoped(), scoped(grant_id="Grant.Other")])  # duplicate scope
     assert DOCUMENT_TOOL_REASON != RESEARCH_TOOL_REASON
 
 
