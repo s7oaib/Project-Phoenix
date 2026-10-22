@@ -2031,7 +2031,7 @@ PHX_132_PATHS = (
 )
 # core.ts and runtime.py carry both PHX-131 and PHX-132; they are pinned at
 # the local merge resolution commit.
-PHX_131_132_COMMIT = "0000000000000000000000000000000000000000"
+PHX_131_132_COMMIT = "35c9d287255e692837c78c99f37251d4f26065df"
 PHX_131_132_PATHS = (
     "apps/desktop/src/adapters/core.ts",
     "phoenix/agents/runtime.py",
