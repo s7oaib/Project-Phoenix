@@ -99,7 +99,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-091 FYP benchmark suite — DONE (configuration 1 GPU baselines; configuration 2 measured live, triage and forced COMPLEX); configuration 3 runnable behind the PHX-116 gate
 - PHX-092 Packaging/install workflow — DONE (unsigned per-user NSIS installer with the bundled backend; ADR-125 to ADR-129)
 - PHX-093 Final demo scenarios — IN_PROGRESS (docs/DEMOS.md, demos/fixtures, scripts/demo_rehearsal.py; offline-tested, ADR-175; the live rehearsal and recordings await the owner)
-- PHX-094 Release evidence package — TODO
+- PHX-094 Release evidence package — IN_PROGRESS (docs/release/RELEASE_CHECKLIST.md and RELEASE_EVIDENCE_2026-10-22.md written; PENDING cells for the Colibri gate re-run, control smoke re-run and demo rehearsal)
 
 ## Phase 10 — Product Integration
 - PHX-100 Backend composition root and entrypoint — DONE
@@ -125,5 +125,5 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-120 Capability integration — DONE (PHX-110/111/113 on one `phoenix-prompts-v5`, backend wiring, capability flags; ADR-160–164; live acceptance pending)
 - PHX-121 Combined planner — IN_PROGRESS (one v6 planner for two or more enabled capability families, ADR-166; tested offline; v6 prompt text awaits owner approval)
 - PHX-122 Desktop capability UI — IN_PROGRESS (voice toggle, files and memory, KAIDO banner, approval summaries, web research status; ADR-170–174; implemented and tested on a local branch, awaiting PR review and the owner's live check)
-- PHX-123 Security review fixes — IN_PROGRESS (SR-01–SR-04 and cheap Lows from the 2026-10-22 review; ADR-180–189; implemented and tested on a local branch, awaiting PR review)
-- PHX-124 Live acceptance bug fixes — IN_PROGRESS (real Playwright handler registration, control smoke DB cleanup, Colibri gate tokenizer throughput and explicit VRAM reporting; ADR-190; awaiting PR review and a live gate re-run)
+- PHX-123 Security review fixes — DONE (SR-01–SR-04 and cheap Lows from the 2026-10-22 review; ADR-180–189; merged in PR #108, main CI test-matrix run 39708451150 green)
+- PHX-124 Live acceptance bug fixes — DONE (real Playwright handler registration, control smoke DB cleanup, Colibri gate tokenizer throughput and explicit VRAM reporting; ADR-190; merged in PR #109, real Chromium verified; the Colibri gate re-run is tracked under PHX-116)
