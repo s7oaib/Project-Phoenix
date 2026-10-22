@@ -1871,10 +1871,7 @@ PHX_113_PATHS: tuple[str, ...] = ()
 # permission route, capability flags and their route) stays pinned, at the
 # PHX-120 implementation commit (the PR must merge with a merge commit).
 PHX_120_COMMIT = "ea7ea165147317afd873f6e61c0a3782b5e37e47"
-PHX_120_PATHS = (
-    "phoenix/agents/responders.py",
-    "phoenix/api/routes/setup.py",
-)
+PHX_120_PATHS = ("phoenix/api/routes/setup.py",)
 
 # Release train 2026-10-21 (ADR-165) merged PHX-114, PHX-117, PHX-116,
 # PHX-115, PHX-092, PHX-120 and PHX-112 onto PHX-118b/PHX-119 main. Every
@@ -1931,7 +1928,6 @@ PHX_123_PATHS = (
     "apps/desktop/src/adapters/ConnectedApp.tsx",
     "phoenix/agents/control_steps.py",
     "phoenix/agents/mission_events.py",
-    "phoenix/agents/runtime.py",
     "phoenix/api/structured_logging.py",
     "phoenix/tools/browser_setup.py",
     "phoenix/web/page_fetch.py",
@@ -1946,6 +1942,21 @@ PHX_124_PATHS: tuple[str, ...] = ()
 # (closure handlers); it is pinned at the merge resolution commit.
 PHX_123_124_COMMIT = "018b7b115b1fc7475a80a6f72d57f3f20a89d44f"
 PHX_123_124_PATHS = ("phoenix/tools/browser.py",)
+# PHX-125a (ADR-195 to ADR-197) intentionally changed capability_steps.py (the
+# written-file LEVI check), runtime.py (offering it), responders.py (repeated
+# JSON keys) and mission_recovery.py (DISALLOWED_DOMAIN retryable); runtime.py
+# left the PHX-121 block and responders.py the PHX-120 block. runtime.py also
+# carries PHX-123 (secret_text_refused), so it left the PHX-123 block when
+# origin/main (PR #108) was merged in. All four stay pinned, at the PHX-125a
+# merge resolution commit (the PR must merge with a merge commit so this
+# commit stays reachable).
+PHX_125A_COMMIT = "c987efbb50a11bfee98da1c2b5eaabe0e4ed5317"
+PHX_125A_PATHS = (
+    "phoenix/agents/capability_steps.py",
+    "phoenix/agents/mission_recovery.py",
+    "phoenix/agents/responders.py",
+    "phoenix/agents/runtime.py",
+)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -1985,6 +1996,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_123_PATHS
         and path not in PHX_124_PATHS
         and path not in PHX_123_124_PATHS
+        and path not in PHX_125A_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2013,6 +2025,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_123_COMMIT, path) for path in PHX_123_PATHS]
     baselines += [(PHX_124_COMMIT, path) for path in PHX_124_PATHS]
     baselines += [(PHX_123_124_COMMIT, path) for path in PHX_123_124_PATHS]
+    baselines += [(PHX_125A_COMMIT, path) for path in PHX_125A_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

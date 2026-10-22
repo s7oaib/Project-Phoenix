@@ -89,6 +89,16 @@ def ok(text: str) -> Reply:
 
 TRUNCATED: Reply = (f"cut {SENTINEL}", "length")
 NOT_JSON: Reply = ok(f"no json here {SENTINEL}")
+# PHX-125: an assignment to a domain this mission did not offer.
+DISALLOWED: Reply = ok(
+    '{"assignments": [{"step_id": "s1", "domain": "documents"},'
+    ' {"step_id": "s2", "domain": "build_engineering"}]}'
+)
+# PHX-125: a repeated key is a schema error, not "the last value wins".
+DUPLICATE_KEY: Reply = ok(
+    '{"steps": [{"objective": "Recall."}, {"objective": "Code."}],'
+    ' "steps": [{"objective": "Recall."}]}'
+)
 
 
 class QueueProvider(ModelProvider):
@@ -273,6 +283,14 @@ def states(result: MissionResult) -> list[str]:
     [
         ("planner", NOT_JSON, "planner", "responder_output", "not_json"),
         ("planner", TRUNCATED, "planner", "responder_output", "truncated"),
+        ("planner", DUPLICATE_KEY, "planner", "responder_output", "schema"),
+        (
+            "assignment",
+            DISALLOWED,
+            "assignment",
+            "responder_output",
+            "disallowed_domain",
+        ),
         (
             "assignment",
             ok('{"assignments": []}'),
@@ -501,7 +519,25 @@ def test_non_transient_failures_are_never_retried() -> None:
         ResponderErrorCode.NOT_JSON,
         ResponderErrorCode.SCHEMA,
         ResponderErrorCode.TRUNCATED,
+        ResponderErrorCode.DISALLOWED_DOMAIN,  # PHX-125 (ADR-197)
     }
+
+
+def test_disallowed_domain_retries_once_then_keeps_its_code() -> None:
+    # PHX-125 (ADR-197): one retry within the existing budgets, never a third.
+    provider = QueueProvider()
+    provider.script("assignment", DISALLOWED, DISALLOWED)
+    result = mission(provider)
+    assert (result.kind, result.failure_code, result.responder_error) == (
+        MissionKind.FAILED,
+        MissionFailureCode.RESPONDER_OUTPUT,
+        ResponderErrorCode.DISALLOWED_DOMAIN,
+    )
+    assert recoveries(result) == [
+        ("assignment", "responder_output", "disallowed_domain", "retry_same", "failed")
+    ]
+    assert provider.roles().count("assignment") == 2
+    assert "specialist" not in provider.roles()
 
 
 def _permission() -> PermissionRequest:
