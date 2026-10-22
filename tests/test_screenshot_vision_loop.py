@@ -1940,13 +1940,14 @@ def test_no_action_persistence_or_dependency_change() -> None:
         ],
         cwd=ROOT,
     )
-    # PHX-017 (ADR-080) intentionally changed ollama.py; it stays pinned, at the
-    # PHX-017 commit.
+    # PHX-017 (ADR-080) and PHX-130 (ADR-222, keep_alive) intentionally changed
+    # ollama.py; it stays pinned, at the PHX-130 implementation commit (the same
+    # baseline as test_prompt_injection_defenses.py).
     assert not subprocess.check_output(
         [
             "git",
             "diff",
-            "b7d96518d58ee7466d441cbe3b17c4eaad0866cf",
+            "c41bef4cce5e824a1d2c651c81c8b46b3c15421e",
             "--",
             "phoenix/models/ollama.py",
         ],
