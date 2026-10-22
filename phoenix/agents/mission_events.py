@@ -2,7 +2,10 @@
 
 PHOENIX's runtime and the backend mission service publish live progress with
 the frozen 32-type vocabulary only. A payload may hold IDs, closed state and
-code values, booleans and millisecond timings, nothing else: every key must be
+code values, booleans and millisecond timings, nothing else (PHX-132, ADR-232:
+except PHOENIX's DIRECT answer delta, ``agent.started`` with exactly
+``mission_id`` and ``answer_delta``, text the user reads in Chat anyway, never
+logged by observers): every key must be
 on its event type's allowlist and every value must match the key's kind. No
 message text, prompt, model output, tool output, file content, path or secret
 can pass, because none of them is a UUID, a step ID or a closed value. The UI
@@ -65,6 +68,11 @@ UUID: Final = "uuid"
 STEP: Final = "step"
 MILLISECONDS: Final = "ms"
 FLAG: Final = "flag"
+# PHX-132 (ADR-232): the one text kind, a DIRECT answer delta the user is
+# about to read in Chat anyway; never a prompt, tool output or path.
+ANSWER_TEXT: Final = "answer_text"
+ANSWER_DELTA_MAX: Final = 2048
+ANSWER_DELTA_FIELDS: Final = frozenset({"mission_id", "answer_delta"})
 _Kind = str | frozenset[str]
 
 
@@ -264,7 +272,13 @@ PAYLOAD_FIELDS: Final[Mapping[EventType, Mapping[str, _Kind]]] = MappingProxyTyp
             "final": FLAG,
         },
         EventType.STEP_COMPLETED: {**_STEP, "duration_ms": MILLISECONDS},
-        EventType.AGENT_STARTED: _ROLE,
+        # PHX-132 (ADR-232): PHOENIX's DIRECT answer delta (exactly
+        # mission_id + answer_delta, see check_event).
+        EventType.AGENT_STARTED: {
+            **_ROLE,
+            "mission_id": UUID,
+            "answer_delta": ANSWER_TEXT,
+        },
         EventType.AGENT_COMPLETED: {
             **_ROLE,
             **_TRIAGE,
@@ -356,6 +370,14 @@ def _value_ok(kind: _Kind, value: object) -> bool:
         return type(value) is int and 0 <= value <= 7 * 24 * 3600 * 1000
     if kind == FLAG:
         return type(value) is bool
+    if kind == ANSWER_TEXT:
+        if type(value) is not str or not 0 < len(value) <= ANSWER_DELTA_MAX:
+            return False
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            return False
+        return True
     return type(value) is str and value in kind
 
 
@@ -374,12 +396,29 @@ def check_event(event: EventEnvelope) -> None:
     """The whole envelope: allowlisted payload, UUID correlation and task IDs,
     and a known agent ID."""
     check_payload(event.event_type, event.payload)
+    # Only AGENT_STARTED allows these keys, and then exactly both, alone.
+    delta_keys = not ANSWER_DELTA_FIELDS.isdisjoint(event.payload)
+    if event.event_type == EventType.AGENT_STARTED and delta_keys:
+        if (
+            set(event.payload) != ANSWER_DELTA_FIELDS
+            or event.payload["mission_id"] != event.correlation_id
+            or event.agent_id != "phoenix"
+            or event.task_id is not None
+        ):
+            raise EventPayloadError("Answer delta event is malformed")
     if not is_uuid(event.correlation_id):
         raise EventPayloadError("Event correlation ID is not a UUID")
     if event.task_id is not None and not is_uuid(event.task_id):
         raise EventPayloadError("Event task ID is not a UUID")
     if event.agent_id is not None and event.agent_id not in AGENT_IDS:
         raise EventPayloadError("Event agent ID is not a known agent")
+
+
+def is_answer_delta(event: EventEnvelope) -> bool:
+    """PHX-132: a DIRECT answer delta; observers must not log its text."""
+    return event.event_type == EventType.AGENT_STARTED and (
+        "answer_delta" in event.payload
+    )
 
 
 def mission_event(

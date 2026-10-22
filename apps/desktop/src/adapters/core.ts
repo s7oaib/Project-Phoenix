@@ -486,6 +486,30 @@ export function readKaido(body: unknown): KaidoView | undefined {
   return { engaged, trigger: engaged ? plainId(body.kaido.trigger) ?? null : null };
 }
 
+// ---- PHX-132 (ADR-234): live DIRECT answers
+
+export const PARTIAL_MAX = 20000;
+export const PARTIAL_BADGE = '[Answering…]';
+/** A DIRECT answer delta: agent.started from phoenix with exactly mission_id and answer_delta. */
+export function answerDelta(event: EventEnvelope): { missionId: string; text: string } | undefined {
+  if (event.eventType !== 'agent.started' || event.agentId !== 'phoenix') return undefined;
+  const keys = Object.keys(event.payload);
+  const text = event.payload.answer_delta;
+  const missionId = id(event.payload.mission_id);
+  if (keys.length !== 2 || typeof text !== 'string' || text.length === 0 || text.length > 2048) return undefined;
+  if (!missionId || missionId !== event.correlationId) return undefined;
+  return { missionId, text };
+}
+/** The chat with each live answer appended (until its stored answer replaces it). */
+export function withPartials(messages: readonly ChatMessage[], partials: ReadonlyMap<string, string>): ChatMessage[] {
+  const live: ChatMessage[] = [];
+  for (const [missionId, text] of partials) {
+    if (!text.trim() || messages.some((message) => message.id.startsWith(`${missionId}:answer`))) continue;
+    live.push({ id: `${missionId}:partial`, role: 'assistant', content: `${PARTIAL_BADGE}\n${text.slice(-(MESSAGE_PART - 32))}` });
+  }
+  return [...messages, ...live].slice(-MESSAGE_WINDOW);
+}
+
 // ---- live evidence from content-free events
 
 export type EventEnvelope = {
@@ -740,6 +764,8 @@ export class PhoenixStore {
   private stream: StreamState = { connected: false, code: null };
   private conversationId: string | undefined;
   private messages: ChatMessage[] = [];
+  private partials = new Map<string, string>(); // PHX-132: live DIRECT answers by mission
+  private settledPartials = new Set<string>();
   private activeMissionId: string | undefined;
   private mission: MissionView | undefined;
   private verifications = new Map<string, Verification>();
@@ -847,6 +873,7 @@ export class PhoenixStore {
     if (!isObject(value) || typeof value.connected !== 'boolean') return;
     const code = typeof value.code === 'number' ? value.code : null;
     this.stream = { connected: value.connected, code };
+    this.partials.clear(); // a gap in deltas: the answer comes over REST
     // Any (re)connection or close may have missed events: reload everything over REST.
     this.schedule(...EVERYTHING);
     this.changed();
@@ -855,6 +882,16 @@ export class PhoenixStore {
   onEvent(value: unknown): void {
     const event = readEvent(value);
     if (!event) return;
+    // PHX-132 (ADR-234): a DIRECT answer delta grows the live answer of the active mission only;
+    // it is never a trace, metric or log line. The final answer over REST replaces it.
+    const delta = answerDelta(event);
+    if (delta) {
+      if (delta.missionId === this.activeMissionId) {
+        this.partials.set(delta.missionId, ((this.partials.get(delta.missionId) ?? '') + delta.text).slice(0, PARTIAL_MAX));
+        this.changed();
+      }
+      return;
+    }
     this.traces = [...this.traces, toTrace(event)].slice(-RING);
     const metric = toMetric(event);
     if (metric) this.metrics = [...this.metrics, metric].slice(-RING);
@@ -910,6 +947,7 @@ export class PhoenixStore {
         const status = str(payload.mission_status, 32);
         if (!status) break;
         evidence.missionStatus = status;
+        if (TERMINAL_STATUSES.includes(status) || status === 'waiting_permission') this.settledPartials.add(missionId);
         const rerunOf = id(payload.rerun_of);
         if (rerunOf && rerunOf === this.activeMissionId) this.activeMissionId = missionId; // linked re-run
         if (status === 'running' && missionId === this.activeMissionId) {
@@ -1166,6 +1204,13 @@ export class PhoenixStore {
       if (mission?.verification) this.sources.set(missionId, mission.sources);
     }));
     this.messages = toChatMessages(body, this.verifications, this.sources);
+    // The stored answer (or the settled status) replaces a live answer.
+    for (const missionId of [...this.partials.keys()]) {
+      if (this.settledPartials.has(missionId) || this.messages.some((message) => message.id.startsWith(`${missionId}:answer`))) {
+        this.partials.delete(missionId);
+        this.settledPartials.delete(missionId);
+      }
+    }
   }
 
   // -- port operations
@@ -1180,6 +1225,8 @@ export class PhoenixStore {
     if (!missionId || !conversationId) throw new ApiError(result.status, 'invalid_response');
     this.conversationId = conversationId;
     this.activeMissionId = missionId;
+    this.partials.clear();
+    this.settledPartials.clear();
     this.missionMessage = '';
     this.mission = undefined;
     this.schedule('conversation', 'mission');
@@ -1324,7 +1371,7 @@ export class PhoenixStore {
     const evidence = this.evidence.get(this.activeMissionId ?? '')?.steps.length ? this.evidence.get(this.activeMissionId ?? '') : this.evidence.get(this.latestEvidence ?? '');
     const graph = status === 'connected' ? toTaskGraph(evidence, this.mission) : undefined;
     return {
-      chatPort: { status, messages: [...this.messages], sendText: this.sendText },
+      chatPort: { status, messages: withPartials(this.messages, this.partials), sendText: this.sendText },
       taskPort: graph ? { status, graph } : { status },
       agentPort: { status, agents },
       permissionPort: { status, requests: toPermissionEntries(this.pending, this.actors), submitDecision: this.submitDecision },

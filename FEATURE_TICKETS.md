@@ -133,3 +133,5 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-129 Always allow for read-only requests — DONE (desktop: P1 requests offer Allow this session / Always allow; Settings lists and removes remembered grants via the existing revoke route; proxy 31 → 32 routes; ADR-215–217; local, not pushed)
 - PHX-130 Quick commands — DONE (open browser/YouTube/Google and YouTube/Google search, typed or spoken, open the default browser before triage with no model call; P1 `desktop.open_link` with an "always" grant; startup model warm-up and Ollama keep_alive 30m; ADR-220–222; local branch, not pushed)
 - PHX-131 Faster chat — DONE (deterministic pre-triage rule sends clearly simple requests DIRECT with no triage generation; triage_outcome `rule`; migration 0010; ADR-225–227; local branch, not pushed)
+
+- PHX-132 Streaming answers — DONE (DIRECT replies stream word by word to Chat over agent.started answer deltas; voice speaks the first sentence early; ADR-230–234; local branch, not pushed)

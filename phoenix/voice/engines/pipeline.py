@@ -90,6 +90,7 @@ __all__ = (
     "VoicePipelineConfig",
     "VoicePipeline",
     "speakable_text",
+    "first_spoken_sentence",
     "strip_wake_phrase",
     "segment_from_pcm",
     "pcm_dbfs",
@@ -211,6 +212,24 @@ def speakable_text(answer: str) -> str:
     if not spoken:
         spoken = text[:_MAX_SPOKEN_CHARS].rsplit(" ", 1)[0]
     return f"{spoken} The full answer is on screen."
+
+
+_SENTENCE_END: Final = re.compile(r"[.!?](?=\s)")
+
+
+def first_spoken_sentence(partial: str) -> str | None:
+    """PHX-132 (ADR-233): the first complete sentence of a streaming answer,
+    rendered as ``speakable_text`` renders the start of the whole answer;
+    None until a sentence is complete, or when it starts in code or markup.
+    """
+    match = _SENTENCE_END.search(partial)
+    if match is None:
+        return None
+    head = partial[: match.end()]
+    if "`" in head or "http" in head or len(head) > _MAX_SPOKEN_CHARS // 2:
+        return None
+    spoken = speakable_text(head)
+    return spoken if len(spoken) >= 2 else None
 
 
 def _frames(pcm: bytes, stream_id: str) -> tuple[PcmAudioFrame, ...]:
