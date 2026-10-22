@@ -6901,3 +6901,74 @@ SR-08 (hwnd-bound inspect grants: binding pid and creation time needs a new
 approve route; design change); SR-09 (provenance labels across steps: planner and
 prompt design); browser ports and rebinding in Playwright (the browser's route guard is
 its own design, PHX-112). Info items SR-15 to SR-27 are recorded, not changed here.
+
+## ADR-195 — No pass for a file that was never written
+
+Status: Accepted (PHX-125 owner instruction; code only, no model-visible text)
+Date: 2026-10-22
+Ticket: PHX-125
+
+A live document-create run completed with a summary that claimed
+`out/summary.md` while no `document.create` call was made: the "create" step
+proposed `read_document` and LEVI's model passed it. LEVI now adds one
+deterministic check (`deterministic.written_file`) in two places:
+
+- a step routed to the documents domain (PHX-046 or PHX-113 capability) whose
+  planned objective asks to create or save a file, and
+- the final answer of a mission that ran at least one document step, when the
+  user's request asks to create or save a file.
+
+The check passes only when a `document.create` call (`WRITE_TOOL_IDS`) of that
+step (or, for the final answer, of any step) was ALLOWED, attempted,
+succeeded and applied its effect, as recorded in `MissionTrace.capability_calls`.
+A failed check is final: the inner LEVI responder and its model are not
+consulted, the step fails `verification_failed`, and nothing is retried. A
+passed check never passes anything by itself; the step's existing LEVI
+responder still decides.
+
+Detection prefers routing evidence: the check is offered only to document
+work (a step's assigned documents domain, or a mission that ran one), never to
+text, knowledge, research, media or control steps. Within that scope, the
+objective or request is matched by a narrow heuristic
+(`requires_written_file`): "save/export/store … to/into/as/in/at <file or
+path>", "write/put … to/into/as <file or path>", "create/generate/make/produce
+[a new …] file" or "create <path>"; a path needs a document extension. Reads
+("write a summary of report.pdf", "a summary of the file") do not match. The
+heuristic can only add a failing check, so a miss leaves today's behaviour and
+a false match turns a would-be completion into an honest failure.
+Rejected: trusting the model's choice of operation (it is what failed), a
+planner-declared operation field (model-visible change, out of scope for this
+branch), and offering the check to every step (text steps legitimately write
+code that "saves to output.csv").
+
+## ADR-196 — A repeated JSON key is a schema error
+
+Status: Accepted (PHX-125 owner instruction)
+Date: 2026-10-22
+Ticket: PHX-125
+
+`parse_json_object` parsed with `json.loads`, which silently keeps the last of
+repeated keys; a 9B reply could therefore carry two contradicting
+`operation` or `steps` values and PHOENIX would act on one it never checked as
+a whole. It now parses with an `object_pairs_hook` that rejects a repeated key
+at any depth and reports `ResponderErrorCode.SCHEMA`, which MAHORAGA already
+retries once within its budgets (ADR-093). Every caller of
+`parse_json_object` (planner, assignment, triage, tool, research, control and
+capability proposals, LEVI checks) gets the same rule; no other parser
+changes.
+
+## ADR-197 — An assignment to a domain not offered is retried once
+
+Status: Accepted (PHX-125 owner instruction)
+Date: 2026-10-22
+Ticket: PHX-125
+
+Live runs showed the assignment model naming `documents` when it was not
+offered (primed by the assignment prompt). `DISALLOWED_DOMAIN` joins
+`RETRYABLE_OUTPUT`, so MAHORAGA retries the generation once (`retry_same`),
+bounded by the unchanged budgets (one retry per generation, three per
+mission). A second disallowed domain fails the mission with the original
+`responder_output`/`disallowed_domain` code; the domain is still never
+accepted, so the allowlist is not weakened. The recovery event allowlist
+follows `RETRYABLE_OUTPUT` and now admits `disallowed_domain`. `OVERSIZED`,
+`INVALID_TEXT` and `UNKNOWN_STEP` stay final.

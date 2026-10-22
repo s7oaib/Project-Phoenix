@@ -28,6 +28,7 @@ Traces hold IDs, statuses, hashes and lengths only. No retries (PHX-109 R10).
 
 import asyncio
 import json
+import re
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -148,6 +149,53 @@ CAPABILITY_TOOLS: dict[str, tuple[str, str, ToolRiskLevel]] = {
     "youtube.pause": (MEDIA_ACTOR_ID, MEDIA_TOOL_REASON, ToolRiskLevel.P2),
 }
 CAPABILITY_TOOL_IDS: tuple[str, ...] = tuple(CAPABILITY_TOOLS)
+# PHX-125 (ADR-195): the tools whose verified success writes a workspace file.
+WRITE_TOOL_IDS: frozenset[str] = frozenset({"document.create"})
+WRITTEN_FILE_CHECK_ID = "deterministic.written_file"
+
+_PATH = (
+    r"(?:[\w.-]+[/\\])*[\w-]+\."
+    r"(?:md|markdown|txt|csv|tsv|docx?|pdf|json|html?|xlsx?|pptx|rtf|odt|xml|ya?ml)\b"
+)
+_ARTICLES = r"(?:(?:a|an|the|new|one)\s+)*"
+# Up to three describing words, never a preposition (so "a summary of the
+# file" is a read, not a write).
+_WORDS = (
+    r"(?:(?!(?:of|from|in|on|about|for|using|based|with|by|to|into|at)\b)"
+    r"[\w-]+\s+){0,3}"
+)
+_TARGET = rf"(?:{_ARTICLES}{_WORDS}file\b|{_PATH})"
+# Heuristic only: a match can add a failing check, never pass anything.
+_WRITE_INTENT = re.compile(
+    rf"\b(?:save|export|store)\b[^\n]{{0,80}}?\b(?:to|into|as|in|at|under)\s+"
+    rf"{_TARGET}"
+    rf"|\b(?:write|put)\b[^\n]{{0,80}}?\b(?:to|into|as)\s+{_TARGET}"
+    rf"|\b(?:create|generate|make|produce)\s+{_ARTICLES}{_WORDS}file\b"
+    rf"|\b(?:create|generate|make|produce)\s+(?:the\s+)?{_PATH}",
+    re.IGNORECASE,
+)
+
+
+def requires_written_file(text: str) -> bool:
+    """PHX-125 (ADR-195): the text asks PHOENIX to create or save a file."""
+    return _WRITE_INTENT.search(text) is not None
+
+
+def wrote_file(
+    records: Sequence["CapabilityCallRecord"], step_id: str | None = None
+) -> bool:
+    """A write tool call (of ``step_id``, or of any step) verifiably succeeded."""
+    return any(
+        record.tool_id in WRITE_TOOL_IDS
+        and record.decision_status == PermissionStatus.ALLOWED
+        and record.tool_status == ToolResultStatus.SUCCESS
+        and record.attempted
+        and record.effect_applied
+        and (step_id is None or record.step_id == step_id)
+        for record in records
+    )
+
+
 # Event "operation" values: the tools' own actions (mission_events mirrors it).
 CAPABILITY_ACTIONS: frozenset[str] = frozenset(
     tool_id.split(".", 1)[1] for tool_id in CAPABILITY_TOOLS
@@ -1098,6 +1146,41 @@ class CapabilityEvidenceVerificationResponder:
             evidence_summary="Allowed by a caller grant; the result correlates"
             if passed
             else "Tool evidence does not correlate or is not an allowed success",
+        )
+
+    async def verify(self, request: VerificationRequest) -> VerificationDraft:
+        check = self._check()
+        if not check.passed:
+            return VerificationDraft(
+                verification_id=request.verification_id, checks=(check,)
+            )
+        draft = await self._inner.verify(request)
+        return VerificationDraft(
+            verification_id=draft.verification_id, checks=(check, *draft.checks)
+        )
+
+
+class WrittenFileVerificationResponder:
+    """PHX-125 (ADR-195): LEVI for a step or answer that must have saved a file.
+
+    Wraps the step's own LEVI responder. Without a verified write tool call
+    the deterministic check fails and is final: the inner responder (and its
+    model) is not consulted and cannot override it. With one, the inner
+    responder decides as before; this check never passes anything by itself.
+    """
+
+    def __init__(self, inner: VerificationResponder, *, written: bool) -> None:
+        self._inner = inner
+        self._written = written
+
+    def _check(self) -> VerificationCheck:
+        return VerificationCheck(
+            check_id=WRITTEN_FILE_CHECK_ID,
+            criterion="A requested file was created by a verified write tool call",
+            passed=self._written,
+            evidence_summary="A write tool call succeeded and applied its effect"
+            if self._written
+            else "No write tool call succeeded, so no file was created",
         )
 
     async def verify(self, request: VerificationRequest) -> VerificationDraft:

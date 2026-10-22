@@ -97,6 +97,9 @@ from phoenix.agents.capability_steps import (
     CapabilityCallRecord,
     CapabilityStepRunner,
     CapabilityTools,
+    WrittenFileVerificationResponder,
+    requires_written_file,
+    wrote_file,
 )
 from phoenix.agents.combined_planning import (
     CombinedPlanningResponder,
@@ -1617,6 +1620,12 @@ class PhoenixRuntime:
             for step_id, route in routes.items()
             if route.domain == RoutingDomain.COMPUTER_CONTROL
         }
+        # PHX-125 (ADR-195): every step that works on workspace documents.
+        document_steps = documents | {
+            step_id
+            for step_id, domain in capability.items()
+            if domain == RoutingDomain.DOCUMENTS
+        }
         steps = [
             TaskStepDefinition(
                 step_id=step.step_id,
@@ -1874,6 +1883,18 @@ class PhoenixRuntime:
                         control_evidence,
                         grants,
                     )
+                # PHX-125 (ADR-195): a document step that asks for a file, or the
+                # answer of a document mission whose request asks for one, needs
+                # a verified write tool call (of that step, or of the mission).
+                if (
+                    step_id in document_steps and requires_written_file(step.objective)
+                ) or (final and document_steps and requires_written_file(request.text)):
+                    levi = _written_levi(
+                        levi,
+                        wrote_file(
+                            evidence.capability_calls, None if final else step_id
+                        ),
+                    )
                 async with asyncio.timeout(limits.verification_timeout_seconds):
                     # PHX-109: only LEVI's failed generation is retried, never
                     # its verdict: a FAILED result returns from here as is.
@@ -2036,6 +2057,18 @@ def _control_levi(
             evidence=evidence,
             grants=grants,
         )
+
+    return responder
+
+
+def _written_levi(
+    default: Callable[[ModelBinding], VerificationResponder],
+    written: bool,
+) -> Callable[[ModelBinding], VerificationResponder]:
+    """PHX-125 (ADR-195): no verified write, no pass; otherwise LEVI as before."""
+
+    def responder(verifier: ModelBinding) -> VerificationResponder:
+        return WrittenFileVerificationResponder(default(verifier), written=written)
 
     return responder
 
