@@ -1975,20 +1975,14 @@ PHX_128_PATHS = ("phoenix/agents/control_steps.py",)
 # commit so this commit stays reachable).
 PHX_130_COMMIT = "c41bef4cce5e824a1d2c651c81c8b46b3c15421e"
 # PHX-133 moved six of them to its own pin (below).
-PHX_130_PATHS = (
-    "phoenix/models/ollama.py",
-)
+PHX_130_PATHS = ("phoenix/models/ollama.py",)
 # PHX-133 (ADR-235 to ADR-239) intentionally changed the event allowlist
 # (desktop.open_app), MissionTrace (quick_answers), the mission service (app
 # grants, clock answers), the missions and permissions routes (label, unbound
 # app approve) and the backend wiring (app tool). Each left the PHX-130 block
 # and stays pinned, at the PHX-133 implementation commit.
 PHX_133_COMMIT = "340695cb3548c00862a909a0152164aa8a9e1fe3"
-PHX_133_PATHS = (
-    "phoenix/api/missions.py",
-    "phoenix/api/routes/missions.py",
-    "phoenix/api/routes/permissions.py",
-)
+PHX_133_PATHS = ("phoenix/api/routes/missions.py",)  # two moved to PHX-135
 # Microphone stall fix (2026-10-23, local review build) intentionally changed
 # voice/engines/sound.py: a busy event loop is no longer read as a dead
 # microphone; it stays pinned, at the fix commit.
@@ -2034,10 +2028,9 @@ PHX_131_PATHS = (
 # PHX-130 block, core.ts the PHX-129 block, the others origin/main. All stay
 # pinned, at the PHX-132 implementation commit.
 PHX_132_COMMIT = "f685a38dbe88fa0ccd7d4f9fb237b472344d2b68"
-PHX_132_PATHS = (
+PHX_132_PATHS = (  # voice.py moved to PHX-135
     "phoenix/agents/answer_stream.py",
     "phoenix/api/observability.py",
-    "phoenix/api/voice.py",
     "phoenix/voice/conversation/__init__.py",
     "phoenix/voice/engines/pipeline.py",
 )
@@ -2047,10 +2040,20 @@ PHX_131_132_COMMIT = "35c9d287255e692837c78c99f37251d4f26065df"
 PHX_131_132_PATHS = ("apps/desktop/src/adapters/core.ts",)
 # runtime.py carries PHX-131, PHX-132 and PHX-134; pinned at that merge.
 PHX_REVIEW_COMMIT = "95ac3006f39796fb7e02b9ae06ea0b282d394ae4"
-PHX_REVIEW_PATHS = (
+PHX_REVIEW_PATHS = ("phoenix/agents/runtime.py",)  # two moved to PHX-135
+# PHX-135 (ADR-245 to ADR-249; owner decision 2026-10-23) intentionally changed
+# the event allowlist (screen.capture_window), the mission service (screen
+# grants), the permissions route (shared approvable rule), the voice service
+# (spoken approval) and the backend wiring (screen describer, voice approval);
+# each left its earlier pin and stays pinned, at the PHX-135 implementation
+# commit.
+PHX_135_COMMIT = "1db015a76d95e2ed40430ce3b7117af5e50fca26"
+PHX_135_PATHS = (
     "phoenix/agents/mission_events.py",
-    "phoenix/agents/runtime.py",
+    "phoenix/api/missions.py",
+    "phoenix/api/routes/permissions.py",
     "phoenix/api/server.py",
+    "phoenix/api/voice.py",
 )
 
 
@@ -2104,6 +2107,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_131_132_PATHS
         and path not in PHX_134_PATHS
         and path not in PHX_REVIEW_PATHS
+        and path not in PHX_135_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2145,6 +2149,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_131_132_COMMIT, path) for path in PHX_131_132_PATHS]
     baselines += [(PHX_134_COMMIT, path) for path in PHX_134_PATHS]
     baselines += [(PHX_REVIEW_COMMIT, path) for path in PHX_REVIEW_PATHS]
+    baselines += [(PHX_135_COMMIT, path) for path in PHX_135_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
