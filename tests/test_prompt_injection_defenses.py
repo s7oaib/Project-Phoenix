@@ -1955,8 +1955,7 @@ PHX_125A_PATHS = (
 PHX_126_COMMIT = "f67207033a84113b8d8fce8d0bcfe1b71f4c408c"
 PHX_126_PATHS: tuple[str, ...] = ()
 # PHX-125b (ADR-198, ADR-199; owner-approved 2026-10-22) intentionally changed
-# prompts.py
-# (phoenix-prompts-v7), responders.py and control_steps.py (one assignment
+# prompts.py (phoenix-prompts-v7), responders.py and control_steps.py (one assignment
 # renderer), capability_steps.py and tool_steps.py (step-scoped inputs, the
 # read rule); prompts.py left the PHX-121 block, tool_steps.py the PHX-103
 # block, control_steps.py the PHX-123 block (it carries PHX-123 too) and
@@ -1964,7 +1963,7 @@ PHX_126_PATHS: tuple[str, ...] = ()
 # five stay pinned, at the PHX-125b resolution commit that merged PHX-123,
 # PHX-125a and PHX-126 (capability_steps.py carries PHX-126 too; the PR must
 # merge with a merge commit so this commit stays reachable).
-PHX_125B_COMMIT = "5a078074b8735cd958fda212b8aed3bacfceb13c"
+PHX_125B_COMMIT = "1071c4fefb15ff1410d972e23c1507ae11de975b"
 PHX_125B_PATHS = (
     "phoenix/agents/capability_steps.py",
     "phoenix/agents/control_steps.py",
