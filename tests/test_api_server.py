@@ -75,6 +75,7 @@ from phoenix.models.provider import (
 from phoenix.persistence.database import create_engine_for_settings
 from phoenix.tools.document_files import document_file_tool_definitions
 from phoenix.tools.filesystem import filesystem_tool_definitions
+from phoenix.tools.open_app import open_app_tool_definitions
 from phoenix.tools.open_link import open_link_tool_definitions
 from phoenix.tools.web_research import web_research_tool_definitions
 from phoenix.tools.youtube import youtube_tool_definitions
@@ -270,6 +271,7 @@ def test_lifespan_builds_services_once_and_closes_them(settings: AppSettings) ->
             *youtube_tool_definitions(),
             *control_tool_definitions(),
             *open_link_tool_definitions(),  # PHX-130
+            *open_app_tool_definitions(),  # PHX-133
         )
         assert services.runtime._research is None
         # No workspace yet: capability steps offer media only, not documents.

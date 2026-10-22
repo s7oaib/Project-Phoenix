@@ -147,6 +147,7 @@ from phoenix.tools.document_files import (
     document_file_tool_definitions,
 )
 from phoenix.tools.filesystem import FilesystemTool, filesystem_tool_definitions
+from phoenix.tools.open_app import OpenAppTool, open_app_tool_definitions
 from phoenix.tools.open_link import OpenLinkTool, open_link_tool_definitions
 from phoenix.tools.registry import ToolRegistry
 from phoenix.tools.web_research import WebResearchTool, web_research_tool_definitions
@@ -730,6 +731,7 @@ async def open_services(
                 *control_tool_definitions(),
                 # PHX-130 (ADR-220): quick commands' allowlisted link opening.
                 *open_link_tool_definitions(),
+                *open_app_tool_definitions(),  # PHX-133 (ADR-236)
             )
         )
         research: WebResearchTool | None = None
@@ -829,7 +831,9 @@ async def open_services(
             events=observer,
             before_run=registrar.refresh_required,
             quick=QuickCommandRunner(
-                OpenLinkTool(tools, policy), EventPublisher(observer)
+                OpenLinkTool(tools, policy),
+                OpenAppTool(tools, policy),  # PHX-133: paths resolved here
+                EventPublisher(observer),
             ),
         )
         observer.bind_traces(missions.get_trace)

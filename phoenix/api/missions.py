@@ -74,6 +74,9 @@ from phoenix.agents.mission_events import EventPublisher, EventSink
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
 from phoenix.agents.prompts import PROMPT_SET_VERSION
 from phoenix.agents.quick_commands import (
+    QUICK_SCOPES,
+    QuickAnswerRecord,
+    QuickCallRecord,
     QuickCommand,
     QuickCommandRunner,
     match_quick_command,
@@ -112,7 +115,6 @@ from phoenix.security.permissions import (
     UserDecision,
     UserPermissionDecision,
 )
-from phoenix.tools.open_link import OPEN_LINK_TOOL_ID
 from phoenix.tools.registry import ToolRegistry, ToolRiskLevel
 
 DEFAULT_RETENTION = timedelta(days=30)
@@ -490,15 +492,18 @@ class MissionService:
         command: QuickCommand,
         stored: tuple[PermissionGrant, ...],
     ) -> Settlement:
-        """PHX-130 (ADR-220/221): one link opening, verified deterministically."""
+        """PHX-130 (ADR-220/221): one link opening, verified deterministically.
+        PHX-133: or one app launch, or a local-clock answer (no tool)."""
         assert self._quick is not None
         result = await self._quick.run(
             mission_id, command, stored, session_id=self._session_id
         )
+        record = result.record
         trace = MissionTrace(
             prompt_set_version=PROMPT_SET_VERSION,
             path=None,
-            quick_calls=(result.record,),
+            quick_calls=(record,) if isinstance(record, QuickCallRecord) else (),
+            quick_answers=(record,) if isinstance(record, QuickAnswerRecord) else (),
         ).model_dump(mode="json")
         if result.answer is not None:
             return Settlement(
@@ -764,8 +769,9 @@ class MissionService:
             )
             if control:
                 control_grants([grant])
-            elif request.tool_id == OPEN_LINK_TOOL_ID:
-                quick_grants([grant])  # PHX-130: P1 "session" or "always"
+            elif request.tool_id in QUICK_SCOPES:
+                # PHX-130 links, PHX-133 apps: P1 "session" or "always"
+                quick_grants([grant])
             else:
                 # document, (PHX-111) research or (PHX-113, PHX-120) capability
                 mission_grants([grant], capabilities=True)

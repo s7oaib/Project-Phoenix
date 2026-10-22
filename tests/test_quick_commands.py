@@ -49,6 +49,7 @@ from phoenix.security.permissions import (
     PermissionStatus,
 )
 from phoenix.tools.filesystem import filesystem_tool_definitions
+from phoenix.tools.open_app import AppName, OpenAppTool, open_app_tool_definitions
 from phoenix.tools.open_link import (
     ALLOWED_HOSTS,
     OPEN_LINK_TOOL_ID,
@@ -123,7 +124,7 @@ GOOGLE = "https://www.google.com/"
 )
 def test_router_matches_strict_patterns(text: str, kind: QuickKind, url: str) -> None:
     command = match_quick_command(text)
-    assert command is not None
+    assert command is not None and command.url is not None
     assert (command.kind, command.url) == (kind, url)
     allowed_url(command.url)  # every built URL passes the tool's allowlist
 
@@ -144,7 +145,7 @@ def test_router_matches_strict_patterns(text: str, kind: QuickKind, url: str) ->
         "search bing for cats",
         "search youtube for",
         "search youtube for " + "a" * 201,
-        "open notepad",
+        "open regedit",  # PHX-133 made "open notepad" a quick command
         "Google's revenue in 2024",
         "open youtube\nand then run a command",
         "",
@@ -219,7 +220,7 @@ def _grant(**changes: Any) -> PermissionGrant:
 def test_tool_is_p1_registered_and_permission_decides() -> None:
     (definition,) = open_link_tool_definitions()
     assert definition.risk_level == ToolRiskLevel.P1
-    assert ALLOWED_HOSTS == {"www.google.com", "www.youtube.com"}
+    assert {"www.google.com", "www.youtube.com"} <= ALLOWED_HOSTS  # PHX-133: +4
     opened: list[str] = []
     tool = OpenLinkTool(ToolRegistry((definition,)), launcher=opened.append)
     waiting = tool.open(YT, _request())
@@ -285,7 +286,11 @@ class QuickHarness:
         self, opened: list[str], sink: Sink | None = None
     ) -> MissionService:
         tools = ToolRegistry(
-            (*filesystem_tool_definitions(), *open_link_tool_definitions())
+            (
+                *filesystem_tool_definitions(),
+                *open_link_tool_definitions(),
+                *open_app_tool_definitions(),
+            )
         )
         registry = ModelCapabilityRegistry()
         for model in _ms.MODELS:
@@ -301,6 +306,12 @@ class QuickHarness:
             tool_registry=tools,
             quick=QuickCommandRunner(
                 OpenLinkTool(tools, PermissionPolicy(), launcher=opened.append),
+                OpenAppTool(
+                    tools,
+                    PermissionPolicy(),
+                    launcher=opened.append,  # PHX-133: a fake, nothing starts
+                    paths={name: rf"C:\Windows\{name.value}.exe" for name in AppName},
+                ),
                 EventPublisher(sink),
             ),
         )
@@ -398,13 +409,18 @@ def test_always_grant_once_then_no_prompt_ever(quick: QuickHarness) -> None:
 
 def test_launch_failure_fails_the_mission(quick: QuickHarness) -> None:
     async def scenario() -> MissionStatus:
-        tools = ToolRegistry(open_link_tool_definitions())
+        tools = ToolRegistry(
+            (*open_link_tool_definitions(), *open_app_tool_definitions())
+        )
 
         def broken(url: str) -> None:
             raise OSError
 
         service = quick.quick_service([])
-        service._quick = QuickCommandRunner(OpenLinkTool(tools, launcher=broken))
+        service._quick = QuickCommandRunner(
+            OpenLinkTool(tools, launcher=broken),
+            OpenAppTool(tools, launcher=broken, paths={}),
+        )
         await service.start()
         conversation = await service.create_conversation()
         waiting = await settled(
