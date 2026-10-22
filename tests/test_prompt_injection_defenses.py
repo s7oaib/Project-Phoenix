@@ -1734,10 +1734,7 @@ PHX_102_PATHS: tuple[str, ...] = ()
 # server.py and missions.py, and PHX-105 runtime.py and mission_events.py, to
 # their own pins (below).
 PHX_103_COMMIT = "023be4ea7cd71ff8ff5c74b0ff8992cf7bb0c134"
-PHX_103_PATHS = (
-    "phoenix/agents/tool_steps.py",
-    "phoenix/api/event_stream.py",
-)
+PHX_103_PATHS = ("phoenix/api/event_stream.py",)
 # PHX-104 (ADR-089) intentionally changed server.py (REST routes, settings
 # store and workspace wiring), missions.py (use_runtime; a mission keeps its
 # runtime) and alembic/env.py (settings row registration); all three stay
@@ -1895,10 +1892,7 @@ PHX_TRAIN_PATHS = (
 # PHX-120 block and runtime.py the train block. All three stay pinned, at the
 # PHX-121 implementation commit (the PR must merge with a merge commit).
 PHX_121_COMMIT = "9a6c2cbfcd6059af75626e8d91059994e60c4348"
-PHX_121_PATHS = (
-    "phoenix/agents/combined_planning.py",
-    "phoenix/agents/prompts.py",
-)
+PHX_121_PATHS = ("phoenix/agents/combined_planning.py",)
 # PHX-122 (ADR-170 to ADR-174) intentionally changed the native proxy
 # allowlist (voice and knowledge routes, the base64 upload) and the desktop
 # adapters (store, connection bar, setup views and their styles); all stay
@@ -1925,10 +1919,23 @@ PHX_124_PATHS = ("phoenix/tools/browser.py",)
 # merge commit so this commit stays reachable).
 PHX_125A_COMMIT = "b97a7c4cc246b979d2434415e1b579deb8fa45ae"
 PHX_125A_PATHS = (
-    "phoenix/agents/capability_steps.py",
     "phoenix/agents/mission_recovery.py",
-    "phoenix/agents/responders.py",
     "phoenix/agents/runtime.py",
+)
+# PHX-125b (ADR-198, ADR-199; owner-gated) intentionally changed prompts.py
+# (phoenix-prompts-v7), responders.py and control_steps.py (one assignment
+# renderer), capability_steps.py and tool_steps.py (step-scoped inputs, the
+# read rule); prompts.py left the PHX-121 block, tool_steps.py the PHX-103
+# block and capability_steps.py and responders.py the PHX-125a block. All
+# five stay pinned, at the PHX-125b implementation commit (the PR must merge
+# with a merge commit so this commit stays reachable).
+PHX_125B_COMMIT = "5a078074b8735cd958fda212b8aed3bacfceb13c"
+PHX_125B_PATHS = (
+    "phoenix/agents/capability_steps.py",
+    "phoenix/agents/control_steps.py",
+    "phoenix/agents/prompts.py",
+    "phoenix/agents/responders.py",
+    "phoenix/agents/tool_steps.py",
 )
 
 
@@ -1968,6 +1975,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_122_PATHS
         and path not in PHX_124_PATHS
         and path not in PHX_125A_PATHS
+        and path not in PHX_125B_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1995,6 +2003,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_122_COMMIT, path) for path in PHX_122_PATHS]
     baselines += [(PHX_124_COMMIT, path) for path in PHX_124_PATHS]
     baselines += [(PHX_125A_COMMIT, path) for path in PHX_125A_PATHS]
+    baselines += [(PHX_125B_COMMIT, path) for path in PHX_125B_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
