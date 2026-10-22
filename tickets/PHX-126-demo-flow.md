@@ -82,6 +82,13 @@ the proposal is still rejected.
 | 6 | FAIL click | FAIL (read answer unverified once; no click, c) | FAIL (read PASS; no click, c) |
 | 8 | FAIL `tool_rejected` | PASS (LEVI rejected the injected file) | PASS (`levi_rejected`) |
 
+Runs 1 and 2 used 702a92f plus this fix. After rebasing onto origin/main
+5c28b6d (PHX-125a), demos 1, 2, 5 and 8 were re-run once on the final branch:
+1 FAIL (read approved and run; LEVI's model check rejected the answer, c),
+2 PASS, 5 FAIL `verification_failed` (no create proposed; PHX-125a's written-file
+check now correctly refuses to pass it, c), 8 PASS. Every 1/2/8 run after the
+fix reached PermissionEngine and showed the read prompt; no `tool_rejected`.
+
 ## Non-goals
 No prompt-text, policy, permission or LEVI change. No change to the rehearsal
 script.
