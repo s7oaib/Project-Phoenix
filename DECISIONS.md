@@ -7536,3 +7536,85 @@ grant model records `user_decision="approved"` only and has no decision-source
 field, so "voice" is not recorded in the audit row; adding one would need a
 migration and is out of scope for the review build. New modules
 (`foreground_window.py`) are not on origin/main and need no guard exclusion.
+
+## ADR-250 — Open any installed app from its Start-menu shortcut
+
+Status: Accepted (PHX-136 owner decision 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-136
+
+Decision: `desktop.open_app` also launches installed apps. At startup the
+tool indexes `*.lnk` under `%ProgramData%` and `%APPDATA%`
+`\Microsoft\Windows\Start Menu\Programs` (key: lower-cased stem, one space;
+uninstaller shortcuts skipped; cap 2000). "open <name>" matches the index:
+exact key, else whole-word or close spelling (ratio >= 0.8) ranked by (whole
+words, ratio); a tie is not a quick command (normal pipeline). The request
+names only an indexed key, never a path; the `.lnk` starts via
+`os.startfile` with no arguments. Notepad, Calculator and File Explorer keep
+their fixed entries (ADR-236).
+
+## ADR-251 — Open any public website's home page
+
+Status: Accepted (PHX-136 owner decision 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-136
+
+Decision: "open <site>" opens `https://<domain>/` only, for a bare domain
+("reddit.com", "amazon.in") or a fixed known name (amazon, reddit, netflix,
+chatgpt, instagram, facebook, twitter/x, linkedin, "spotify web").
+`site_root_url` refuses non-https, any path, query, fragment, user info or
+port, upper case, IP literals, `localhost` and private/reserved suffixes
+(local, internal, lan, corp, test, ...). The router accepts a TLD only from a
+fixed generic set or two letters that are not common file extensions, so
+"open notes.md" is not a site. Order: a text with a TLD is a site; otherwise
+an installed shortcut beats a known name.
+
+## ADR-252 — Owner-approved wide quick-command scopes
+
+Status: Accepted (PHX-136 owner decision 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-136
+
+Decision: each quick tool gets one more P1 scope, beside its fixed one:
+`desktop.open_link` / `open_link` / `sites:public-https-home-pages` and
+`desktop.open_app` / `open_app` / `start-menu:installed-app-shortcuts`. One
+"Always allow" per scope covers every website or every indexed app. The tools
+bind scope to validation: a website opens only under the site resource (and
+is never resolved), a shortcut only under the shortcut resource, a fixed app
+never under it; allowlisted links still need the fixed link scope. Earlier
+PHX-130/133 grants stay valid for exactly their items.
+Why widened: the owner asked for "open anything" (2026-10-23) and accepted
+one approval per kind. Risk: an "always" site grant opens any public home
+page a command names (a phishing domain typed or misheard); an "always"
+shortcut grant starts any indexed app, including shells or admin tools that
+have Start-menu shortcuts. Mitigations: home pages only, no arguments, no
+paths from text, names from the local index only, P1 approval first, grants
+revocable in Settings.
+
+## ADR-253 — Play on YouTube without an API key
+
+Status: Accepted (PHX-136 owner request 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-136
+
+Decision: "play X on youtube", "play X" (X mentions song, music, video or
+youtube) and "play (some/random) music" fetch
+`https://www.youtube.com/results?search_query=<X>` with httpx (5 s, desktop
+User-Agent, no redirects) only after PermissionEngine allows the link scope,
+take the first `"videoId":"<11 chars>"` (validated `[A-Za-z0-9_-]{11}`; music
+uses a random fixed query and a random pick of the top 5) and open
+`https://www.youtube.com/watch?v=<id>`, re-checked against the link
+allowlist. Any fetch, parse or check failure opens the results page instead.
+The host is fixed, so no general page-fetch helper is needed. "search youtube
+for X" still opens results.
+
+## ADR-254 — PHX-136 pins
+
+Status: Accepted (PHX-136)
+Date: 2026-10-23
+Ticket: PHX-136
+
+Decision: `phoenix/api/missions.py` (matches through the runner's shortcut
+index) leaves the PHX-133 pin for a PHX-136 pin at the implementation commit.
+`quick_commands.py`, `open_link.py` and `open_app.py` are not on origin/main
+and need no pin.

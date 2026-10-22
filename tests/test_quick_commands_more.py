@@ -179,7 +179,7 @@ def test_app_commands(text: str, app: AppName) -> None:
         "open C:\\Windows\\System32\\cmd.exe",
         "open file explorer at C:\\",
         "open files; rm -rf /",
-        "open evil.com",
+        "open evil.com:8080",  # PHX-136: a bare domain is a website
         "open wikipedia.org/wiki/x",
         "open github.com/evil/repo",
         "open gmail and send an email to bob",

@@ -1982,7 +1982,13 @@ PHX_130_PATHS = ("phoenix/models/ollama.py",)
 # app approve) and the backend wiring (app tool). Each left the PHX-130 block
 # and stays pinned, at the PHX-133 implementation commit.
 PHX_133_COMMIT = "340695cb3548c00862a909a0152164aa8a9e1fe3"
-PHX_133_PATHS = ("phoenix/api/routes/missions.py",)  # two moved to PHX-135
+# PHX-135 moved api/missions.py and routes/permissions.py to later pins.
+PHX_133_PATHS = ("phoenix/api/routes/missions.py",)
+# PHX-136 (ADR-250 to ADR-254) intentionally changed the mission service
+# (quick commands match through the runner's Start-menu shortcut index); PHX-135
+# changed it too, so it moved to the PHX-135/136 merge pin (below).
+PHX_136_COMMIT = "0626017bb15ce15f1d9181b8f5f299582d704444"
+PHX_136_PATHS: tuple[str, ...] = ()
 # Microphone stall fix (2026-10-23, local review build) intentionally changed
 # voice/engines/sound.py: a busy event loop is no longer read as a dead
 # microphone; it stays pinned, at the fix commit.
@@ -2048,13 +2054,16 @@ PHX_REVIEW_PATHS = ("phoenix/agents/runtime.py",)  # two moved to PHX-135
 # each left its earlier pin and stays pinned, at the PHX-135 implementation
 # commit.
 PHX_135_COMMIT = "1db015a76d95e2ed40430ce3b7117af5e50fca26"
-PHX_135_PATHS = (
+PHX_135_PATHS = (  # api/missions.py moved to the PHX-135/136 merge pin
     "phoenix/agents/mission_events.py",
-    "phoenix/api/missions.py",
     "phoenix/api/routes/permissions.py",
     "phoenix/api/server.py",
     "phoenix/api/voice.py",
 )
+# api/missions.py carries both PHX-135 and PHX-136; pinned at the merge
+# resolution commit.
+PHX_135_136_COMMIT = "0000000000000000000000000000000000000000"
+PHX_135_136_PATHS = ("phoenix/api/missions.py",)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -2101,6 +2110,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_129_PATHS
         and path not in PHX_130_PATHS
         and path not in PHX_133_PATHS
+        and path not in PHX_136_PATHS
         and path not in PHX_MIC_PATHS
         and path not in PHX_131_PATHS
         and path not in PHX_132_PATHS
@@ -2108,6 +2118,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_134_PATHS
         and path not in PHX_REVIEW_PATHS
         and path not in PHX_135_PATHS
+        and path not in PHX_135_136_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2143,6 +2154,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_129_COMMIT, path) for path in PHX_129_PATHS]
     baselines += [(PHX_130_COMMIT, path) for path in PHX_130_PATHS]
     baselines += [(PHX_133_COMMIT, path) for path in PHX_133_PATHS]
+    baselines += [(PHX_136_COMMIT, path) for path in PHX_136_PATHS]
     baselines += [(PHX_MIC_COMMIT, path) for path in PHX_MIC_PATHS]
     baselines += [(PHX_131_COMMIT, path) for path in PHX_131_PATHS]
     baselines += [(PHX_132_COMMIT, path) for path in PHX_132_PATHS]
@@ -2150,6 +2162,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_134_COMMIT, path) for path in PHX_134_PATHS]
     baselines += [(PHX_REVIEW_COMMIT, path) for path in PHX_REVIEW_PATHS]
     baselines += [(PHX_135_COMMIT, path) for path in PHX_135_PATHS]
+    baselines += [(PHX_135_136_COMMIT, path) for path in PHX_135_136_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
