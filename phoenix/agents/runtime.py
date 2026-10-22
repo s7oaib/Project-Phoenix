@@ -74,6 +74,7 @@ yet, so every registered candidate is treated as resource eligible.
 """
 
 import asyncio
+import os
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -320,8 +321,31 @@ class ModelTierTable:
         return self.roles.get(agent_id, self.default)
 
 
-def default_tier_table() -> ModelTierTable:
-    """MASTER_SPEC BLAZE-6 tiers; T0 is always the last fallback."""
+# PHX-134 (ADR-240): the tier of AIZEN's plan and PHOENIX's step assignment.
+PLANNER_TIER_ENV = "PHOENIX_PLANNER_TIER"
+PLANNER_TIERS = ("9b", "4b")
+DEFAULT_PLANNER_TIER = "9b"
+
+
+def planner_tier() -> str:
+    """``PHOENIX_PLANNER_TIER``; unset or blank is the default. Any other value
+    is refused, never guessed (ADR-241)."""
+    value = os.environ.get(PLANNER_TIER_ENV, "").strip().lower()
+    if not value:
+        return DEFAULT_PLANNER_TIER
+    if value not in PLANNER_TIERS:
+        raise ValueError(
+            f"{PLANNER_TIER_ENV} must be one of {', '.join(PLANNER_TIERS)}"
+        )
+    return value
+
+
+def default_tier_table(planner: str | None = None) -> ModelTierTable:
+    """MASTER_SPEC BLAZE-6 tiers; T0 is always the last fallback.
+
+    ``planner`` (default ``planner_tier()``) sets only the ``strategist`` and
+    ``assignment`` candidates; LEVI's verifier keeps T2 (ADR-240).
+    """
 
     def refs(*models: str) -> tuple[ModelCandidateRef, ...]:
         return tuple(
@@ -329,15 +353,20 @@ def default_tier_table() -> ModelTierTable:
         )
 
     t0, t1, t2, code = "qwen3.5:2b", "qwen3.5:4b", "qwen3.5:9b", "qwen2.5-coder:7b"
+    tier = planner_tier() if planner is None else planner
+    if tier not in PLANNER_TIERS:
+        raise ValueError(f"planner tier must be one of {', '.join(PLANNER_TIERS)}")
+    plan = refs(t2, t1, t0) if tier == "9b" else refs(t1, t0)
     return ModelTierTable(
         roles=MappingProxyType(
             {
                 "phoenix": refs(t1, t0),
-                # PHX-047 (ADR-083): PHOENIX's step assignment runs on T2.
-                "assignment": refs(t2, t1, t0),
+                # PHX-047 (ADR-083): PHOENIX's step assignment runs on T2;
+                # PHX-134 (ADR-240) can move it and AIZEN's plan to T1.
+                "assignment": plan,
                 # PHX-105 (ADR-090): PHOENIX's request triage, thinking off.
                 TRIAGE_ROLE: refs(t1, t0),
-                "strategist": refs(t2, t1, t0),
+                "strategist": plan,
                 "verifier": refs(t2, t1, t0),
                 "build_engineer": refs(code, t2, t1, t0),
                 # PHX-119 (ADR-155): KAIDO's degraded reply runs on T0 only.
