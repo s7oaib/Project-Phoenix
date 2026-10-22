@@ -7042,3 +7042,29 @@ prompt additions for the owner.
 
 Consequences: no new capability, risk level or grant scope; only the choice
 between two P1 read tools for one path moves from the model to PHOENIX.
+
+## ADR-205 — Owner-approved demo reliability prompt text (phoenix-prompts-v8, phoenix-control-prompts-v2)
+
+Status: Accepted (approved by owner 2026-10-22)
+Date: 2026-10-22
+Ticket: PHX-127
+
+Context: PHX-126's live rehearsal traced demos 3 to 6 to model behaviour
+(class c) and recorded six prompt proposals for the owner. The owner approved
+proposals 2 to 6 verbatim and declined proposal 1.
+
+Decision: apply the approved text exactly, as `phoenix-prompts-v8`:
+`COMBINED_PLANNING_LINES["knowledge_rag"]` and `["documents"]` now tell
+uploaded files apart from workspace files; `RESEARCH_ANSWER_SYSTEM` (the
+research role that writes quotes) forbids quoting a source's title;
+`DOCUMENT_CAPABILITY_SYSTEM` tells the specialist to propose `create_document`
+from earlier step outputs for a create objective; `COMBINED_PLANNING_SYSTEM`
+tells the planner never to drop an explicitly requested action. The click
+sentence belongs to `CONTROL_SPECIALIST_SYSTEM`, which lives in its own set, so
+that set becomes `phoenix-control-prompts-v2` (a changed constant needs a new
+set version). Only the line wrapping around each insertion moved; every other
+constant is byte-identical and hash-pinned.
+
+Consequences: no permission, P-level, LEVI, tool or code-path change. A click
+is still a P4 action the user approves and a create is still P2; LEVI's
+written-file check (ADR-195) still backstops a missing create.
