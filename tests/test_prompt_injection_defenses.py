@@ -1916,6 +1916,11 @@ PHX_122_PATHS = (
     "apps/desktop/src/adapters/SetupViews.tsx",
     "apps/desktop/src/adapters/connected.css",
 )
+# PHX-124 (ADR-190) intentionally changed browser.py's handler registration
+# (closures instead of bound methods of the slotted session); it stays pinned
+# at the PHX-124 implementation commit (merge with a merge commit).
+PHX_124_COMMIT = "61e2b577a5dd42ae3b7bae930b848bb808d20b42"
+PHX_124_PATHS = ("phoenix/tools/browser.py",)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -1952,6 +1957,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_TRAIN_PATHS
         and path not in PHX_121_PATHS
         and path not in PHX_122_PATHS
+        and path not in PHX_124_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -1977,6 +1983,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_TRAIN_COMMIT, path) for path in PHX_TRAIN_PATHS]
     baselines += [(PHX_121_COMMIT, path) for path in PHX_121_PATHS]
     baselines += [(PHX_122_COMMIT, path) for path in PHX_122_PATHS]
+    baselines += [(PHX_124_COMMIT, path) for path in PHX_124_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

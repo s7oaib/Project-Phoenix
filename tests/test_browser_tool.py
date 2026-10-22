@@ -29,6 +29,7 @@ import playwright.sync_api as playwright_api
 import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from playwright._impl._impl_to_api_mapping import ImplToApiMapping
 from pydantic import ValidationError
 from sqlalchemy import Engine, Table, create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -76,6 +77,15 @@ OPERATIONS = tuple(x.value for x in BrowserOperation)
 RISKS = ("P2", "P2", "P1", "P1", "P4", "P4", "P2")
 BAD = (None, True, 1, 1.5, b"data", object(), "", "   ")
 _REAL_START = module._start_playwright
+
+
+def playwright_wrap(handler: Callable[..., None]) -> Callable[..., None]:
+    """Real Playwright handler wrapping, as every sync route/on registration does.
+
+    It caches the wrapper as an attribute on a bound method's instance, which a
+    slotted object rejects; plain fakes hid that live failure (PHX-124).
+    """
+    return ImplToApiMapping().wrap_handler(handler)
 
 
 def forbidden(*args: object, **kwargs: object) -> Never:
@@ -196,7 +206,7 @@ class FakeBrowser:
 
     def on(self, event: str, handler: Callable[..., None]) -> None:
         self.runtime.record("browser_on", event)
-        self.handlers[event] = handler
+        self.handlers[event] = playwright_wrap(handler)
 
     def new_context(self, **kwargs: object) -> FakeContext:
         self.runtime.record("new_context", **kwargs)
@@ -234,11 +244,11 @@ class FakeContext:
 
     def route(self, pattern: str, handler: Callable[..., None]) -> None:
         self.runtime.record("route", pattern)
-        self.guard = handler
+        self.guard = playwright_wrap(handler)
 
     def on(self, event: str, handler: Callable[..., None]) -> None:
         self.runtime.record("context_on", event)
-        self.handlers[event] = handler
+        self.handlers[event] = playwright_wrap(handler)
 
     def close(self) -> None:
         self.runtime.record("context_close")
@@ -251,7 +261,7 @@ class FakeProtocol:
 
     def on(self, event: str, handler: Callable[..., None]) -> None:
         self.runtime.record("protocol_on", event)
-        self.handlers[event] = handler
+        self.handlers[event] = playwright_wrap(handler)
 
     def send(self, method: str, parameters: dict[str, object]) -> None:
         self.runtime.record("protocol_send", method, parameters)
@@ -280,7 +290,7 @@ class FakePage:
 
     def on(self, event: str, handler: Callable[..., None]) -> None:
         self.runtime.record("page_on", event)
-        self.handlers[event] = handler
+        self.handlers[event] = playwright_wrap(handler)
 
     def goto(self, url: str, **kwargs: object) -> None:
         self.runtime.record("goto", url, **kwargs)
@@ -765,6 +775,15 @@ def test_startup_exact_and_explicit_cleanup(backend: FakeRuntime) -> None:
         execute(tool, call("session_close")).error_code
         is BrowserErrorCode.SESSION_NOT_FOUND
     )
+
+
+def test_slotted_bound_method_breaks_real_playwright_registration() -> None:
+    # The live PHX-124 failure shape: Playwright cannot cache its wrapper on a
+    # slotted instance, so _open must register closures, never bound methods.
+    session = object.__new__(module._Session)
+    with pytest.raises(AttributeError, match="_pw_impl_instance_route"):
+        playwright_wrap(session.route)
+    assert callable(playwright_wrap(lambda route: session.route(route)))
 
 
 @pytest.mark.parametrize(
