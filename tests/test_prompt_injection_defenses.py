@@ -2100,7 +2100,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     # PHX-108 (ADR-111) adds 0009_default_mission_path.
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0009_default_mission_path"]
+    ).get_heads() == ["0010_triage_rule"]
 
 
 def test_credential_signature_scan_new_sources() -> None:

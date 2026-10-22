@@ -133,7 +133,7 @@ export function readPermission(value: unknown): PendingPermission | undefined {
 export type MissionView = {
   missionId: string; conversationId: string; status: string;
   /** PHX-105: null until triage decides; triageOutcome says who decided. */
-  path: 'direct' | 'complex' | null; triageOutcome: 'decided' | 'fallback' | 'client' | null; failureCode: string | null;
+  path: 'direct' | 'complex' | null; triageOutcome: 'decided' | 'fallback' | 'client' | 'rule' | null; failureCode: string | null;
   rerunOf: string | null; rerunId: string | null; taskId: string | null; taskStates: readonly string[];
   permissionRequestId: string | null;
   /** Review M1: whether LEVI verified a completed mission's answer (undefined until completed). */
@@ -200,7 +200,7 @@ export function readMission(value: unknown): MissionView | undefined {
   return {
     missionId, conversationId, status, path, verification: verificationOf({ status, path, taskStates: states, kaido }),
     kaido, sources: status === 'completed' ? readSources(value.sources) : [],
-    triageOutcome: value.triage_outcome === 'decided' || value.triage_outcome === 'fallback' || value.triage_outcome === 'client' ? value.triage_outcome : null,
+    triageOutcome: value.triage_outcome === 'decided' || value.triage_outcome === 'fallback' || value.triage_outcome === 'client' || value.triage_outcome === 'rule' ? value.triage_outcome : null,
     failureCode: str(value.failure_code, 64) ?? null, rerunOf: id(value.rerun_of) ?? null,
     rerunId: id(value.rerun_id) ?? null, taskId: id(value.task_id) ?? null, taskStates: states,
     permissionRequestId: request,

@@ -79,7 +79,7 @@ from phoenix.tools.open_link import open_link_tool_definitions
 from phoenix.tools.web_research import web_research_tool_definitions
 from phoenix.tools.youtube import youtube_tool_definitions
 
-HEAD = "0009_default_mission_path"
+HEAD = "0010_triage_rule"
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = secrets.token_urlsafe(32)
 PORT = 48765  # Host-header identity for in-process clients; nothing binds it
