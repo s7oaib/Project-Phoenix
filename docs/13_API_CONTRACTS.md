@@ -25,7 +25,7 @@ default 50) and `offset` (0-1,000,000) and return
 | `POST /permissions/{request_id}/approve` | 202 | `{"duration": "session" \| "always"}` | Stores the user's grant (SESSION for this launch, or PERSISTENT until revoked), supersedes the waiting mission and queues the linked re-run: `{"request_id", "duration", "superseded_mission_id", "mission_id"}`. The tool, action, resource and actor come from the stored request; a body naming them is 422. 409 if not pending, and 409 `workspace_changed` if the resource is outside the active workspace root (deny it instead). |
 | `POST /permissions/{request_id}/deny` | 200 | none, or `{}` | The mission fails `permission_denied`. 409 if not pending. |
 | `GET /grants` | 200 | `include_inactive`, `limit`, `offset` | Grants this launch can use; `include_inactive=true` adds `expired` and `revoked`. Duration is `session` or `always`. |
-| `POST /grants/{grant_id}/revoke` | 200 | | Later missions no longer receive it; 409 if already revoked. |
+| `POST /grants/{grant_id}/revoke` | 200 | | Later missions no longer receive it; 409 if already revoked. Sets `revoked_at`; the grant row stays for audit. The desktop's Settings → Remembered permissions "Remove" uses it (PHX-129, ADR-217). |
 | `GET /conversations` | 200 | `limit`, `offset` | IDs and timestamps. |
 | `GET /conversations/{conversation_id}/messages` | 200 | `limit`, `offset` | The user's messages and PHOENIX's final answers. |
 | `DELETE /conversations/{conversation_id}` | 204 | | Deletes it with its missions and traces (cancels its running mission). |

@@ -7094,3 +7094,53 @@ rule; left for a follow-up.
 Rejected: trusting the model's choice of actions (it is what failed), a
 planner-declared action field (model-visible change, out of scope), and
 counting PHOENIX's teardown `browser.session_close` as closing a window.
+
+## ADR-215 — "Always allow" is offered for read-only (P1) requests only
+
+Status: Accepted (PHX-129 owner approval 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-129
+
+Context: every launch re-asks for the same read-only permissions. The backend has
+accepted PERSISTENT ("always") grants for P1 since PHX-102/104; the desktop only sent
+`{"duration": "session"}`.
+
+Decision: for a pending request whose backend-reported risk level is P1, the desktop
+offers "Allow this session" and "Always allow". P2 and P3 keep session approval and P4
+keeps one-time approval. The store refuses "always" for anything but a pending P1
+request; the backend stays authoritative and unchanged (P2 document, research and media
+"always" is 422; P3 control "always" is refused). No P-level, PermissionEngine decision,
+LEVI rule or prompt changes.
+
+The choice is rendered by `ConnectedApp`'s `ReadOnlyApprovals` above App's Permission
+Center, because App.tsx's Permission Center and its intent path are byte-frozen by the
+PHX-085/086/087 tests; the card's own "Approve this request" remains the session path.
+
+Known gap (not changed here): `control_grants` (ADR-151) still admits PERSISTENT P2
+control grants if a client sends them; the desktop never offers it.
+
+Consequences: fewer prompts for read-only work; a remembered grant matches only its exact
+tool, action and resource and lasts until removed (ADR-216).
+
+## ADR-216 — Remembered permissions are listed and removable in Settings
+
+Status: Accepted (PHX-129)
+Date: 2026-10-23
+Ticket: PHX-129
+
+Decision: Settings shows "Remembered permissions": active "always" grants from the
+existing `GET /grants` (tool, action, resource, granted at), each with "Remove". The
+existing backend routes suffice; no new backend route was added. Session grants are not
+listed.
+
+## ADR-217 — The native proxy admits grant revoke
+
+Status: Accepted (PHX-129)
+Date: 2026-10-23
+Ticket: PHX-129
+
+Decision: the proxy allowlist gains `POST /grants/{id}/revoke` (canonical UUID, no
+query, no body), 32 routes in total. Revoke sets `revoked_at` and never deletes the
+grant row, so the audit trail is kept. `DELETE /grants/{id}`, other methods, non-UUID
+segments and queries stay `route_not_allowed`. This supersedes the proxy comment that
+grant revoke was deliberately absent (no adapter used it until now).

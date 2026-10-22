@@ -247,6 +247,8 @@ export function toPermissionEntries(pending: readonly PendingPermission[], actor
       requestId: request.requestId, actorId, toolId: request.toolId, action: request.action, resource: request.resource,
       reason: request.riskLevel === 'P4'
         ? `Mission ${request.missionId} needs ${request.action} through ${request.toolId}. One-time approval (P4): Approve allows this exact action once and queues the linked re-run; no grant is stored, so PHOENIX asks again next time. Deny fails the mission.`
+        : request.riskLevel === 'P1'
+        ? `Mission ${request.missionId} needs ${request.action} through ${request.toolId}. Approve (or Allow this session above) stores a grant for this launch; Always allow, above, remembers it until you remove it in Settings. Either queues the linked re-run; Deny fails the mission.`
         : `Mission ${request.missionId} needs ${request.action} through ${request.toolId}. Approve stores a grant for this launch (session) and queues the linked re-run; Deny fails the mission.`,
       requestedAt: request.requestedAt,
     };
@@ -377,6 +379,25 @@ export function readSettings(body: unknown): SettingsView | undefined {
     defaultTier: refs(body.default_tier),
     retentionDays: count(body.retention_days),
   };
+}
+
+/** PHX-129 (ADR-215): a remembered ("always") grant the user can remove in Settings. */
+export type GrantView = { grantId: string; toolId: string; action: string; resource: string; issuedAt: string };
+export type GrantChoice = 'session' | 'always';
+
+/** Active "always" grants only; session grants end with the launch and are not listed. */
+export function readGrants(body: unknown): GrantView[] {
+  const found: GrantView[] = [];
+  for (const entry of items(body).slice(0, 200)) {
+    if (!isObject(entry) || entry.duration !== 'always' || entry.status !== 'active') continue;
+    const grantId = id(entry.grant_id);
+    const toolId = str(entry.tool_id, 128);
+    const action = str(entry.action, 256);
+    const resource = str(entry.resource, 512);
+    const issuedAt = utc(entry.issued_at);
+    if (grantId && toolId && action && resource && issuedAt) found.push({ grantId, toolId, action, resource, issuedAt });
+  }
+  return found;
 }
 
 export const missionPathText: Readonly<Record<MissionPath, string>> = {
@@ -701,6 +722,9 @@ export type ConnectionView = {
   searchHits: SearchHitView[] | undefined;
   knowledgeBusy: boolean;
   knowledgeMessage: string;
+  // PHX-129
+  grants: GrantView[] | undefined;
+  grantsMessage: string;
 };
 export type PortsView = {
   chatPort: ChatPort; taskPort: TaskGraphPort; agentPort: AgentPort; permissionPort: PermissionPort;
@@ -708,8 +732,8 @@ export type PortsView = {
 };
 
 type Activity = { state: AgentStatus['state']; missionId: string; currentTask?: string };
-type Refresh = 'conversation' | 'mission' | 'permissions' | 'models' | 'settings' | 'onboarding' | 'capabilities' | 'metrics' | 'ready' | 'voice' | 'knowledge';
-const EVERYTHING: readonly Refresh[] = ['conversation', 'mission', 'permissions', 'models', 'settings', 'onboarding', 'capabilities', 'metrics', 'ready', 'voice', 'knowledge'];
+type Refresh = 'conversation' | 'mission' | 'permissions' | 'models' | 'settings' | 'onboarding' | 'capabilities' | 'metrics' | 'ready' | 'voice' | 'knowledge' | 'grants';
+const EVERYTHING: readonly Refresh[] = ['conversation', 'mission', 'permissions', 'models', 'settings', 'onboarding', 'capabilities', 'metrics', 'ready', 'voice', 'knowledge', 'grants'];
 
 export class PhoenixStore {
   private backend: BackendState = { state: 'starting' };
@@ -751,6 +775,8 @@ export class PhoenixStore {
   private searchHits: SearchHitView[] | undefined;
   private knowledgeBusy = false;
   private knowledgeMessage = '';
+  private grants: GrantView[] | undefined;
+  private grantsMessage = '';
   private due = new Set<Refresh>();
   private timer: unknown;
   private poller: unknown;
@@ -978,6 +1004,7 @@ export class PhoenixStore {
       due.has('ready') ? this.loadReady() : undefined,
       due.has('voice') ? this.loadVoice() : undefined,
       due.has('knowledge') ? this.loadKnowledge() : undefined,
+      due.has('grants') ? this.loadGrants() : undefined,
     ].map((task) => task?.catch(() => undefined)));
     if (due.has('conversation')) await this.loadConversation().catch(() => undefined);
     this.changed();
@@ -998,6 +1025,20 @@ export class PhoenixStore {
     // The saved default becomes this launch's mission path once, when it is first read.
     if (settings && !this.settings) this.path = settings.defaultMissionPath;
     if (settings) this.settings = settings;
+  }
+
+  private async loadGrants(): Promise<void> {
+    this.grants = readGrants(await this.get('/grants?limit=200'));
+  }
+
+  /** PHX-129: the user's "Remove" in Settings. Revoking sets revoked_at; the audit row stays. */
+  async revokeGrant(grantId: string): Promise<void> {
+    if (!UUID.test(grantId)) return;
+    const result = await this.transport.request('POST', `/grants/${grantId}/revoke`).catch(() => ({ status: 0, body: undefined }));
+    this.grantsMessage = result.status === 200 ? 'Removed. PHOENIX will ask again next time.'
+      : result.status === 409 ? 'That permission was already removed.' : `The permission was not removed (${errorCode(result.body)}).`;
+    this.schedule('grants');
+    this.changed();
   }
 
   private async loadOnboarding(): Promise<void> {
@@ -1145,10 +1186,12 @@ export class PhoenixStore {
     this.changed();
   }
 
-  async submitDecision(requestId: string, decision: DecisionIntent): Promise<void> {
-    if (!UUID.test(requestId) || (decision !== 'approved' && decision !== 'denied')) throw new ApiError(0, 'invalid_request');
+  async submitDecision(requestId: string, decision: DecisionIntent, duration: GrantChoice = 'session'): Promise<void> {
+    if (!UUID.test(requestId) || (decision !== 'approved' && decision !== 'denied') || (duration !== 'session' && duration !== 'always')) throw new ApiError(0, 'invalid_request');
+    // PHX-129 (ADR-215): "always" is offered for a P1 request only; the backend still refuses it for P2+.
+    if (duration === 'always' && (decision !== 'approved' || this.pending.find((entry) => entry.requestId === requestId)?.riskLevel !== 'P1')) throw new ApiError(0, 'invalid_request');
     const result = decision === 'approved'
-      ? await this.transport.request('POST', `/permissions/${requestId}/approve`, { duration: 'session' })
+      ? await this.transport.request('POST', `/permissions/${requestId}/approve`, { duration })
       : await this.transport.request('POST', `/permissions/${requestId}/deny`, {});
     const expected = decision === 'approved' ? 202 : 200;
     if (result.status !== expected) throw new ApiError(result.status, errorCode(result.body));
@@ -1158,7 +1201,7 @@ export class PhoenixStore {
       if (rerun && (!this.activeMissionId || superseded === this.activeMissionId)) this.activeMissionId = rerun;
     }
     this.pending = this.pending.filter((entry) => entry.requestId !== requestId);
-    this.schedule('permissions', 'mission', 'conversation');
+    this.schedule('permissions', 'mission', 'conversation', ...(duration === 'always' ? ['grants' as const] : []));
     this.changed();
   }
 
@@ -1301,6 +1344,7 @@ export class PhoenixStore {
         approvals: [...this.pending], kaido: this.kaido, voice: this.voice, voiceInterrupted: this.voiceInterrupted, voiceBusy: this.voiceBusy,
         voiceMessage: this.voiceMessage, documents: this.documents, memories: this.memories, searchHits: this.searchHits,
         knowledgeBusy: this.knowledgeBusy, knowledgeMessage: this.knowledgeMessage,
+        grants: this.grants, grantsMessage: this.grantsMessage,
       },
     };
   }
