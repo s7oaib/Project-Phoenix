@@ -129,6 +129,17 @@ behaviour.
     Caveat: those traces predate `MissionTrace.recoveries`, so fallbacks were
     detected from the task states (a completed mission whose COMPLEX task
     ended `failed`).
+  - Re-run on `main` (2026-10-22, BLAZE-6, `phoenix-prompts-v6`, triage, 16
+    missions, one measured run; summary in
+    `docs/release/RELEASE_EVIDENCE_2026-10-22.md`):
+
+    | Accuracy | Success excl. fallbacks | Latency median (min–max) | DIRECT | COMPLEX | MAHORAGA |
+    | --- | --- | --- | --- | --- | --- |
+    | 64% (9/14 scored) | 88% (14/16, 0 fallbacks) | 1.09 s (0.85–11.6 s) | 14/14 completed, 9/12 scored pass, unverified by design | 0/2 completed | 2 of 3 actions recovered (67%) |
+
+    Failure codes: one `responder_output/not_json`, one `verification_failed`.
+    The traces carry `MissionTrace.recoveries`, so `recovery_success` is
+    MEASURED for this run.
 - Configuration (3) runs with `--config phoenix-adaptive-deep`
   (`scripts/fyp_adaptive_deep.py`, PHX-116, ADR-121), only after the deep tier
   passes its gate.
@@ -219,6 +230,13 @@ fictional and local only.
     deterministic floor: LEVI's code checks catch every forgery and nothing
     else. That is harness validation, not a FYP number. The live run sends
     LEVI's turns to Ollama.
+  - Live result (2026-10-22, BLAZE-6, `phoenix-prompts-v6`): catch rate 95%
+    (19 caught, 1 escaped, 0 inconclusive of 20 faults); deterministic checks
+    5/5, model verdicts 14/15. By fault: wrong answer 7/7, ungrounded claim
+    5/5, forged tool evidence 3/3, forged verdict 2/2, injected tool evidence
+    2/3. False rejections: 20% (1 of 5 controls). The same run measured 6
+    permission prompts over 8 intervention missions (0.75 per mission, no
+    excess over the minimum).
   - Scoring:
     - CAUGHT: the mission fails `verification_failed` with a FAILED verdict.
     - ESCAPED: it completes with every verdict PASSED.
