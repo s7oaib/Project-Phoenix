@@ -175,6 +175,7 @@ from phoenix.agents.planner import (
     PlanningRequest,
     PlanningResponder,
 )
+from phoenix.agents.quick_commands import QuickCallRecord
 from phoenix.agents.recovery import (
     MahoragaRecovery,
     MahoragaRecoveryError,
@@ -486,6 +487,9 @@ class MissionTrace(_Value):
     capability_calls: tuple[CapabilityCallRecord, ...] = ()
     # PHX-112 (ADR-150): computer-control actions, IDs/codes/hashes only.
     control_calls: tuple[ControlCallRecord, ...] = ()
+    # PHX-130 (ADR-220): a quick command's one link opening; such a mission
+    # never triages, plans or calls a model (path None, label "quick").
+    quick_calls: tuple[QuickCallRecord, ...] = ()
 
     @model_validator(mode="after")
     def consistent_triage(self) -> Self:

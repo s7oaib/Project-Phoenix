@@ -7094,3 +7094,83 @@ rule; left for a follow-up.
 Rejected: trusting the model's choice of actions (it is what failed), a
 planner-declared action field (model-visible change, out of scope), and
 counting PHOENIX's teardown `browser.session_close` as closing a window.
+
+## ADR-220 — Quick commands open allowlisted links before triage, as P1
+
+Status: Accepted (PHX-130 owner decisions 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-130
+
+Context: the owner wants "open browser", "open youtube", "open google",
+"search youtube for X" and "search google for X", typed or spoken, to act in
+about a second. The full pipeline (triage, then a DIRECT or COMPLEX plan) costs
+model generations and, for media, a permissioned YouTube API flow.
+
+Decision: `MissionService` checks each claimed mission's text with a strict,
+deterministic router (`phoenix.agents.quick_commands`) before the runtime runs;
+chat (`POST /chat`) and voice (`MissionVoiceResponder`) both submit through
+`MissionService.submit`, so this is the one shared entry. A match makes one
+`desktop.open_link` call and no model call; anything else runs unchanged.
+Patterns are anchored full matches after polite prefixes ("please", "can you",
+"Phoenix,", "rise, phoenix") are stripped. URLs come only from fixed templates
+(`https://www.google.com/`, `https://www.youtube.com/`, their search pages);
+the query is capped at 200 characters, refused if it holds a URL scheme,
+"www." or shell/markup punctuation (then it is not a quick command), and
+URL-encoded with `quote_plus`, so no text can choose the host.
+
+`desktop.open_link` is registered in ToolRegistry and decided by
+PermissionEngine (INV-004). It is **P1**: it only hands an https URL on an
+exact two-host allowlist (`www.google.com`, `www.youtube.com`; no user info,
+port or fragment, re-checked by the tool) to the OS default browser, via
+`os.startfile` on Windows (no shell, no arguments) and `webbrowser.open`
+elsewhere. PHOENIX does not drive, read or close the page (owner decision), so
+the effect is the same as the user clicking a bookmark: no data leaves except
+the search text the user asked to search, and nothing on the machine changes.
+P2+ would overstate it; P0 would skip the user's first consent.
+
+Permission scope is fixed (actor `phoenix`, action `open_link`, resource
+`allowlist:www.google.com,www.youtube.com`, a fixed reason), so one grant
+covers every quick command. The first use waits for permission; the existing
+approve route accepts "session" or "always" for it (owner decision: "Always
+allow" — a PERSISTENT P1 grant, revocable under grants), and then it never
+asks again. The route's workspace check does not apply (an allowlist, not a
+path). Quick grants are kept out of the runtime's grants (`_usable` drops
+them), and the runtime never sees this tool.
+
+The mission completes with a fixed answer ("Opened YouTube search for X."),
+which voice speaks through the existing path; its trace has no path or triage
+(`quick_calls` holds the call: IDs, closed values, a query hash), the detail
+API labels it `mission_label: "quick"`, and tool/permission events use the
+PHX-103 allowlist (tool `desktop.open_link`, operation `open_link`). P1 writes
+no durable audit row (INV-007 covers P3/P4), like the other P1 tools.
+Rejected: a new `quick` path value (needs a migration and changes the triage
+contract), arbitrary URL opening, and driving the page with Playwright.
+
+## ADR-221 — LEVI verifies a quick command deterministically
+
+Status: Accepted (PHX-130)
+Date: 2026-10-23
+Ticket: PHX-130
+
+Decision: a quick command's answer is reported only when its one call was
+ALLOWED, attempted and returned `success` (`QuickCallRecord.verified`). No
+LEVI model is consulted: there is no generated text to check, and the answer
+is a fixed template naming the user's own query. A launch error fails the
+mission `tool_failed` (INV-008, INV-021); no retry.
+
+## ADR-222 — Warm the chat model at startup and keep it loaded
+
+Status: Accepted (PHX-130 owner goal: fast chat answers)
+Date: 2026-10-23
+Ticket: PHX-130
+
+Decision: when the providers include Ollama, the backend starts a background
+task after the mission service starts: if Ollama is healthy, it runs one
+1-token generation on the first registered triage model (`qwen3.5:4b`, which
+also serves PHOENIX's DIRECT answer) on the thinking-off provider. It never
+blocks startup or a mission, and any failure is ignored (the first mission
+loads the model as before). Both Ollama providers send `keep_alive: "30m"`
+(new optional `OllamaProvider(keep_alive=...)`; unset sends nothing, as
+before), so the model stays loaded between missions instead of Ollama's 5
+minute default. INV-023: the warm-up is one tiny generation, and Ollama runs
+requests for one loaded model in order.
