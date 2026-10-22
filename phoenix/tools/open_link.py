@@ -7,7 +7,8 @@ template hosts; PHX-133 added four) with no user info, port or fragment;
 anything else is refused before PermissionEngine is asked. PermissionEngine
 decides every call (P1, ADR-220); only ALLOWED launches. The launch is
 ``os.startfile`` on Windows (no shell, no arguments) and ``webbrowser.open``
-elsewhere. P1 writes no durable audit row (INV-007 covers P3/P4); the mission trace records the call.
+elsewhere. P1 writes no durable audit row (INV-007 covers P3/P4); the mission
+trace records the call.
 """
 
 import os
