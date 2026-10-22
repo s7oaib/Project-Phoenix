@@ -7224,3 +7224,38 @@ loads the model as before). Both Ollama providers send `keep_alive: "30m"`
 before), so the model stays loaded between missions instead of Ollama's 5
 minute default. INV-023: the warm-up is one tiny generation, and Ollama runs
 requests for one loaded model in order.
+
+## ADR-225 — A deterministic pre-triage rule sends clearly simple chat DIRECT
+
+Ticket: PHX-131
+
+Decision: before the triage model, `rule_decides_direct` (phoenix/agents/
+triage.py) decides DIRECT with no generation for a clearly simple request;
+everything else goes to the unchanged model triage. It only ever chooses
+DIRECT, grants nothing (INV-003) and DIRECT runs with all its checks
+(INV-001). Saves one 4B generation (~2 s) per simple chat. No prompt text
+changes.
+
+## ADR-226 — The rule is conservative by construction
+
+Ticket: PHX-131
+
+Decision: DIRECT only if all hold: at most 25 words and 200 characters;
+plain prose characters only (no `/ \ { } < > @ # _` or newline); no dotted
+name (`.` followed by a non-space: files, URLs, versions); no numbered item
+or "after that"; at most one `?`; and no blocked word (files, workspace,
+upload, memory, web/research/search, browser/window/desktop, documents,
+create/save/read/open/write/edit, click/type/run/command, plan/compare/
+summarize/steps, time-bound words, my/our, then/next/finally, ...). On
+routing-v1 it decides 19 of 60 cases, all labelled `direct`; a unit test
+asserts it never decides a `complex` case.
+
+## ADR-227 — `triage_outcome` gains `rule`
+
+Ticket: PHX-131
+
+Decision: `TriageOutcome.RULE = "rule"` in the trace, agent events, mission
+summary/detail and desktop ("simple request"). Migration `0010_triage_rule`
+widens `ck_missions_triage_outcome` and adds `ck_missions_triage_rule`
+(`rule` implies `direct`); MissionTrace validates the same. Downgrade maps
+`rule` to `decided`. Run-again reuses `rule` like any other decision.

@@ -101,7 +101,8 @@ class MissionSummary(Contract):
     status: MissionStatus
     # PHX-105: null until triage decides; triage_outcome says who decided.
     path: Literal["direct", "complex"] | None
-    triage_outcome: Literal["decided", "fallback", "client"] | None
+    # PHX-131: "rule" is the pre-triage rule (always direct).
+    triage_outcome: Literal["decided", "fallback", "client", "rule"] | None
     failure_code: str | None
     responder_error: str | None
     rerun_of: str | None

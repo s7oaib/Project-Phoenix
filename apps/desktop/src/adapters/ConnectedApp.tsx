@@ -45,7 +45,7 @@ export function KaidoBanner({ connection }: { connection: Pick<ConnectionView, '
   return <p className="kaido-banner" role="alert">Degraded mode (KAIDO) — answers unverified.{trigger} PHOENIX gives short, unchecked answers and runs no tools until it recovers.</p>;
 }
 const triageText: Readonly<Record<string, string>> = {
-  decided: 'PHOENIX decided', fallback: 'triage fallback', client: 'your override',
+  decided: 'PHOENIX decided', fallback: 'triage fallback', client: 'your override', rule: 'simple request',
 };
 /** PHX-123 (ADR-185): PHOENIX refuses to type secret-looking text; the owner types it. */
 const failureText: Readonly<Record<string, string>> = {

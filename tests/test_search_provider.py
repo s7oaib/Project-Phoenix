@@ -972,7 +972,7 @@ def test_all_prior_runtime_tests_schema_desktop_dependencies_unchanged() -> None
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0009_default_mission_path"]
+    ).get_heads() == ["0010_triage_rule"]
     assert len(list((ROOT / "alembic/versions").glob("000*.py"))) == 9
 
 

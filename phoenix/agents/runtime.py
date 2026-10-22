@@ -259,6 +259,7 @@ from phoenix.agents.triage import (
     TriageFallbackReason,
     TriageOutcome,
     fallback_reason,
+    rule_decides_direct,
 )
 from phoenix.agents.verifier import (
     LeviVerifier,
@@ -504,6 +505,11 @@ class MissionTrace(_Value):
             and self.path != OrchestrationPath.COMPLEX
         ):
             raise ValueError("A triage fallback takes the complex path")
+        if (
+            self.triage_outcome == TriageOutcome.RULE
+            and self.path != OrchestrationPath.DIRECT
+        ):
+            raise ValueError("The pre-triage rule only takes the direct path")
         if any(record.direct_fallback for record in self.recoveries) and (
             self.path != OrchestrationPath.COMPLEX or TaskState.COMPLETED in self.states
         ):
@@ -1479,6 +1485,14 @@ class PhoenixRuntime:
         trace and published as agent.failed (role triage) with the reason.
         """
         async with _agent_phase(events, "phoenix", TRIAGE_ROLE) as phase:
+            # PHX-131 (ADR-225): a clearly simple request goes DIRECT by rule,
+            # with no generation; anything else is triaged by the model.
+            if rule_decides_direct(request.text):
+                evidence.triage_outcome = TriageOutcome.RULE
+                evidence.path = OrchestrationPath.DIRECT
+                phase.result["triage_outcome"] = TriageOutcome.RULE.value
+                phase.result["path"] = OrchestrationPath.DIRECT.value
+                return OrchestrationPath.DIRECT
             try:
                 async with asyncio.timeout(self._limits.triage_timeout_seconds):
                     health = await self._health(evidence)

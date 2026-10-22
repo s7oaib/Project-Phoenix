@@ -75,8 +75,8 @@ class RequestStatus(StrEnum):
 MissionPath = Literal["direct", "complex"]
 # Mirrors phoenix.agents.triage.TriageOutcome (tests assert equality); the
 # persistence layer imports no agents module.
-TriageDecider = Literal["decided", "fallback", "client"]
-TRIAGE_OUTCOMES: tuple[TriageDecider, ...] = ("decided", "fallback", "client")
+TriageDecider = Literal["decided", "fallback", "client", "rule"]
+TRIAGE_OUTCOMES: tuple[TriageDecider, ...] = ("decided", "fallback", "client", "rule")
 
 # Failure codes the store and service add to the runtime's MissionFailureCode.
 PERMISSION_DENIED = "permission_denied"
@@ -142,8 +142,9 @@ class MissionRow(Base):
         CheckConstraint("path IN ('direct', 'complex')", name="ck_missions_path"),
         # PHX-105 (ADR-090): a NULL path is still to be triaged; once a path is
         # set, triage_outcome records who decided it.
+        # PHX-131 (ADR-227, migration 0010): 'rule' is the pre-triage rule.
         CheckConstraint(
-            "triage_outcome IN ('decided', 'fallback', 'client')",
+            "triage_outcome IN ('decided', 'fallback', 'client', 'rule')",
             name="ck_missions_triage_outcome",
         ),
         CheckConstraint(
@@ -153,6 +154,10 @@ class MissionRow(Base):
         CheckConstraint(
             "triage_outcome <> 'fallback' OR path = 'complex'",
             name="ck_missions_triage_fallback",
+        ),
+        CheckConstraint(
+            "triage_outcome <> 'rule' OR path = 'direct'",
+            name="ck_missions_triage_rule",
         ),
         CheckConstraint(
             "status IN ('queued', 'running', 'completed', 'failed', 'cancelled', "
