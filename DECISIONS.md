@@ -6972,3 +6972,28 @@ mission). A second disallowed domain fails the mission with the original
 accepted, so the allowlist is not weakened. The recovery event allowlist
 follows `RETRYABLE_OUTPUT` and now admits `disallowed_domain`. `OVERSIZED`,
 `INVALID_TEXT` and `UNKNOWN_STEP` stay final.
+
+## ADR-200 — A read_document proposal for a plain-text file becomes PHOENIX's own read_text
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-126
+
+Context: the live demo rehearsal on main 702a92f failed demos 1, 2 and 8 with
+`tool_rejected` and no permission prompt. Trace capture showed the desktop
+composition routes documents steps to `CapabilityStepRunner`, which offers both
+`read_text` (filesystem) and `read_document`; the live model proposed
+`read_document` for `.txt` files, and `DocumentFileCall` reads only PDF, DOCX,
+Markdown and CSV, so PHOENIX rejected the proposal before PermissionEngine.
+
+Decision: when the filesystem tool is composed and a `read_document` proposal
+names a path whose extension is not in `READ_EXTENSIONS`, PHOENIX builds its
+own P1 `filesystem.read_text` call for the same relative path, exactly as for a
+`read_text` proposal. PermissionEngine decides; the user approves the
+`filesystem.read_text` request; actor, reason, risk, grants and LEVI's tool
+evidence check are those of PHX-046. Without the filesystem tool the proposal
+is still rejected. Prompt text is unchanged; the ticket records the proposed
+prompt additions for the owner.
+
+Consequences: no new capability, risk level or grant scope; only the choice
+between two P1 read tools for one path moves from the model to PHOENIX.

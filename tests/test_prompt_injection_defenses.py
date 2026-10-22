@@ -1952,11 +1952,16 @@ PHX_123_124_PATHS = ("phoenix/tools/browser.py",)
 # commit stays reachable).
 PHX_125A_COMMIT = "c987efbb50a11bfee98da1c2b5eaabe0e4ed5317"
 PHX_125A_PATHS = (
-    "phoenix/agents/capability_steps.py",
     "phoenix/agents/mission_recovery.py",
     "phoenix/agents/responders.py",
     "phoenix/agents/runtime.py",
 )
+# PHX-126 (ADR-200) intentionally changed capability_steps.py (a read_document
+# proposal for a plain-text file becomes PHOENIX's own read_text); it left the
+# PHX-125a block and stays pinned at the PHX-126 implementation commit (the PR
+# must merge with a merge commit so this commit stays reachable).
+PHX_126_COMMIT = "f67207033a84113b8d8fce8d0bcfe1b71f4c408c"
+PHX_126_PATHS = ("phoenix/agents/capability_steps.py",)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -1997,6 +2002,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_124_PATHS
         and path not in PHX_123_124_PATHS
         and path not in PHX_125A_PATHS
+        and path not in PHX_126_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2026,6 +2032,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_124_COMMIT, path) for path in PHX_124_PATHS]
     baselines += [(PHX_123_124_COMMIT, path) for path in PHX_123_124_PATHS]
     baselines += [(PHX_125A_COMMIT, path) for path in PHX_125A_PATHS]
+    baselines += [(PHX_126_COMMIT, path) for path in PHX_126_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
