@@ -1871,15 +1871,23 @@ def test_p3_control_grants_last_for_the_session_only(rig: Rig) -> None:
 
 
 # The draft texts the owner reviews in tickets/PHX-112-computer-control.md
-# ("Owner approval needed"); any change needs a new review.
+# ("Owner approval needed"); any change needs a new review. PHX-127 (ADR-205,
+# v2, approved by the owner 2026-10-22) adds one click sentence to
+# CONTROL_SPECIALIST_SYSTEM only.
+CONTROL_CLICK_SENTENCE = (
+    "When the objective asks to click a link, propose navigate and then click"
+    ' with a selector such as "a"; PHOENIX asks the user before any click.'
+)
+# The v1 CONTROL_SPECIALIST_SYSTEM with line breaks flattened to single spaces.
+CONTROL_SPECIALIST_V1_FLAT_SHA256 = "03d669f7bce8223d3199a5b65a9fbcec"
 CONTROL_PROMPT_SHA256 = {
     "CONTROL_ANSWER_SYSTEM": "c55ce0e3e0247d8d79e7d6920847c3aa",
     "CONTROL_ANSWER_TASK": "31166deedec2e119d961bab3443dc621",
     "CONTROL_CANDIDATE_TASK": "2830fab9c04feae3e60ddcd47490adb4",
     "CONTROL_DOMAIN_DESCRIPTION": "5f72e5536e2c7f9fabd1e4e99b8e88ad",
     "CONTROL_PLANNING_SYSTEM": "d696a0d84e25f614a6c67da04203e952",
-    "CONTROL_PROMPT_SET_VERSION": "4ef69a6497d364f56d77546cf2db05cb",
-    "CONTROL_SPECIALIST_SYSTEM": "1819a0157188a6e6094f793cb987f4fe",
+    "CONTROL_PROMPT_SET_VERSION": "be2629bfcb87bcda7ee5d3b27aec0bee",
+    "CONTROL_SPECIALIST_SYSTEM": "74326666207e495e51cbc3a129f6cfc8",
     "CONTROL_STEP_COMPLETION_RULE": "200955a655929636695448daf9606519",
     "CONTROL_STEP_EXPECTED_OUTPUT": "191c166d72ed62f7e92aa8cc1a009712",
     "CONTROL_TOOL_TASK": "fb162545aeb8760b480e4743cfefd9a2",
@@ -1888,7 +1896,7 @@ CONTROL_PROMPT_SHA256 = {
 
 
 def test_approved_control_prompts_are_separate_and_role_marked() -> None:
-    assert control_prompts.CONTROL_PROMPT_SET_VERSION == "phoenix-control-prompts-v1"
+    assert control_prompts.CONTROL_PROMPT_SET_VERSION == "phoenix-control-prompts-v2"
     roles = {
         "CONTROL_PLANNING_SYSTEM": "planner",
         "CONTROL_SPECIALIST_SYSTEM": "control_specialist",
@@ -1910,7 +1918,7 @@ def test_approved_control_prompts_are_separate_and_role_marked() -> None:
     # The approved prompt set is untouched by PHX-112 (since the 2026-10-21
     # release train it is PHX-120's v5, and since PHX-121 v6 (v5 plus the
     # combined planner), hash-pinned in test_phoenix_runtime.py).
-    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v7"
+    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v8"
     assert "computer_control" not in prompts.DOMAIN_DESCRIPTIONS
     current = {
         name: sha256(value.encode("utf-8")).hexdigest()[:32]
@@ -1918,6 +1926,29 @@ def test_approved_control_prompts_are_separate_and_role_marked() -> None:
         if name.isupper() and isinstance(value, str)
     }
     assert current == CONTROL_PROMPT_SHA256
+
+
+def test_control_v2_click_sentence_renders_only_in_the_specialist() -> None:
+    def flat(text: str) -> str:
+        return " ".join(text.split())
+
+    specialist = flat(control_prompts.CONTROL_SPECIALIST_SYSTEM.format(max_actions=4))
+    assert specialist.count(CONTROL_CLICK_SENTENCE) == 1
+    v1 = flat(control_prompts.CONTROL_SPECIALIST_SYSTEM).replace(
+        " " + CONTROL_CLICK_SENTENCE, ""
+    )
+    assert sha256(v1.encode("utf-8")).hexdigest()[:32] == (
+        CONTROL_SPECIALIST_V1_FLAT_SHA256
+    )
+    others = [
+        value
+        for module in (control_prompts, prompts)
+        for name, value in vars(module).items()
+        if name.isupper()
+        and isinstance(value, str)
+        and name != "CONTROL_SPECIALIST_SYSTEM"
+    ]
+    assert all("click a link" not in flat(value) for value in others)
 
 
 def test_control_module_stays_provider_neutral() -> None:

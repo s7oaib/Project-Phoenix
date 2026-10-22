@@ -1,7 +1,9 @@
 """PHX-112 computer-control prompt texts, approved by the owner (2026-10-21).
 
 The owner reviewed these texts in tickets/PHX-112-computer-control.md and
-approved them unchanged as ``phoenix-control-prompts-v1`` (ADR-152). They live
+approved them unchanged as ``phoenix-control-prompts-v1`` (ADR-152);
+``phoenix-control-prompts-v2`` (PHX-127, ADR-205; approved by the owner
+2026-10-22) adds one click sentence to CONTROL_SPECIALIST_SYSTEM only. They live
 apart from prompts.py so the approved phoenix-prompts set stays byte-identical;
 they are used only by a PhoenixRuntime built with a ControlStepRunner, which the
 backend composition root now builds.
@@ -12,7 +14,7 @@ however these prompts are phrased: a model can only propose actions; PHOENIX,
 ToolRegistry and PermissionEngine decide, and the user approves (INV-003).
 """
 
-CONTROL_PROMPT_SET_VERSION = "phoenix-control-prompts-v1"
+CONTROL_PROMPT_SET_VERSION = "phoenix-control-prompts-v2"
 
 # Replaces PLANNING_SYSTEM only when computer-control steps are enabled.
 CONTROL_PLANNING_SYSTEM = """PHOENIX ROLE: planner
@@ -62,7 +64,9 @@ actions that PHOENIX may run, in order, for this step. Each action is one object
   "query": "what to look for"}}
 - {{"tool": "terminal", "operation": "run", "profile_id": "...", "arguments": []}}
 PHOENIX opens its own browser before the first browser action and closes it
-after the last; browser actions after "navigate" act on that page. A control
+after the last; browser actions after "navigate" act on that page. When the
+objective asks to click a link, propose navigate and then click with a selector
+such as "a"; PHOENIX asks the user before any click. A control
 needs "automation_id" or "name" (or both). "window_title" is the window's exact
 title. PHOENIX and the user decide whether each action runs; do not claim or
 grant any permission or approval.

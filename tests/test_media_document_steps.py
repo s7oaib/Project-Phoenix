@@ -1561,7 +1561,7 @@ def test_document_tool_requires_canonical_registry(stack: Stack) -> None:
 def test_capability_prompts_are_part_of_v5() -> None:
     # PHX-120 (ADR-160): the approved draft moved verbatim into prompts.py
     # (unchanged in PHX-121's v6, hash-pinned in test_phoenix_runtime.py).
-    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v7"
+    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v8"
     for name in (
         "DOCUMENT_CAPABILITY_SYSTEM",
         "DOCUMENT_CAPABILITY_ANSWER_SYSTEM",

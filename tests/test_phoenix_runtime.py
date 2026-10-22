@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from phoenix.agents import prompts
 from phoenix.agents import runtime as runtime_module
+from phoenix.agents.combined_planning import capability_lines
 from phoenix.agents.orchestrator import (
     CancellationStatus,
     OrchestrationPath,
@@ -712,7 +713,7 @@ def test_assignment_without_its_own_tier_row_uses_the_phoenix_row() -> None:
 def test_prompt_set_is_versioned_with_role_markers() -> None:
     # PHX-121 (ADR-166): v6 adds the combined planner, which keeps the planner
     # marker as another alternative to PLANNING_SYSTEM.
-    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v7"
+    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v8"
     assert prompts.COMBINED_PLANNING_SYSTEM.splitlines()[0] == "PHOENIX ROLE: planner"
     systems = (
         prompts.KNOWLEDGE_ANSWER_SYSTEM,
@@ -951,6 +952,87 @@ V7_PROMPT_SHA256 = {
 }
 V7_CHANGED_SHA256 = {"ASSIGNMENT_SYSTEM": "1ff0bd273d2dced45caabe5ea77c729a"}
 
+# PHX-127 (ADR-205; approved by the owner 2026-10-22): phoenix-prompts-v8 adds
+# one sentence to each of three texts and rewrites two planner lines. Every
+# other v7 constant is pinned above and unchanged; any change needs a new prompt
+# set version.
+V8_SENTENCES = {
+    "RESEARCH_ANSWER_SYSTEM": (
+        "Quote only text from a source's content item, never its title."
+    ),
+    "DOCUMENT_CAPABILITY_SYSTEM": (
+        "When the objective asks to create a file, propose create_document with"
+        " the content from the earlier step outputs; do not read again."
+    ),
+    "COMBINED_PLANNING_SYSTEM": (
+        "When the user explicitly asks for an action (creating a file, clicking),"
+        " plan a step for it; never drop it."
+    ),
+}
+V8_CHANGED_SHA256 = {
+    "RESEARCH_ANSWER_SYSTEM": "467dd6ca0730472779d12a5aca99692a",
+    "DOCUMENT_CAPABILITY_SYSTEM": "c8d9c371a78f9ed8ea7ded6d1f645c96",
+    "COMBINED_PLANNING_SYSTEM": "7467610fa53519316b980c49ffe2d8f0",
+}
+# The v7 texts with their line breaks flattened to single spaces: v8 is v7 plus
+# its sentence (only the line wrapping around the insertion moved).
+V7_FLAT_SHA256 = {
+    "RESEARCH_ANSWER_SYSTEM": "25df6541b87e676e024a249f6d2347d9",
+    "DOCUMENT_CAPABILITY_SYSTEM": "fdb1fa7c701f692638ab8c4b996a4d86",
+    "COMBINED_PLANNING_SYSTEM": "5cdddc05e432e57b2af0aa47aaa55946",
+}
+V8_LINES = {
+    "documents": (
+        "- reading one named file, listing one directory or inspecting one file's"
+        " metadata in the user's workspace (not uploaded files)"
+    ),
+    "knowledge_rag": (
+        "- looking up facts in files the user uploaded to PHOENIX (not workspace"
+        " files) and in saved memories"
+    ),
+}
+V8_LINES_SHA256 = {
+    "documents": "e385bbb9d347f6e912f3c8e2866832e5",
+    "knowledge_rag": "b0116bc2d0f636ef06a9a5f154b191da",
+}
+
+
+def flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def test_v8_adds_exactly_the_owner_approved_text() -> None:
+    for name, sentence in V8_SENTENCES.items():
+        text: str = getattr(prompts, name)
+        assert digest_of(text) == V8_CHANGED_SHA256[name], name
+        assert flat(text).count(sentence) == 1, name
+        assert (
+            digest_of(flat(text).replace(" " + sentence, "")) == (V7_FLAT_SHA256[name])
+        ), name
+    for key, line in V8_LINES.items():
+        assert prompts.COMBINED_PLANNING_LINES[key] == line
+        assert digest_of(line) == V8_LINES_SHA256[key], key
+    # The action sentence follows the planner's irreversible-action rule.
+    planner = flat(prompts.COMBINED_PLANNING_SYSTEM)
+    rule = "only when the user explicitly asked for it. "
+    assert rule + V8_SENTENCES["COMBINED_PLANNING_SYSTEM"] in planner
+    assert "{" not in "".join(V8_SENTENCES.values())
+
+
+def test_v8_text_renders_only_in_its_own_prompt() -> None:
+    texts = {
+        name: flat(value)
+        for name, value in vars(prompts).items()
+        if name.isupper() and isinstance(value, str)
+    }
+    for name, sentence in V8_SENTENCES.items():
+        assert [n for n, t in texts.items() if sentence in t] == [name], name
+    # The two rewritten lines render only when their capability is offered.
+    both = capability_lines(["documents", "knowledge_rag"])
+    assert V8_LINES["documents"] in both and V8_LINES["knowledge_rag"] in both
+    assert "uploaded to PHOENIX" not in capability_lines(["documents", "spotify"])
+    assert "(not uploaded files)" not in capability_lines(["knowledge_rag", "spotify"])
+
 
 def test_v7_renders_each_rule_only_when_relevant() -> None:
     for name, digest in {**V7_PROMPT_SHA256, **V7_CHANGED_SHA256}.items():
@@ -990,11 +1072,15 @@ def test_v6_adds_only_the_combined_planner() -> None:
     # PHX-121 (ADR-166): every v5 constant is pinned above and unchanged; v6
     # adds exactly these texts, which keep the planner's reply contract.
     for name, digest in V6_PROMPT_SHA256.items():
-        assert digest_of(getattr(prompts, name)) == digest, name
+        # PHX-127 (v8) changes COMBINED_PLANNING_SYSTEM (pinned below).
+        assert digest_of(getattr(prompts, name)) == V8_CHANGED_SHA256.get(
+            name, digest
+        ), name
     assert list(prompts.COMBINED_PLANNING_LINES) == list(V6_LINES_SHA256)
     for key, digest in V6_LINES_SHA256.items():
         line = prompts.COMBINED_PLANNING_LINES[key]
-        assert digest_of(line) == digest, key
+        # PHX-127 (v8) changes two lines (pinned below).
+        assert digest_of(line) == V8_LINES_SHA256.get(key, digest), key
         assert line.startswith("- ") and "{" not in line and "}" not in line
     combined = prompts.COMBINED_PLANNING_SYSTEM
     assert combined.splitlines()[-2:] == prompts.PLANNING_SYSTEM.splitlines()[-2:]
@@ -1049,7 +1135,10 @@ def test_v5_adds_only_the_approved_texts() -> None:
     # three domain descriptions, and changes only FINAL_VERIFICATION_SYSTEM
     # (PHX-118); every other v4 constant (checked above) is unchanged.
     for name, digest in V5_PROMPT_SHA256.items():
-        assert digest_of(getattr(prompts, name)) == digest, name
+        # PHX-127 (v8) adds one sentence to two v5 texts (pinned below).
+        assert digest_of(getattr(prompts, name)) == V8_CHANGED_SHA256.get(
+            name, digest
+        ), name
     for domain, digest in V5_DOMAIN_SHA256.items():
         assert digest_of(prompts.DOMAIN_DESCRIPTIONS[domain]) == digest, domain
     for (table, key), digest in V5_LINES_SHA256.items():
