@@ -6973,6 +6973,51 @@ accepted, so the allowlist is not weakened. The recovery event allowlist
 follows `RETRYABLE_OUTPUT` and now admits `disallowed_domain`. `OVERSIZED`,
 `INVALID_TEXT` and `UNKNOWN_STEP` stay final.
 
+## ADR-198 — Model inputs carry only what their step needs (phoenix-prompts-v7)
+
+Status: Accepted (approved by owner 2026-10-22)
+Date: 2026-10-22
+Ticket: PHX-125
+
+The 2026-10-22 diagnosis traced three live failure modes to model inputs:
+the assignment prompt always rendered the "documents" routing sentence, so
+the 9B named `documents` even when it was not offered (knowledge smoke 3/5
+`disallowed_domain`); the document capability proposal, answer and LEVI
+inputs all carried "Original request:", so a "create" step proposed
+`read_document` and a read step's answer anticipated the save; and the 9B
+verifier applied the whole request's output format to intermediate steps.
+v7 therefore:
+
+- moves the documents sentence, byte-identical, into
+  `ASSIGNMENT_DOCUMENTS_RULE`, rendered into `ASSIGNMENT_SYSTEM`'s `{rules}`
+  only when `documents` is offered (with it offered the rendered prompt is
+  byte-identical to v6); both assignment responders use one renderer;
+- drops the "Original request:" block from the capability tool proposal and
+  answer inputs, the capability verifier input and the document verifier
+  input. The step's objective, expected output, completion rule, earlier step
+  outputs and tool output stay; the final answer and final verifier still see
+  the original request. The constructors keep their `original_request`
+  parameter (no API change).
+
+Every other v6 constant is byte-identical. No permission, tool or LEVI rule
+changes; ADR-195's deterministic check stays the backstop for a missing write.
+
+## ADR-199 — Two new routing and answer rules, rendered only when relevant
+
+Status: Accepted (approved by owner 2026-10-22; exact text in tickets/PHX-125-mission-reliability.md)
+Date: 2026-10-22
+Ticket: PHX-125
+
+`ASSIGNMENT_KNOWLEDGE_RULE` (rendered into `{rules}` after the documents rule,
+only when `knowledge_rag` is offered) tells the assignment model to route
+look-ups in the user's uploaded documents and saved memories to
+`knowledge_rag`. `DOCUMENT_READ_ANSWER_RULE` is appended on its own line to
+`DOCUMENT_CAPABILITY_ANSWER_SYSTEM` only when the step's tool call read a file
+(`document.read` or filesystem `read_text`), so a read answer reports the
+file and never claims a save. Each is its own constant; neither is rendered
+in any other case. Rejected: editing the v5/v6 constants in place (would
+change every rendering, not only the relevant ones).
+
 ## ADR-200 — A read_document proposal for a plain-text file becomes PHOENIX's own read_text
 
 Status: Accepted (recommended option, under the owner's instruction)

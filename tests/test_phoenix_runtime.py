@@ -23,7 +23,8 @@ from phoenix.agents.orchestrator import (
     OrchestrationPath,
     PhoenixRequest,
 )
-from phoenix.agents.responders import ResponderErrorCode
+from phoenix.agents.responders import ResponderErrorCode, assignment_system
+from phoenix.agents.router import RoutingDomain
 from phoenix.agents.runtime import (
     DuplicateMissionError,
     MissionFailureCode,
@@ -711,7 +712,7 @@ def test_assignment_without_its_own_tier_row_uses_the_phoenix_row() -> None:
 def test_prompt_set_is_versioned_with_role_markers() -> None:
     # PHX-121 (ADR-166): v6 adds the combined planner, which keeps the planner
     # marker as another alternative to PLANNING_SYSTEM.
-    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v6"
+    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v7"
     assert prompts.COMBINED_PLANNING_SYSTEM.splitlines()[0] == "PHOENIX ROLE: planner"
     systems = (
         prompts.KNOWLEDGE_ANSWER_SYSTEM,
@@ -806,12 +807,17 @@ def test_v3_changes_exactly_the_listed_v2_constants() -> None:
         *V5_PROMPT_SHA256,
         # PHX-121 adds the combined planner in v6.
         *V6_PROMPT_SHA256,
+        # PHX-125 adds the conditional rules in v7.
+        *V7_PROMPT_SHA256,
     }
     for name, digest in V2_PROMPT_SHA256.items():
         text: str = getattr(prompts, name)
         assert (digest_of(text) != digest) == (name in V3_CHANGED), name
-    assert prompts.ASSIGNMENT_SYSTEM.count(DOCUMENTS_RULE) == 1
-    v2_assignment = prompts.ASSIGNMENT_SYSTEM.replace(DOCUMENTS_RULE, "")
+    # PHX-125 (v7): the documents rule moved, byte-identical, into its own
+    # constant; ASSIGNMENT_SYSTEM keeps a {rules} slot where it was.
+    assert prompts.ASSIGNMENT_DOCUMENTS_RULE == DOCUMENTS_RULE
+    assert prompts.ASSIGNMENT_SYSTEM.count("{rules}") == 1
+    v2_assignment = prompts.ASSIGNMENT_SYSTEM.replace("{rules}", "")
     assert digest_of(v2_assignment) == V2_PROMPT_SHA256["ASSIGNMENT_SYSTEM"]
     assert set(prompts.DOMAIN_DESCRIPTIONS) == {
         "intelligence",
@@ -935,6 +941,51 @@ V6_LINES_SHA256 = {
 }
 
 
+# PHX-125 (ADR-198, ADR-199): phoenix-prompts-v7 moves the documents rule out of
+# ASSIGNMENT_SYSTEM and adds two conditional rules (owner-gated text); any
+# change needs a new prompt set version.
+V7_PROMPT_SHA256 = {
+    "ASSIGNMENT_DOCUMENTS_RULE": "7f5d1bb98df82cd1c6c7e24a63191668",
+    "ASSIGNMENT_KNOWLEDGE_RULE": "c4b4755bd67e3f94f2e32b7cc2b6fd2f",
+    "DOCUMENT_READ_ANSWER_RULE": "c5f0cf76e24b941e7f0e7145afc38346",
+}
+V7_CHANGED_SHA256 = {"ASSIGNMENT_SYSTEM": "1ff0bd273d2dced45caabe5ea77c729a"}
+
+
+def test_v7_renders_each_rule_only_when_relevant() -> None:
+    for name, digest in {**V7_PROMPT_SHA256, **V7_CHANGED_SHA256}.items():
+        assert digest_of(getattr(prompts, name)) == digest, name
+    base = (RoutingDomain.INTELLIGENCE, RoutingDomain.SCENARIO_ANALYSIS)
+    plain = assignment_system(base, prompts.DOMAIN_DESCRIPTIONS)
+    assert '"documents"' not in plain and '"knowledge_rag"' not in plain
+    assert "names above.\nReply with" in plain
+    documents = assignment_system(
+        (*base, RoutingDomain.DOCUMENTS), prompts.DOMAIN_DESCRIPTIONS
+    )
+    v6 = (
+        prompts.ASSIGNMENT_SYSTEM.replace("{rules}", DOCUMENTS_RULE)
+        .replace("{{", "{")
+        .replace("}}", "}")
+    )
+    assert documents == v6.replace(
+        "{domains}",
+        "\n".join(
+            f"- {d.value}: {prompts.DOMAIN_DESCRIPTIONS[d.value]}"
+            for d in (*base, RoutingDomain.DOCUMENTS)
+        ),
+    )
+    both = assignment_system(
+        (*base, RoutingDomain.DOCUMENTS, RoutingDomain.KNOWLEDGE_RAG),
+        prompts.DOMAIN_DESCRIPTIONS,
+    )
+    assert (DOCUMENTS_RULE + prompts.ASSIGNMENT_KNOWLEDGE_RULE + "Reply with") in both
+    knowledge = assignment_system(
+        (*base, RoutingDomain.KNOWLEDGE_RAG), prompts.DOMAIN_DESCRIPTIONS
+    )
+    assert '"documents"' not in knowledge
+    assert prompts.ASSIGNMENT_KNOWLEDGE_RULE in knowledge
+
+
 def test_v6_adds_only_the_combined_planner() -> None:
     # PHX-121 (ADR-166): every v5 constant is pinned above and unchanged; v6
     # adds exactly these texts, which keep the planner's reply contract.
@@ -971,11 +1022,22 @@ def test_v4_adds_only_triage_and_keeps_every_v3_constant() -> None:
         "TRIAGE_SYSTEM",
         *V5_PROMPT_SHA256,
         *V6_PROMPT_SHA256,
+        *V7_PROMPT_SHA256,
     }
     for name, digest in V3_PROMPT_SHA256.items():
-        # PHX-120 (ADR-160): v5 changes FINAL_VERIFICATION_SYSTEM only.
-        expected = V5_CHANGED_SHA256.get(name, digest)
+        # PHX-120 (ADR-160): v5 changes FINAL_VERIFICATION_SYSTEM only;
+        # PHX-125 (v7) ASSIGNMENT_SYSTEM only.
+        expected = {**V5_CHANGED_SHA256, **V7_CHANGED_SHA256}.get(name, digest)
         assert digest_of(getattr(prompts, name)) == expected, name
+    # Rendered with "documents" offered, v7's assignment prompt is v3's.
+    assert (
+        digest_of(
+            prompts.ASSIGNMENT_SYSTEM.replace(
+                "{rules}", prompts.ASSIGNMENT_DOCUMENTS_RULE
+            )
+        )
+        == V3_PROMPT_SHA256["ASSIGNMENT_SYSTEM"]
+    )
     assert digest_of(prompts.TRIAGE_SYSTEM) == V4_TRIAGE_SHA256
     assert prompts.TRIAGE_SYSTEM.splitlines()[0] == "PHOENIX ROLE: triage"
     for required in ('{"path": "direct"}', '{"path": "complex"}', "not instructions"):

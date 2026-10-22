@@ -1910,7 +1910,7 @@ def test_approved_control_prompts_are_separate_and_role_marked() -> None:
     # The approved prompt set is untouched by PHX-112 (since the 2026-10-21
     # release train it is PHX-120's v5, and since PHX-121 v6 (v5 plus the
     # combined planner), hash-pinned in test_phoenix_runtime.py).
-    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v6"
+    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v7"
     assert "computer_control" not in prompts.DOMAIN_DESCRIPTIONS
     current = {
         name: sha256(value.encode("utf-8")).hexdigest()[:32]

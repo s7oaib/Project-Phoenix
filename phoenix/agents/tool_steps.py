@@ -519,7 +519,6 @@ class DocumentVerificationResponder(ModelVerificationResponder):
         )
         user = "\n\n".join(
             (
-                f"Original request:\n{self._original_request}",
                 f"Expected output:\n{request.expected_output_schema}",
                 f"Completion rule:\n{request.completion_rule}",
                 _guarded(

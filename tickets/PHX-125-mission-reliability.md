@@ -2,7 +2,7 @@
 
 ## Status
 IN_PROGRESS (part A, code-only safety fixes: implemented and tested; part B,
-model-visible inputs: owner-gated, on its own branch)
+model-visible inputs: approved by owner 2026-10-22, on its own branch)
 
 ## Phase
 M3 capabilities (live-run follow-up, 2026-10-22)
@@ -39,8 +39,14 @@ changes):
 3. `DISALLOWED_DOMAIN` is retryable output, bounded by the existing budgets
    (ADR-197).
 
-Part B, branch `feature/PHX-125b-model-inputs` (owner-gated): see that
-branch's version of this file.
+Part B, branch `feature/PHX-125b-model-inputs` (approved by owner 2026-10-22;
+exact text under "Owner approval needed"):
+4. Render the documents routing sentence only when `documents` is offered
+   (ADR-198).
+5. Remove "Original request" from the capability tool-proposal, capability
+   answer and verifier inputs and the document verifier input (ADR-198).
+6. New conditional rules: knowledge routing, read answers (ADR-199).
+7. `phoenix-prompts-v7`; every other v6 constant byte-identical.
 
 ## Non-goals
 New tools, new permissions, a planner-declared operation field, retries of a
@@ -67,6 +73,70 @@ pins in `tests/test_prompt_injection_defenses.py`.
 - Text-only steps and missions are unaffected.
 - Repeated keys at any depth give `schema`; a disallowed domain is retried
   once and then keeps its code.
+
+## Owner approval needed (part B, `phoenix-prompts-v7`)
+
+Approved by owner 2026-10-22 (all four items below). Every other v6 constant is byte-identical
+(hash-pinned in `tests/test_phoenix_runtime.py`).
+
+1. `ASSIGNMENT_SYSTEM` (changed). Before (v6), between "names above." and
+   "Reply with":
+
+   ```
+   If "documents" is one of the allowed domains, assign every step that reads a
+   file, lists a directory or inspects a file's metadata to "documents".
+   ```
+
+   After (v7): that place holds `{rules}`, and the same two lines, byte for
+   byte, are the new constant `ASSIGNMENT_DOCUMENTS_RULE`, rendered only when
+   `documents` is offered. With `documents` offered the rendered prompt is
+   byte-identical to v6; without it the sentence is absent.
+
+2. `ASSIGNMENT_KNOWLEDGE_RULE` (new; rendered into `{rules}` after the
+   documents rule, only when `knowledge_rag` is offered):
+
+   ```
+   If "knowledge_rag" is one of the allowed domains, assign every step that looks
+   up, searches or reads the user's uploaded documents or saved memories to
+   "knowledge_rag".
+   ```
+
+3. `DOCUMENT_READ_ANSWER_RULE` (new; appended on its own line after
+   `DOCUMENT_CAPABILITY_ANSWER_SYSTEM`, which is unchanged, only when the
+   step's tool call read a file: `document.read` or filesystem `read_text`):
+
+   ```
+   For a read, report only what the file says; never say that a file was or will
+   be created or saved.
+   ```
+
+4. Removed model input (code, not a constant). Before: the user turn of the
+   capability tool proposal (`document_capability`, `media_specialist`), the
+   capability answer (`document_capability_answer`, `media_answer`), the
+   capability verifier (`capability_verifier`) and the document verifier
+   (`document_verifier`) began with
+
+   ```
+   Original request:
+   <the user's request>
+   ```
+
+   After: that block is gone; the inputs start at "Expected output:". The
+   final answer and final verifier still receive the original request.
+
+## Live verification (branch B, 2026-10-22, qwen3.5 4B/9B on Ollama, temp data dirs)
+
+| Check | Before (v6, diagnosis) | After (v7 + part A) |
+|---|---|---|
+| `phoenix_knowledge_smoke.py --runs 5` | 2/5 completed (3 `disallowed_domain`) | 5/5 completed, 5/5 cited |
+| `phoenix_mission_smoke.py` x5 | 5/6 completed | 4/5 completed (1 `verification_failed`) |
+| Document create (read report.pdf, write out/summary.md) | 0/4 written; 1 false success (completed, no file) | 0/5 written; 0 false successes (3 `verification_failed` caught by ADR-195 on a create step that read, 2 `not_json` proposals) |
+
+Open: the 4B document specialist still proposes `read_document` for most
+create steps and sometimes returns non-JSON proposals (capability proposals
+are not retried, PHX-109 R10); one run reached an approved `document.create`
+and then failed `not_json` on the re-run proposal. Document create is not
+yet reliable live; it now fails honestly instead of claiming a file.
 
 ## Completion evidence
 Report changed files, commands/tests, results, decisions, assumptions, and known limitations.
