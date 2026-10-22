@@ -1709,7 +1709,8 @@ def test_static_no_execution_or_concrete_dependency(path: str) -> None:
 # PHX-017 (ADR-080) intentionally changed these; they stay pinned, at the
 # PHX-017 commit.
 PHX_017_COMMIT = "b7d96518d58ee7466d441cbe3b17c4eaad0866cf"
-PHX_017_PATHS = ("phoenix/models/ollama.py",)
+# PHX-130 moved ollama.py to its own pin (below).
+PHX_017_PATHS: tuple[str, ...] = ()
 # PHX-046 (ADR-082) pinned prompts.py and runtime.py to its implementation
 # commit 95c5afad908933ea92ab61c6c2e5b86fdd04e0e0. PHX-047 (ADR-083)
 # intentionally changed both again, plus tool_steps.py (frozen at origin/main
@@ -1876,16 +1877,12 @@ PHX_120_PATHS = ("phoenix/api/routes/setup.py",)
 # moved here (out of the blocks above, whose comments name the earlier
 # owners), pinned at the train's resolution commit. The train must merge
 # with a merge commit so this commit stays reachable. PHX-123 moved
-# mission_events.py to its own pin (below).
+# mission_events.py to its own pin (below). PHX-130 moved missions.py, the
+# missions, permissions and schemas routes and server.py to its own pin.
 PHX_TRAIN_COMMIT = "65b3d935d51b241fa9c7d1e6eefaf321184b3460"
 PHX_TRAIN_PATHS = (
     "phoenix/api/capabilities.py",
-    "phoenix/api/missions.py",
     "phoenix/api/routes/__init__.py",
-    "phoenix/api/routes/missions.py",
-    "phoenix/api/routes/permissions.py",
-    "phoenix/api/routes/schemas.py",
-    "phoenix/api/server.py",
 )
 # PHX-121 (ADR-166) intentionally changed prompts.py (phoenix-prompts-v6 adds
 # the combined planner; every v5 constant unchanged) and runtime.py (planner
@@ -1915,7 +1912,6 @@ PHX_122_PATHS = ("apps/desktop/src/adapters/connected.css",)
 PHX_123_COMMIT = "f8c727a60e30861332e7f9f166dd0b654594c1f5"
 PHX_123_PATHS = (
     "apps/desktop/src-tauri/src/backend.rs",
-    "phoenix/agents/mission_events.py",
     "phoenix/api/structured_logging.py",
     "phoenix/tools/browser_setup.py",
     "phoenix/web/page_fetch.py",
@@ -1968,9 +1964,25 @@ PHX_125B_PATHS = (
 # block. Both stay pinned, at the PHX-128 implementation commit (the PR must
 # merge with a merge commit so this commit stays reachable).
 PHX_128_COMMIT = "0bc1df7d5cd1d0c2051d2f27ad83c930aa5e6b62"
-PHX_128_PATHS = (
-    "phoenix/agents/control_steps.py",
+PHX_128_PATHS = ("phoenix/agents/control_steps.py",)
+# PHX-130 (ADR-220 to ADR-222; owner-approved 2026-10-23) intentionally
+# changed the event allowlist (desktop.open_link), MissionTrace (quick_calls),
+# the mission service (quick commands before triage, quick grants), the
+# missions, permissions and schemas routes (label, unbound approve), the
+# backend wiring (tool, runner, warm-up) and the Ollama provider (keep_alive).
+# Each left its earlier block (PHX-017, train, PHX-123, PHX-128) and stays
+# pinned, at the PHX-130 implementation commit (the PR must merge with a merge
+# commit so this commit stays reachable).
+PHX_130_COMMIT = "c41bef4cce5e824a1d2c651c81c8b46b3c15421e"
+PHX_130_PATHS = (
+    "phoenix/agents/mission_events.py",
     "phoenix/agents/runtime.py",
+    "phoenix/api/missions.py",
+    "phoenix/api/routes/missions.py",
+    "phoenix/api/routes/permissions.py",
+    "phoenix/api/routes/schemas.py",
+    "phoenix/api/server.py",
+    "phoenix/models/ollama.py",
 )
 # PHX-129 (ADR-215 to ADR-217; owner-approved 2026-10-23) intentionally changed
 # the desktop store (P1 "always", remembered grants, revoke), Settings
@@ -2030,6 +2042,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_126_PATHS
         and path not in PHX_128_PATHS
         and path not in PHX_129_PATHS
+        and path not in PHX_130_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2063,6 +2076,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_125B_COMMIT, path) for path in PHX_125B_PATHS]
     baselines += [(PHX_128_COMMIT, path) for path in PHX_128_PATHS]
     baselines += [(PHX_129_COMMIT, path) for path in PHX_129_PATHS]
+    baselines += [(PHX_130_COMMIT, path) for path in PHX_130_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

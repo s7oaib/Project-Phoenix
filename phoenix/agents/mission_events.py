@@ -144,6 +144,10 @@ CAPABILITY_TOOL_IDS: Final = frozenset(
 CAPABILITY_OPERATIONS: Final = frozenset(
     {"read", "create", "search", "play", "pause", "cue"}
 )
+# PHX-130 (ADR-220): the quick command's one tool and operation (mirrors
+# quick_commands; tests assert equality).
+QUICK_TOOL_IDS: Final = frozenset({"desktop.open_link"})
+QUICK_OPERATIONS: Final = frozenset({"open_link"})
 AGENT_IDS: Final = frozenset(
     agent.internal_id for agent in build_default_agent_registry().agents
 )
@@ -167,7 +171,7 @@ SCOPES: Final = frozenset({"task", "mission"})
 _STEP: dict[str, _Kind] = {"step_id": STEP}
 _TOOL: dict[str, _Kind] = {
     **_STEP,
-    "tool_id": TOOL_IDS | RESEARCH_TOOL_IDS | CAPABILITY_TOOL_IDS,
+    "tool_id": TOOL_IDS | RESEARCH_TOOL_IDS | CAPABILITY_TOOL_IDS | QUICK_TOOL_IDS,
     "call_id": UUID,
 }
 _ROLE: dict[str, _Kind] = {"role": AGENT_ROLES, "step_id": STEP}
@@ -278,7 +282,8 @@ PAYLOAD_FIELDS: Final[Mapping[EventType, Mapping[str, _Kind]]] = MappingProxyTyp
             **_TOOL,
             "operation": DOCUMENT_OPERATIONS
             | RESEARCH_OPERATIONS
-            | CAPABILITY_OPERATIONS,
+            | CAPABILITY_OPERATIONS
+            | QUICK_OPERATIONS,
             "permission_request_id": UUID,
         },
         EventType.TOOL_STARTED: _TOOL,

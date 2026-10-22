@@ -146,6 +146,10 @@ async def _detail(
             "sources": ()
             if trace is None or record.answer_message_id is None
             else tuple(source_out(citation) for citation in trace.citations),
+            # PHX-130: a quick command's mission carries its label.
+            "mission_label": "quick"
+            if trace is not None and trace.quick_calls
+            else None,
         }
     )
 

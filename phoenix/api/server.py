@@ -79,8 +79,11 @@ from phoenix.agents.kaido import (
     KaidoStatus,
     system_ram_sample,
 )
+from phoenix.agents.mission_events import EventPublisher
+from phoenix.agents.quick_commands import QuickCommandRunner
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.runtime import ModelTierTable, PhoenixRuntime, default_tier_table
+from phoenix.agents.triage import TRIAGE_ROLE
 from phoenix.api.app import create_app
 from phoenix.api.body_limit import BodyLimitMiddleware
 from phoenix.api.event_stream import (
@@ -114,6 +117,9 @@ from phoenix.models.lifecycle import ModelLifecycleManager
 from phoenix.models.ollama import OllamaProvider
 from phoenix.models.ollama_embeddings import OllamaEmbeddingProvider
 from phoenix.models.provider import (
+    GenerationRequest,
+    MessageRole,
+    ModelMessage,
     ModelProvider,
     ModelProviderError,
     ProviderHealthStatus,
@@ -141,6 +147,7 @@ from phoenix.tools.document_files import (
     document_file_tool_definitions,
 )
 from phoenix.tools.filesystem import FilesystemTool, filesystem_tool_definitions
+from phoenix.tools.open_link import OpenLinkTool, open_link_tool_definitions
 from phoenix.tools.registry import ToolRegistry
 from phoenix.tools.web_research import WebResearchTool, web_research_tool_definitions
 from phoenix.tools.windows_ui import WindowsUITool
@@ -173,6 +180,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = ROOT / "alembic.ini"
 STATE_KEY = "phoenix"
 MIGRATION_LOCK_NAME = "phoenix.migrate.lock"
+KEEP_ALIVE = "30m"  # PHX-130 (ADR-222)
 _LOCK_POLL_SECONDS = 0.05
 
 
@@ -237,11 +245,53 @@ ProviderFactory = Callable[[ServerConfig], ProviderSet]
 
 def ollama_providers(config: ServerConfig) -> ProviderSet:
     """Local Ollama, default and think=False; construction performs no I/O."""
+    # PHX-130 (ADR-222): keep the chat models loaded between missions.
     return ProviderSet(
-        providers=(OllamaProvider(config.ollama_base_url),),
-        structured=(OllamaProvider(config.ollama_base_url, think=False),),
+        providers=(OllamaProvider(config.ollama_base_url, keep_alive=KEEP_ALIVE),),
+        structured=(
+            OllamaProvider(config.ollama_base_url, think=False, keep_alive=KEEP_ALIVE),
+        ),
         embedding=OllamaEmbeddingProvider(config.ollama_base_url),
     )
+
+
+async def warm_chat_model(
+    providers: Sequence[ModelProvider],
+    structured: Sequence[ModelProvider],
+    table: ModelTierTable,
+    registry: ModelCapabilityRegistry,
+    timeout: float,
+) -> bool:
+    """PHX-130 (ADR-222): load the triage/DIRECT model with one tiny generation.
+
+    Runs in the background at startup, only when the provider is healthy; any
+    failure is ignored (the first mission then loads the model as before).
+    """
+    try:
+        twins = {provider.provider_id: provider for provider in structured}
+        for ref in table.candidates(TRIAGE_ROLE):
+            if registry.get(ref.provider_id, ref.model_id) is None:
+                continue
+            provider = twins.get(ref.provider_id) or next(
+                (p for p in providers if p.provider_id == ref.provider_id), None
+            )
+            if provider is None:
+                return False
+            async with asyncio.timeout(timeout):
+                health = await provider.health()
+            if health.status != ProviderHealthStatus.HEALTHY:
+                return False
+            await provider.generate(
+                GenerationRequest(
+                    model_id=ref.model_id,
+                    messages=(ModelMessage(role=MessageRole.USER, text="Hi"),),
+                    max_output_tokens=1,
+                )
+            )
+            return True
+    except Exception:
+        return False
+    return False
 
 
 def _consume(task: "asyncio.Task[bool]") -> None:
@@ -678,6 +728,8 @@ async def open_services(
                 *document_file_tool_definitions(),
                 *youtube_tool_definitions(),
                 *control_tool_definitions(),
+                # PHX-130 (ADR-220): quick commands' allowlisted link opening.
+                *open_link_tool_definitions(),
             )
         )
         research: WebResearchTool | None = None
@@ -776,6 +828,9 @@ async def open_services(
             tool_registry=tools,
             events=observer,
             before_run=registrar.refresh_required,
+            quick=QuickCommandRunner(
+                OpenLinkTool(tools, policy), EventPublisher(observer)
+            ),
         )
         observer.bind_traces(missions.get_trace)
         settings_store = SettingsStore(session_factory)
@@ -829,9 +884,21 @@ async def open_services(
             control_steps=control,
         )
         refresher: asyncio.Task[None] | None = None
+        warmer: asyncio.Task[bool] | None = None
         try:
             await services.workspace.load()  # before the first mission runs
             await services.missions.start()
+            if uses_ollama:
+                # PHX-130 (ADR-222): non-blocking; failures are ignored.
+                warmer = asyncio.create_task(
+                    warm_chat_model(
+                        provider_set.providers,
+                        provider_set.structured,
+                        table,
+                        capabilities,
+                        config.probe_timeout_seconds,
+                    )
+                )
             refresher = asyncio.create_task(
                 registrar.run(
                     config.model_refresh_seconds, config.model_refresh_idle_seconds
@@ -843,10 +910,11 @@ async def open_services(
         finally:
             try:
                 await services.voice.aclose()  # voice first: no new missions
-                if refresher is not None:
-                    refresher.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await refresher
+                for task in (refresher, warmer):
+                    if task is not None:
+                        task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await task
                 await cancel_active_missions(services)
             finally:
                 await stream.close()  # 1001 to every remaining client

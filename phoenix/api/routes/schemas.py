@@ -149,6 +149,8 @@ class MissionDetail(MissionSummary):
     kaido: KaidoOut | None
     # PHX-110: the sources behind the answer, in citation order.
     sources: tuple[SourceOut, ...] = ()
+    # PHX-130: "quick" when a quick command ran (no triage, no model).
+    mission_label: Literal["quick"] | None = None
 
 
 class CancelResult(Contract):

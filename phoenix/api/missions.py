@@ -43,6 +43,12 @@ decided) is recorded when it settles. A re-run, from ``run_again`` or an
 approval, reuses the original's decision; one that never got a decision (it
 was interrupted before triage finished) is triaged again.
 
+Quick commands (PHX-130, ADR-220): with a QuickCommandRunner, a mission whose
+text is a quick command (see quick_commands) runs it instead of the runtime:
+one ``desktop.open_link`` call under the stored quick-command grant, no
+triage and no model. It completes with a fixed answer, waits for permission,
+or fails ``tool_failed``; its trace holds the call (``quick_calls``).
+
 This module is application logic for the backend process, not transport: it
 imports no FastAPI; the PHX-104 routes call it.
 """
@@ -66,8 +72,16 @@ from phoenix.agents.control_steps import (
 )
 from phoenix.agents.mission_events import EventPublisher, EventSink
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
+from phoenix.agents.prompts import PROMPT_SET_VERSION
+from phoenix.agents.quick_commands import (
+    QuickCommand,
+    QuickCommandRunner,
+    match_quick_command,
+    quick_grants,
+)
 from phoenix.agents.research_steps import mission_grants
 from phoenix.agents.runtime import (
+    MissionFailureCode,
     MissionKind,
     MissionResult,
     MissionTrace,
@@ -98,6 +112,7 @@ from phoenix.security.permissions import (
     UserDecision,
     UserPermissionDecision,
 )
+from phoenix.tools.open_link import OPEN_LINK_TOOL_ID
 from phoenix.tools.registry import ToolRegistry, ToolRiskLevel
 
 DEFAULT_RETENTION = timedelta(days=30)
@@ -167,6 +182,7 @@ class MissionService:
         clock: Callable[[], datetime] = _utcnow,
         events: EventSink | None = None,
         before_run: Callable[[], Awaitable[None]] | None = None,
+        quick: QuickCommandRunner | None = None,
     ) -> None:
         if retention <= timedelta(0):
             raise ValueError("Retention must be positive")
@@ -201,6 +217,10 @@ class MissionService:
         # PHX-112 (ADR-151): one-time P4 approvals, by the re-run they belong to.
         # Memory only: a restart interrupts that re-run and the approval is gone.
         self._approvals: dict[str, ControlApproval] = {}
+        # PHX-130 (ADR-220): quick commands run before the runtime (no triage).
+        if quick is not None and type(quick) is not QuickCommandRunner:
+            raise TypeError("Expected a QuickCommandRunner")
+        self._quick = quick
 
     @property
     def session_id(self) -> str:
@@ -420,6 +440,12 @@ class MissionService:
                     outcome = Settlement(
                         status=MissionStatus.FAILED, failure_code=refused
                     )
+                elif (
+                    command := None
+                    if self._quick is None
+                    else match_quick_command(claimed.text)
+                ) is not None:
+                    outcome = await self._run_quick(mission_id, command, found.grants)
                 else:
                     # No await between this check and run() registering the
                     # mission, so a cancel either is seen here or reaches run().
@@ -457,6 +483,38 @@ class MissionService:
                 await self._record(self._settle_failed, mission_id)
         finally:
             self._current = None
+
+    async def _run_quick(
+        self,
+        mission_id: str,
+        command: QuickCommand,
+        stored: tuple[PermissionGrant, ...],
+    ) -> Settlement:
+        """PHX-130 (ADR-220/221): one link opening, verified deterministically."""
+        assert self._quick is not None
+        result = await self._quick.run(
+            mission_id, command, stored, session_id=self._session_id
+        )
+        trace = MissionTrace(
+            prompt_set_version=PROMPT_SET_VERSION,
+            path=None,
+            quick_calls=(result.record,),
+        ).model_dump(mode="json")
+        if result.answer is not None:
+            return Settlement(
+                status=MissionStatus.COMPLETED, trace=trace, answer_text=result.answer
+            )
+        if result.pending is not None:
+            return Settlement(
+                status=MissionStatus.WAITING_PERMISSION,
+                trace=trace,
+                pending=result.pending,
+            )
+        return Settlement(
+            status=MissionStatus.FAILED,
+            trace=trace,
+            failure_code=MissionFailureCode.TOOL_FAILED.value,
+        )
 
     def _settle_failed(self, mission_id: str, failure_code: str, now: datetime) -> bool:
         return self._store.settle(mission_id, _INTERNAL_ERROR, now)
@@ -706,6 +764,8 @@ class MissionService:
             )
             if control:
                 control_grants([grant])
+            elif request.tool_id == OPEN_LINK_TOOL_ID:
+                quick_grants([grant])  # PHX-130: P1 "session" or "always"
             else:
                 # document, (PHX-111) research or (PHX-113, PHX-120) capability
                 mission_grants([grant], capabilities=True)
