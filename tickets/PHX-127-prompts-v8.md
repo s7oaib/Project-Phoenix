@@ -81,5 +81,39 @@ rehearsal or smoke scripts. Proposal 1 is not applied.
 - `prompts.py` and `control_prompts.py` are pinned at the implementation
   commit (two-commit pattern).
 
-## Live results
-See below.
+## Live results (2026-10-22, Ollama, RTX 3050 6 GB, temp data dirs, demo 7 MANUAL)
+
+Environment note: the first attempt ran with Ollama on CPU only (Ollama had
+started without seeing the NVIDIA GPU; every mission fell to KAIDO
+`resource_pressure`) and is discarded; two more attempts were cut short by
+session restarts. The runs below are complete and GPU-placed (the 9B model is
+partly offloaded, as on every 6 GB run).
+
+| Demo | Before (PHX-126, 2 runs) | v8 run 1 | v8 run 2 |
+| --- | --- | --- | --- |
+| 1 | PASS / PASS | PASS | PASS |
+| 2 | PASS / FAIL | PASS | FAIL: deny part PASS; approve part `responder_output` before any read |
+| 3 | FAIL / FAIL (`permission_denied`, workspace read) | FAIL (`permission_denied` on `document.read`) | FAIL (`permission_denied` on `filesystem.list_directory`) |
+| 4 | FAIL / FAIL (`verification_failed`, title quoted) | FAIL (`verification_failed`) | FAIL (`tool_failed` after the search was approved) |
+| 5 | FAIL / FAIL (no create proposed) | FAIL: PDF read approved, no create, `verification_failed` | same as run 1 |
+| 6 | FAIL / FAIL (no click proposed) | FAIL: read `responder_output`; click mission asked for `windows.list_windows` (refused), no P4 | FAIL: read `verification_failed`; click mission completed and verified with no P4 request |
+| 8 | PASS / PASS | PASS (`levi_rejected`) | PASS (`levi_rejected`) |
+
+Smokes: knowledge `--runs 5` 5/5 completed (v7: 5/5). Mission smoke 2/3
+completed (v7: 4/5); the failure is `verification_failed` from the document
+verifier on a correct read in the PHX-046 single-family path, which renders
+none of the v8 text (`PLANNING_SYSTEM`, `DOCUMENT_SPECIALIST_SYSTEM`).
+
+Reading: v8 did not turn any of demos 3 to 6 into a PASS in two runs. Demo 2
+dropped one run, as it did before v8 (1/2 then and now). One behaviour to watch:
+in run 2, demo 6's click mission completed and passed LEVI without any click
+being requested (before v8 it failed verification). Nothing was clicked, so
+no safety property changed, but the demo outcome is less informative. Evidence:
+`scratchpad\live3\run1`, `run2`, `knowledge`, `mission1` to `mission3`.
+
+## Test matrix
+`uv run python scripts/test_matrix.py --allow-dirty`: every stage PASS except
+pytest, 17016 passed, 32 skipped, 1 failed:
+`tests/test_model_benchmark.py::test_generation_that_blocks_past_deadline_remains_timeout`,
+a wall-clock deadline test (file untouched by this branch). Re-run alone:
+`tests/test_model_benchmark.py` 130 passed. A load flake, not a v8 effect.
