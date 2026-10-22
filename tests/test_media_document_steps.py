@@ -1750,6 +1750,25 @@ def test_write_check_is_limited_to_document_work(stack: Stack) -> None:
     assert result.kind is MissionKind.COMPLETED
 
 
+@pytest.mark.parametrize("domain", ["intelligence", "documents"])
+def test_action_check_is_limited_to_control_work(stack: Stack, domain: str) -> None:
+    # PHX-128 (ADR-210): outside a control mission an action word changes nothing.
+    stack.provider.replies.update(
+        {
+            **plan(("Read report.md, then click Save and close the window.", domain)),
+            "document_capability": proposal(
+                operation="read_document", relative_path="report.md"
+            ),
+            "final_answer": "Here is the summary.",
+        }
+    )
+    grants = (stack.document_grant(),) if domain == "documents" else ()
+    result = mission(
+        stack, grants, text="Read report.md, click Save and close the window"
+    )
+    assert result.kind is MissionKind.COMPLETED, result
+
+
 @pytest.mark.parametrize(
     "text",
     [

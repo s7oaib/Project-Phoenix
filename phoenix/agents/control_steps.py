@@ -39,6 +39,7 @@ IDs, statuses, codes, hashes and lengths only.
 import asyncio
 import contextlib
 import json
+import re
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -89,6 +90,7 @@ from phoenix.agents.verifier import (
     VerificationCheck,
     VerificationDraft,
     VerificationRequest,
+    VerificationResponder,
 )
 from phoenix.models.provider import Identifier, NonnegativeInt
 from phoenix.models.vision import VisionError, VisionLoopRequest, VisionLoopService
@@ -1750,6 +1752,125 @@ class ControlEvidenceVerificationResponder:
             evidence_summary="Each action was permitted, attempted and succeeded"
             if passed
             else "Control evidence does not correlate or is not a permitted success",
+        )
+
+    async def verify(self, request: VerificationRequest) -> VerificationDraft:
+        check = self._check()
+        if not check.passed:
+            return VerificationDraft(
+                verification_id=request.verification_id, checks=(check,)
+            )
+        draft = await self._inner.verify(request)
+        return VerificationDraft(
+            verification_id=draft.verification_id, checks=(check, *draft.checks)
+        )
+
+
+# PHX-128 (ADR-210): a requested state-changing action must have been performed.
+PERFORMED_ACTION_CHECK_ID = "deterministic.performed_action"
+_GAP = r"[^\n.]{0,60}?"
+# Heuristic only: a match can add a failing check, never pass anything. Each
+# requested kind needs one verified call of one of its tools.
+_ACTION_KINDS: tuple[tuple[str, re.Pattern[str], frozenset[str]], ...] = (
+    (
+        "click",
+        re.compile(
+            rf"\b(?:double[- ]?)?click(?:s|ing)?\b|\binvoke\b"
+            rf"|\b(?:press|activate)\b{_GAP}\b(?:button|control|link)\b",
+            re.IGNORECASE,
+        ),
+        frozenset({"browser.click", "windows.invoke_control"}),
+    ),
+    (
+        "fill",
+        re.compile(
+            rf"\bfill(?:s|ing)?\b|\bset\s+(?:the\s+)?text\b"
+            rf"|\b(?:type|enter|input|write|put)\b{_GAP}\b(?:into|in)\s+"
+            rf"(?:(?:the|a|an)\s+)?(?:[\w-]+\s+){{0,3}}"
+            rf"(?:field|box|textbox|input|form|bar|control)\b",
+            re.IGNORECASE,
+        ),
+        frozenset({"browser.fill", "windows.set_text"}),
+    ),
+    (
+        "close_window",
+        re.compile(
+            r"\bclose\b(?:(?!\bbrowser\b)[^\n.]){0,40}?\bwindow\b", re.IGNORECASE
+        ),
+        frozenset({"windows.close_window"}),
+    ),
+    (
+        "terminal",
+        re.compile(
+            rf"\b(?:run|execute)\b{_GAP}\b(?:command|terminal|script|profile)s?\b",
+            re.IGNORECASE,
+        ),
+        frozenset({"terminal.inspect", "terminal.project", "terminal.sensitive"}),
+    ),
+)
+_NEGATED = re.compile(
+    r"(?:\b(?:not|never|without|no|nothing)|n't)\s+(?:[\w-]+\s+){0,2}$",
+    re.IGNORECASE,
+)
+# A read-only terminal profile applies no effect by design (TerminalToolResult).
+_NO_EFFECT_TOOL_IDS = frozenset({"terminal.inspect"})
+
+
+def requested_actions(text: str) -> tuple[str, ...]:
+    """PHX-128 (ADR-210): the state-changing action kinds the text asks for."""
+    return tuple(
+        kind
+        for kind, pattern, _ in _ACTION_KINDS
+        if any(
+            _NEGATED.search(text[max(0, match.start() - 40) : match.start()]) is None
+            for match in pattern.finditer(text)
+        )
+    )
+
+
+def performed_actions(
+    records: Sequence[ControlCallRecord],
+    kinds: Sequence[str],
+    step_id: str | None = None,
+) -> bool:
+    """Each kind has a verified control call (of ``step_id``, or of any step)."""
+    tools = {kind: tool_ids for kind, _, tool_ids in _ACTION_KINDS}
+    return all(
+        any(
+            record.tool_id in tools[kind]
+            and record.decision_status == PermissionStatus.ALLOWED
+            and record.tool_status == ToolResultStatus.SUCCESS
+            and record.attempted
+            and (record.effect_applied or record.tool_id in _NO_EFFECT_TOOL_IDS)
+            and (step_id is None or record.step_id == step_id)
+            for record in records
+        )
+        for kind in kinds
+    )
+
+
+class PerformedActionVerificationResponder:
+    """PHX-128 (ADR-210): LEVI for a step or answer that must have acted.
+
+    Wraps the step's own LEVI responder. Without a verified control call for
+    every requested action the deterministic check fails and is final: the
+    inner responder (and its model) is not consulted and cannot override it.
+    With them, the inner responder decides as before; this check never passes
+    anything by itself.
+    """
+
+    def __init__(self, inner: VerificationResponder, *, performed: bool) -> None:
+        self._inner = inner
+        self._performed = performed
+
+    def _check(self) -> VerificationCheck:
+        return VerificationCheck(
+            check_id=PERFORMED_ACTION_CHECK_ID,
+            criterion="A requested action was performed by a verified control call",
+            passed=self._performed,
+            evidence_summary="A matching control call succeeded and applied its effect"
+            if self._performed
+            else "No matching control call succeeded, so the action was not performed",
         )
 
     async def verify(self, request: VerificationRequest) -> VerificationDraft:
