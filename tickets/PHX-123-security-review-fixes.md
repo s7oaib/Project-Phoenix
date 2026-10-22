@@ -1,7 +1,7 @@
 # PHX-123 — Security review fixes
 
 ## Status
-IN_PROGRESS (implemented and tested on `fix/PHX-123-security-review`; awaiting PR review)
+DONE (merged in PR #108 as `702a92f`; main CI `test-matrix` run 39708451150 green)
 
 ## Phase
 M5 release (PHX-094 release evidence)

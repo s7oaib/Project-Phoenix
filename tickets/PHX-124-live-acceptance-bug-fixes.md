@@ -1,7 +1,7 @@
 # PHX-124 — Live acceptance bug fixes
 
 ## Status
-IN_PROGRESS (implemented and tested on a local branch; awaiting PR review and a live gate re-run)
+DONE (merged in PR #109; real Chromium verified in the PR; the Colibri gate re-run is tracked under PHX-116)
 
 ## Phase
 M5 release hardening
