@@ -1944,7 +1944,7 @@ PHX_124_COMMIT = "61e2b577a5dd42ae3b7bae930b848bb808d20b42"
 PHX_124_PATHS: tuple[str, ...] = ()
 # browser.py carries both PHX-123 (launch manifest check) and PHX-124
 # (closure handlers); it is pinned at the merge resolution commit.
-PHX_123_124_COMMIT = "0000000000000000000000000000000000000000"
+PHX_123_124_COMMIT = "018b7b115b1fc7475a80a6f72d57f3f20a89d44f"
 PHX_123_124_PATHS = ("phoenix/tools/browser.py",)
 
 
