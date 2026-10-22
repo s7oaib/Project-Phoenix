@@ -1799,7 +1799,7 @@ PHX_118B_PATHS = ("phoenix/agents/final_grounding.py",)
 # resolution commit on top of PHX-108 and PHX-118 (the PR must merge with a
 # merge commit so this commit stays reachable).
 PHX_112_COMMIT = "b71e716046595a7c16e9e94c71f6dd7ccf93f4aa"
-PHX_112_PATHS = ("phoenix/persistence/missions.py",)
+PHX_112_PATHS: tuple[str, ...] = ()  # PHX-131 moved persistence/missions.py
 # PHX-108 (ADR-110 to ADR-114) intentionally changed server.py (ModelRegistrar),
 # api/missions.py (before_run), the REST route package, schemas and settings
 # routes, the settings store, the native proxy allowlist and the desktop
@@ -1976,11 +1976,9 @@ PHX_128_PATHS = ("phoenix/agents/control_steps.py",)
 PHX_130_COMMIT = "c41bef4cce5e824a1d2c651c81c8b46b3c15421e"
 PHX_130_PATHS = (
     "phoenix/agents/mission_events.py",
-    "phoenix/agents/runtime.py",
     "phoenix/api/missions.py",
     "phoenix/api/routes/missions.py",
     "phoenix/api/routes/permissions.py",
-    "phoenix/api/routes/schemas.py",
     "phoenix/api/server.py",
     "phoenix/models/ollama.py",
 )
@@ -1999,9 +1997,24 @@ PHX_MIC_PATHS = ("phoenix/voice/engines/sound.py",)
 PHX_129_COMMIT = "ba6bc6fc16c45dab498179244508b54dd576fb40"
 PHX_129_PATHS = (
     "apps/desktop/src-tauri/src/proxy.rs",
-    "apps/desktop/src/adapters/ConnectedApp.tsx",
     "apps/desktop/src/adapters/SetupViews.tsx",
+)
+# PHX-131 (ADR-225 to ADR-227) intentionally changed triage.py (the pre-triage
+# rule, TriageOutcome.RULE), runtime.py (applying it), persistence/missions.py
+# and schemas.py (the "rule" outcome), the desktop adapter and mission line,
+# and added migration 0010_triage_rule. runtime.py and schemas.py left the
+# PHX-130 block, persistence/missions.py the PHX-112 block, core.ts and
+# ConnectedApp.tsx the PHX-129 block. All stay pinned, at the PHX-131
+# implementation commit.
+PHX_131_COMMIT = "3f7bc22e6550eb08c214158f0a2554fbb8764927"
+PHX_131_PATHS = (
+    "alembic/versions/0010_triage_rule.py",
+    "apps/desktop/src/adapters/ConnectedApp.tsx",
     "apps/desktop/src/adapters/core.ts",
+    "phoenix/agents/runtime.py",
+    "phoenix/agents/triage.py",
+    "phoenix/api/routes/schemas.py",
+    "phoenix/persistence/missions.py",
 )
 
 
@@ -2049,6 +2062,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_129_PATHS
         and path not in PHX_130_PATHS
         and path not in PHX_MIC_PATHS
+        and path not in PHX_131_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2084,6 +2098,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_129_COMMIT, path) for path in PHX_129_PATHS]
     baselines += [(PHX_130_COMMIT, path) for path in PHX_130_PATHS]
     baselines += [(PHX_MIC_COMMIT, path) for path in PHX_MIC_PATHS]
+    baselines += [(PHX_131_COMMIT, path) for path in PHX_131_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
@@ -2097,7 +2112,8 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     assert len(EventType) == 32
     # PHX-102 (ADR-086) adds migration 0006_missions; PHX-104 (ADR-089) adds
     # 0007_app_settings; PHX-105 (ADR-090) adds 0008_mission_triage;
-    # PHX-108 (ADR-111) adds 0009_default_mission_path.
+    # PHX-108 (ADR-111) adds 0009_default_mission_path; PHX-131 (ADR-227)
+    # adds 0010_triage_rule.
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
     ).get_heads() == ["0010_triage_rule"]
