@@ -1032,4 +1032,64 @@ test('PHX-122 Settings shows web research as on or off for this launch (read-onl
   assert.equal(setup.webResearchLine(undefined), 'Web research: status unavailable.');
 });
 
+// ---- PHX-129 (ADR-215 to ADR-217): "Always allow" for read-only (P1) requests; remembered permissions in Settings.
+const GRANT = '88888888-8888-4888-8888-888888888888';
+const p1Request = { ...detail().permission_request, risk_level: 'P1' };
+function grantBody(overrides = {}) {
+  return { grant_id: GRANT, tool_id: 'filesystem.read_text', action: 'read_text', resource: 'D:\\docs\\notes.txt', risk_level: 'P1',
+    duration: 'always', status: 'active', issued_at: AT, revoked_at: null, ...overrides };
+}
+
+test('PHX-129 submitDecision sends "always" only for a pending P1 request; P2 stays session only', async () => {
+  const { store, transport, scheduler } = await readyStore(backendRoutes({ 'GET /permissions?limit=64': { status: 200, body: page([p1Request]) },
+    'GET /grants?limit=200': { status: 200, body: page([grantBody()]) } }));
+  transport.calls.length = 0;
+  assert.equal(await store.getSnapshot().permissionPort.submitDecision(REQ, 'approved', 'always'), undefined);
+  assert.deepEqual(plain(transport.calls[0]), { method: 'POST', path: `/permissions/${REQ}/approve`, body: { duration: 'always' } });
+  await scheduler.flush();
+  assert.ok(transport.calls.some((call) => call.path === '/grants?limit=200'));
+  // P2 (the default fixture): "always" is refused before any call; the backend refuses it too (422).
+  const { store: p2, transport: calls } = await readyStore();
+  const before = calls.calls.length;
+  await assert.rejects(p2.getSnapshot().permissionPort.submitDecision(REQ, 'approved', 'always'), { code: 'invalid_request' });
+  await assert.rejects(p2.getSnapshot().permissionPort.submitDecision(REQ, 'denied', 'always'), { code: 'invalid_request' });
+  await assert.rejects(p2.getSnapshot().permissionPort.submitDecision(REQ, 'approved', 'forever'), { code: 'invalid_request' });
+  assert.equal(calls.calls.length, before);
+});
+
+test('PHX-129 the P1 panel offers both durations for P1 requests only', async () => {
+  const p1 = await readyStore(backendRoutes({ 'GET /permissions?limit=64': { status: 200, body: page([p1Request]) } }));
+  const markup = render(connectedModule.ReadOnlyApprovals, { approvals: p1.store.getSnapshot().connection.approvals, store: p1.store });
+  assert.match(markup, />Allow this session<\/button>/);
+  assert.match(markup, />Always allow<\/button>/);
+  const p2 = await readyStore();
+  assert.equal(render(connectedModule.ReadOnlyApprovals, { approvals: p2.store.getSnapshot().connection.approvals, store: p2.store }), '');
+  for (const risk of ['P3', 'P4']) {
+    assert.equal(render(connectedModule.ReadOnlyApprovals, { approvals: [{ ...p1.store.getSnapshot().connection.approvals[0], riskLevel: risk }], store: p1.store }), '');
+  }
+});
+
+test('PHX-129 Settings lists active "always" grants and Remove revokes one (never a delete)', async () => {
+  const listed = page([grantBody(), grantBody({ grant_id: MSG1, duration: 'session' }), grantBody({ grant_id: MSG2, status: 'revoked' }), grantBody({ grant_id: 'bad' })]);
+  const { store, transport, scheduler } = await readyStore(backendRoutes({ 'GET /grants?limit=200': { status: 200, body: listed },
+    [`POST /grants/${GRANT}/revoke`]: { status: 200, body: { grant_id: GRANT, status: 'revoked' } } }));
+  assert.deepEqual(plain(store.getSnapshot().connection.grants), [{ grantId: GRANT, toolId: 'filesystem.read_text', action: 'read_text', resource: 'D:\\docs\\notes.txt', issuedAt: AT }]);
+  const markup = render(setup.SettingsPanel, { connection: store.getSnapshot().connection, store });
+  assert.match(markup, /Remembered permissions/);
+  assert.match(markup, /filesystem\.read_text · read_text · D:\\docs\\notes\.txt · granted/);
+  assert.match(markup, />Remove<\/button>/);
+  transport.calls.length = 0;
+  await store.revokeGrant(GRANT);
+  assert.deepEqual(plain(transport.calls[0]), { method: 'POST', path: `/grants/${GRANT}/revoke` });
+  assert.match(store.getSnapshot().connection.grantsMessage, /^Removed\./);
+  await scheduler.flush();
+  assert.ok(transport.calls.some((call) => call.path === '/grants?limit=200'));
+  transport.calls.length = 0;
+  await store.revokeGrant('../settings');
+  assert.equal(transport.calls.length, 0);
+  assert.ok(transport.calls.every((call) => call.method !== 'DELETE'));
+  const empty = await readyStore(backendRoutes({ 'GET /grants?limit=200': { status: 200, body: page([]) } }));
+  assert.match(render(setup.SettingsPanel, { connection: empty.store.getSnapshot().connection, store: empty.store }), /None\. &quot;Always allow&quot; on a read-only \(P1\) request/);
+});
+
 export { loader };
