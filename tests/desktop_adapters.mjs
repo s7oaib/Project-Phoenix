@@ -405,6 +405,11 @@ test('PHX-107 ConnectedApp renders the connection bar and the live App without i
   const degraded = renderToStaticMarkup(createElement(connected.ConnectionBar, { connection: { ...store.getSnapshot().connection, backend: { state: 'degraded', code: 'python_not_found' } }, store }));
   assert.match(degraded, /Backend unavailable\. The backend Python environment was not found/);
   assert.doesNotMatch(degraded, /Document workspace/);
+  // PHX-123 (ADR-185): a refused secret fill tells the owner to type it themselves.
+  const mission = store.getSnapshot().connection.mission ?? {};
+  const refused = connected.missionLine({ ...mission, missionId: '11111111-aaaa', status: 'failed', failureCode: 'secret_text_refused', verification: null, path: null });
+  assert.match(refused, /\(secret_text_refused: PHOENIX does not type passwords, keys or other secrets; type it yourself\)/);
+  assert.match(connected.missionLine({ ...mission, missionId: '11111111-aaaa', status: 'failed', failureCode: 'tool_rejected', verification: null, path: null }), /\(tool_rejected\)/);
 });
 
 // ---- consolidated review M1: an unverified answer never looks verified

@@ -1561,6 +1561,9 @@ def test_source_architecture_and_immutability() -> None:
         # changed proxy and adapters are excluded above and hash-pinned in
         # test_prompt_injection_defenses.py).
         ":(exclude)apps/desktop/src/adapters/CapabilityViews.tsx",
+        # PHX-123 (ADR-184) verifies the browser folder before launch; browser.py
+        # is hash-pinned (PHX_123_PATHS in test_prompt_injection_defenses.py).
+        ":(exclude)phoenix/tools/browser.py",
     ]
     assert not subprocess.check_output(
         ["git", "diff", "origin/main", "--", *paths], cwd=ROOT
