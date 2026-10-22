@@ -2062,7 +2062,7 @@ PHX_135_PATHS = (  # api/missions.py moved to the PHX-135/136 merge pin
 )
 # api/missions.py carries both PHX-135 and PHX-136; pinned at the merge
 # resolution commit.
-PHX_135_136_COMMIT = "0000000000000000000000000000000000000000"
+PHX_135_136_COMMIT = "974c91422f1e5a0deefcb5d7ff877e9433eeb6ab"
 PHX_135_136_PATHS = ("phoenix/api/missions.py",)
 
 
