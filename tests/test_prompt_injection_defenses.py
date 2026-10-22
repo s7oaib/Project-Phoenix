@@ -1985,6 +1985,11 @@ PHX_130_PATHS = (
 # microphone; it stays pinned, at the fix commit.
 PHX_MIC_COMMIT = "790facbf96eb1396423a07f91f917bf7ce42dac7"
 PHX_MIC_PATHS = ("phoenix/voice/engines/sound.py",)
+# PHX-134 (ADR-240, ADR-241) intentionally changed runtime.py (the planner tier
+# flag in default_tier_table); it left the PHX-130 block and stays pinned, at
+# the PHX-134 implementation commit.
+PHX_134_COMMIT = "fa934cabbb657287f689c35ce20ffe4e1c1a8f8b"
+PHX_134_PATHS: tuple[str, ...] = ()  # runtime.py moved to the review merge pin
 # PHX-129 (ADR-215 to ADR-217; owner-approved 2026-10-23) intentionally changed
 # the desktop store (P1 "always", remembered grants, revoke), Settings
 # (Remembered permissions), ConnectedApp (the P1 choice above Permissions) and
@@ -2032,10 +2037,10 @@ PHX_132_PATHS = (
 # core.ts and runtime.py carry both PHX-131 and PHX-132; they are pinned at
 # the local merge resolution commit.
 PHX_131_132_COMMIT = "35c9d287255e692837c78c99f37251d4f26065df"
-PHX_131_132_PATHS = (
-    "apps/desktop/src/adapters/core.ts",
-    "phoenix/agents/runtime.py",
-)
+PHX_131_132_PATHS = ("apps/desktop/src/adapters/core.ts",)
+# runtime.py carries PHX-131, PHX-132 and PHX-134; pinned at that merge.
+PHX_REVIEW_COMMIT = "0000000000000000000000000000000000000000"
+PHX_REVIEW_PATHS = ("phoenix/agents/runtime.py",)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -2085,6 +2090,8 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_131_PATHS
         and path not in PHX_132_PATHS
         and path not in PHX_131_132_PATHS
+        and path not in PHX_134_PATHS
+        and path not in PHX_REVIEW_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2123,6 +2130,8 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_131_COMMIT, path) for path in PHX_131_PATHS]
     baselines += [(PHX_132_COMMIT, path) for path in PHX_132_PATHS]
     baselines += [(PHX_131_132_COMMIT, path) for path in PHX_131_132_PATHS]
+    baselines += [(PHX_134_COMMIT, path) for path in PHX_134_PATHS]
+    baselines += [(PHX_REVIEW_COMMIT, path) for path in PHX_REVIEW_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

@@ -7334,3 +7334,29 @@ Decision: `core.ts` appends deltas of the active mission to an in-memory
 live answer shown as an assistant message `[Answering…]`; deltas are never
 traces, metrics or logs. The stored answer (REST) replaces it; a settled
 mission, a new send or any stream reconnect drops it.
+
+## ADR-240 — Planner tier flag; 9B stays the default
+
+Status: Accepted (PHX-134)
+Date: 2026-10-23
+Ticket: PHX-134
+
+Decision: `PHOENIX_PLANNER_TIER` (`9b` default, or `4b`) sets the first
+candidate of the `strategist` (AIZEN's plan) and `assignment` roles in
+`default_tier_table`: `9b` keeps T2→T1→T0, `4b` uses T1→T0. LEVI's verifier,
+PHOENIX, triage, the coder and KAIDO are unchanged. Live evidence (2026-10-23,
+`phoenix_mission_smoke.py` ×3 each way, alternated, GPU confirmed): 9B 3/3
+completed, median 162.1 s; 4B 2/3 completed (one `verification_failed`),
+median 91.8 s. Rule: 4B becomes the default only if success is not lower and
+median latency improves ≥25%; success was lower, so 9B stays the default and
+the flag stays for opt-in. Rejected: switching LEVI to 4B (not measured).
+
+## ADR-241 — An unknown planner tier is refused
+
+Status: Accepted (PHX-134)
+Date: 2026-10-23
+Ticket: PHX-134
+
+Decision: unset or blank means the default; any value other than `9b`/`4b`
+(case and whitespace ignored) raises `ValueError` when the table is built,
+instead of guessing a model.

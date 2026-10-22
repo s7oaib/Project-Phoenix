@@ -135,3 +135,4 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-131 Faster chat — DONE (deterministic pre-triage rule sends clearly simple requests DIRECT with no triage generation; triage_outcome `rule`; migration 0010; ADR-225–227; local branch, not pushed)
 
 - PHX-132 Streaming answers — DONE (DIRECT replies stream word by word to Chat over agent.started answer deltas; voice speaks the first sentence early; ADR-230–234; local branch, not pushed)
+- PHX-134 4B planner — DONE (`PHOENIX_PLANNER_TIER=4b` runs AIZEN's plan and step assignment on qwen3.5:4b; default stays 9b on live evidence: 4B faster but 2/3 vs 3/3; ADR-240–241; local branch, not pushed)
