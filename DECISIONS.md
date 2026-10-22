@@ -6673,6 +6673,29 @@ in place of them). In the native shell the mic toggle sits above Chat and App's 
 (ADR-161), so Settings and the Research view show it read-only as "enabled for this
 launch" or "off — start PHOENIX with PHOENIX_WEB_RESEARCH_ENABLED=true".
 
+## ADR-175 — The demo rehearsal approves only its own P1/P2 fixtures
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-093
+
+`scripts/demo_rehearsal.py` answers permission requests through the same
+authenticated `POST /permissions/{id}/approve|deny` routes the desktop uses, as the
+user of a backend it launched itself (`python -m phoenix.api`, stdin token, a fresh
+temporary data directory and workspace under the home folder). One gate decides:
+`approvable` admits only risk P1 or P2, and then only the demo's own allowlist — P1
+reads of the fixtures it copied into its temporary workspace, the P2 `document.create`
+of its own `garden-club-summary.md` there, the P1 `web.research` search of demo 4, and
+PHOENIX's own browser (`session_open`, and pages on `https://example.com` only).
+Every other request — any P3, P4 or P5, and anything off the allowlist — is denied and
+recorded, so the demo 6 P4 click is shown and denied, never executed. Approvals are
+always "this session" of that throwaway backend. PermissionEngine still decides every
+call; the script holds no grant authority of its own. Fixtures are pinned by SHA-256
+and the report keeps codes and checks only, never answers or file content.
+Rejected: forcing the COMPLEX path or approving "always" (the rehearsal would no longer
+mirror the desktop demo), and a backend test hook (the rehearsal must exercise the real
+launch path).
+
 ## ADR-190 — Live acceptance fixes: Playwright handlers, smoke cleanup, gate throughput and VRAM reporting
 
 Status: Accepted (recommended option, under the owner's instruction)

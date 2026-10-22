@@ -98,7 +98,7 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-090 Automated test matrix — DONE
 - PHX-091 FYP benchmark suite — DONE (configuration 1 GPU baselines; configuration 2 measured live, triage and forced COMPLEX); configuration 3 runnable behind the PHX-116 gate
 - PHX-092 Packaging/install workflow — DONE (unsigned per-user NSIS installer with the bundled backend; ADR-125 to ADR-129)
-- PHX-093 Final demo scenarios — TODO
+- PHX-093 Final demo scenarios — IN_PROGRESS (docs/DEMOS.md, demos/fixtures, scripts/demo_rehearsal.py; offline-tested, ADR-175; the live rehearsal and recordings await the owner)
 - PHX-094 Release evidence package — TODO
 
 ## Phase 10 — Product Integration
