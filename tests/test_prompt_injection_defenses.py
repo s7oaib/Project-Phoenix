@@ -1984,6 +1984,11 @@ PHX_130_PATHS = (
     "phoenix/api/server.py",
     "phoenix/models/ollama.py",
 )
+# Microphone stall fix (2026-10-23, local review build) intentionally changed
+# voice/engines/sound.py: a busy event loop is no longer read as a dead
+# microphone; it stays pinned, at the fix commit.
+PHX_MIC_COMMIT = "790facbf96eb1396423a07f91f917bf7ce42dac7"
+PHX_MIC_PATHS = ("phoenix/voice/engines/sound.py",)
 # PHX-129 (ADR-215 to ADR-217; owner-approved 2026-10-23) intentionally changed
 # the desktop store (P1 "always", remembered grants, revoke), Settings
 # (Remembered permissions), ConnectedApp (the P1 choice above Permissions) and
@@ -2043,6 +2048,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_128_PATHS
         and path not in PHX_129_PATHS
         and path not in PHX_130_PATHS
+        and path not in PHX_MIC_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2077,6 +2083,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_128_COMMIT, path) for path in PHX_128_PATHS]
     baselines += [(PHX_129_COMMIT, path) for path in PHX_129_PATHS]
     baselines += [(PHX_130_COMMIT, path) for path in PHX_130_PATHS]
+    baselines += [(PHX_MIC_COMMIT, path) for path in PHX_MIC_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
