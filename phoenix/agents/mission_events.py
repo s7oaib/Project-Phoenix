@@ -154,9 +154,11 @@ CAPABILITY_OPERATIONS: Final = frozenset(
 )
 # PHX-130 (ADR-220): the quick command's one tool and operation (mirrors
 # quick_commands; tests assert equality).
-# PHX-133 (ADR-236) adds desktop.open_app.
-QUICK_TOOL_IDS: Final = frozenset({"desktop.open_link", "desktop.open_app"})
-QUICK_OPERATIONS: Final = frozenset({"open_link", "open_app"})
+# PHX-133 (ADR-236) adds desktop.open_app; PHX-135 (ADR-247) the screen.
+QUICK_TOOL_IDS: Final = frozenset(
+    {"desktop.open_link", "desktop.open_app", "screen.capture_window"}
+)
+QUICK_OPERATIONS: Final = frozenset({"open_link", "open_app", "capture_window"})
 AGENT_IDS: Final = frozenset(
     agent.internal_id for agent in build_default_agent_registry().agents
 )

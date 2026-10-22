@@ -20,6 +20,7 @@ from fastapi import APIRouter, Request
 
 from phoenix.agents.capability_steps import CAPABILITY_TOOLS, MEDIA_ACTOR_ID
 from phoenix.agents.control_steps import CONTROL_ACTOR_ID
+from phoenix.agents.quick_commands import QUICK_TOOL_IDS
 from phoenix.agents.research_steps import RESEARCH_TOOL_IDS
 from phoenix.api.routes.common import (
     DEFAULT_PAGE,
@@ -41,10 +42,9 @@ from phoenix.api.routes.schemas import (
     PermissionRequestOut,
     RevokeResult,
 )
-from phoenix.persistence.missions import GrantRecord
+from phoenix.api.workspace import WorkspaceService
+from phoenix.persistence.missions import GrantRecord, PermissionRequestRecord
 from phoenix.security.permissions import GrantDuration
-from phoenix.tools.open_app import OPEN_APP_TOOL_ID
-from phoenix.tools.open_link import OPEN_LINK_TOOL_ID
 
 router = APIRouter()
 
@@ -54,6 +54,22 @@ MEDIA_TOOL_IDS = tuple(
     for tool_id, (actor, _, _) in CAPABILITY_TOOLS.items()
     if actor == MEDIA_ACTOR_ID
 )
+
+
+def approvable(record: PermissionRequestRecord, workspace: WorkspaceService) -> bool:
+    """False when approving would store a grant outside the active workspace
+    root. The route and (PHX-135, ADR-246) spoken approval both apply it.
+
+    A request made under another (or no longer valid) workspace can only be
+    denied. PHX-111/PHX-120: research and media requests name no workspace
+    path; PHX-112: neither do computer-control requests; PHX-130/133/135:
+    nor do quick-command requests (an allowlist, an app list, one window).
+    """
+    unbound = (
+        record.request.tool_id in (*RESEARCH_TOOL_IDS, *MEDIA_TOOL_IDS, *QUICK_TOOL_IDS)
+        or record.request.actor_id == CONTROL_ACTOR_ID
+    )
+    return unbound or workspace.covers(record.request.resource)
 
 
 def _grant(record: GrantRecord) -> GrantOut:
@@ -100,18 +116,7 @@ async def approve(
     services = backend(request)
     missions = services.missions
     record = await missions.get_permission_request(request_id)
-    # A request made under another (or no longer valid) workspace would store a
-    # grant outside the active root; it can only be denied.
-    # PHX-111/PHX-120: research and media requests name no workspace path;
-    # PHX-112: neither do computer-control requests.
-    # PHX-130: nor do quick-command link requests (an allowlist, not a path);
-    # PHX-133: nor app requests.
-    unbound = (
-        record.request.tool_id
-        in (*RESEARCH_TOOL_IDS, *MEDIA_TOOL_IDS, OPEN_LINK_TOOL_ID, OPEN_APP_TOOL_ID)
-        or record.request.actor_id == CONTROL_ACTOR_ID
-    )
-    if not unbound and not services.workspace.covers(record.request.resource):
+    if not approvable(record, services.workspace):
         raise ApiError(409, "workspace_changed")
     rerun = await missions.approve(request_id, _DURATIONS[body.duration])
     return ApproveResult(

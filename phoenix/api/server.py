@@ -81,7 +81,7 @@ from phoenix.agents.kaido import (
     system_ram_sample,
 )
 from phoenix.agents.mission_events import EventPublisher
-from phoenix.agents.quick_commands import QuickCommandRunner
+from phoenix.agents.quick_commands import QuickCommandRunner, ScreenDescriber
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.runtime import ModelTierTable, PhoenixRuntime, default_tier_table
 from phoenix.agents.triage import TRIAGE_ROLE
@@ -117,6 +117,7 @@ from phoenix.models.embeddings import EmbeddingProvider
 from phoenix.models.lifecycle import ModelLifecycleManager
 from phoenix.models.ollama import OllamaProvider
 from phoenix.models.ollama_embeddings import OllamaEmbeddingProvider
+from phoenix.models.ollama_vision import OllamaVisionInterpreter
 from phoenix.models.provider import (
     GenerationRequest,
     MessageRole,
@@ -126,13 +127,14 @@ from phoenix.models.provider import (
     ProviderHealthStatus,
 )
 from phoenix.models.registry import ModelCapabilityRegistry
+from phoenix.models.vision import VisionLoopService
 from phoenix.persistence.database import (
     create_engine_for_settings,
     create_session_factory,
     database_url,
     prepare_data_directory,
 )
-from phoenix.persistence.missions import MissionStore
+from phoenix.persistence.missions import MissionStore, PermissionRequestRecord
 from phoenix.persistence.settings import SettingsStore
 from phoenix.security.audit import AuditTrail
 from phoenix.security.permissions import PermissionPolicy
@@ -151,6 +153,7 @@ from phoenix.tools.filesystem import FilesystemTool, filesystem_tool_definitions
 from phoenix.tools.open_app import OpenAppTool, open_app_tool_definitions
 from phoenix.tools.open_link import OpenLinkTool, open_link_tool_definitions
 from phoenix.tools.registry import ToolRegistry
+from phoenix.tools.screenshot import ScreenshotCaptureTool
 from phoenix.tools.web_research import WebResearchTool, web_research_tool_definitions
 from phoenix.tools.windows_ui import WindowsUITool
 from phoenix.tools.youtube import YouTubeTool, youtube_tool_definitions
@@ -828,6 +831,9 @@ async def open_services(
             )
 
         runtime = build_runtime()
+        # PHX-135 (ADR-247): "what's on my screen" — one window, local vision.
+        vision = OllamaVisionInterpreter(config.ollama_base_url)
+        stack.push_async_callback(vision.aclose)
         missions = MissionService(
             runtime=runtime,
             store=MissionStore(session_factory),
@@ -838,10 +844,21 @@ async def open_services(
                 OpenLinkTool(tools, policy),
                 OpenAppTool(tools, policy),  # PHX-133: paths resolved here
                 EventPublisher(observer),
+                screen=ScreenDescriber(
+                    ScreenshotCaptureTool(tools, policy),
+                    VisionLoopService(vision),
+                    lifecycle,
+                ),
             ),
         )
         observer.bind_traces(missions.get_trace)
         settings_store = SettingsStore(session_factory)
+        workspace = WorkspaceService(
+            store=settings_store,
+            missions=missions,
+            build_runtime=build_runtime,
+            data_dir=settings.data_dir,
+        )
         database_probe = DatabaseProbe(engine, heads)
         voice = VoiceService(
             missions,
@@ -858,6 +875,8 @@ async def open_services(
             factory=voice_factory,
             models_dir=config.voice_models_dir,
             partial_answers=partials,
+            # PHX-135 (ADR-245/246): the route's workspace rule, for voice too.
+            may_approve=lambda record: _approvable(record, workspace),
         )
         services = BackendServices(
             settings=settings,
@@ -879,12 +898,7 @@ async def open_services(
             runtime=runtime,
             missions=missions,
             settings_store=settings_store,
-            workspace=WorkspaceService(
-                store=settings_store,
-                missions=missions,
-                build_runtime=build_runtime,
-                data_dir=settings.data_dir,
-            ),
+            workspace=workspace,
             kaido=kaido,
             model_registrar=registrar,
             voice=voice,
@@ -992,6 +1006,14 @@ async def readiness(
         kaido=kaido,
         prerequisites=prerequisites(services, statuses),
     )
+
+
+def _approvable(record: PermissionRequestRecord, workspace: WorkspaceService) -> bool:
+    """PHX-135: the approve route's workspace rule (imported late: the routes
+    import this module)."""
+    from phoenix.api.routes.permissions import approvable
+
+    return approvable(record, workspace)
 
 
 def _remove_interactive_docs(app: FastAPI) -> None:

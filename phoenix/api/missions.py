@@ -74,7 +74,7 @@ from phoenix.agents.mission_events import EventPublisher, EventSink
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
 from phoenix.agents.prompts import PROMPT_SET_VERSION
 from phoenix.agents.quick_commands import (
-    QUICK_SCOPES,
+    QUICK_TOOL_IDS,
     QuickAnswerRecord,
     QuickCallRecord,
     QuickCommand,
@@ -769,8 +769,9 @@ class MissionService:
             )
             if control:
                 control_grants([grant])
-            elif request.tool_id in QUICK_SCOPES:
-                # PHX-130 links, PHX-133 apps: P1 "session" or "always"
+            elif request.tool_id in QUICK_TOOL_IDS:
+                # PHX-130 links, PHX-133 apps: P1 "session" or "always";
+                # PHX-135 one exact window: P1 "session"
                 quick_grants([grant])
             else:
                 # document, (PHX-111) research or (PHX-113, PHX-120) capability

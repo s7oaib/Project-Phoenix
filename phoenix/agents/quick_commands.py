@@ -33,12 +33,20 @@ covers every link command, and a second one every app command; both are
 revocable like any grant. No grant: the mission waits for the user's
 decision. LEVI's check is deterministic (ADR-221): the answer is reported only
 when the call was ALLOWED, attempted and succeeded.
+
+PHX-135 (ADR-247, ADR-248) adds "what's on my screen" / "describe my screen" /
+"look at my screen" / "read my screen": ``screen.capture_window`` (P1, through
+ScreenshotCaptureTool and PermissionEngine) captures the foreground window and
+the local Ollama vision model describes it. The image stays in memory only
+(never stored, traced or logged); the screen is untrusted data, so the answer
+is descriptive text only and never triggers an action. Its grant is per exact
+window and lasts for this session.
 """
 
 import asyncio
 import re
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -51,12 +59,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from phoenix.agents.mission_events import EventPublisher, MissionEvents, elapsed_ms
 from phoenix.core.events import EventType
+from phoenix.models.lifecycle import ModelLifecycleManager
+from phoenix.models.vision import VisionLoopRequest, VisionLoopService
 from phoenix.security.permissions import (
     GrantDuration,
     PermissionGrant,
     PermissionRequest,
     PermissionStatus,
 )
+from phoenix.tools.foreground_window import foreground_call
 from phoenix.tools.open_app import (
     OPEN_APP_TOOL_ID,
     AppName,
@@ -70,6 +81,11 @@ from phoenix.tools.open_link import (
     OpenLinkTool,
 )
 from phoenix.tools.registry import ToolResultStatus, ToolRiskLevel
+from phoenix.tools.screenshot import (
+    ScreenshotCall,
+    ScreenshotCaptureTool,
+    ScreenshotFrame,
+)
 
 QUICK_ACTOR_ID = "phoenix"
 QUICK_ACTION = "open_link"
@@ -84,6 +100,21 @@ QUICK_SCOPES: dict[str, tuple[str, str, str]] = {
     OPEN_LINK_TOOL_ID: (QUICK_ACTION, QUICK_RESOURCE, QUICK_REASON),
     OPEN_APP_TOOL_ID: (QUICK_APP_ACTION, QUICK_APP_RESOURCE, QUICK_APP_REASON),
 }
+# PHX-135 (ADR-247): the screen scope. The resource names one exact window
+# (ScreenshotCaptureTool's canonical form), so the grant is per window.
+QUICK_SCREEN_TOOL_ID = "screen.capture_window"
+QUICK_SCREEN_ACTION = "capture_window"
+QUICK_SCREEN_REASON = "PHOENIX quick command: describe the window on your screen"
+_SCREEN_RESOURCE = re.compile(r'\["capture_window",[1-9][0-9]*,[1-9][0-9]*,".+"\]')
+# Every tool a quick command can ask permission for.
+QUICK_TOOL_IDS = frozenset({*QUICK_SCOPES, QUICK_SCREEN_TOOL_ID})
+SCREEN_PROVIDER_ID = "ollama"
+SCREEN_MODEL_ID = "gemma3:4b"  # local, vision-capable (owner, 2026-10-23)
+SCREEN_QUERY = (
+    "Describe briefly, in two or three plain sentences, what this window shows."
+)
+MAX_SCREEN_ANSWER_CHARS = 600
+SCREEN_UNAVAILABLE = "I can't see your screen right now."
 QUICK_STEP_ID = "s1"
 MAX_QUERY_CHARS = 200
 MAX_TEXT_CHARS = 300
@@ -144,6 +175,8 @@ class QuickKind(StrEnum):
     OPEN_NOTEPAD = "open_notepad"
     OPEN_CALCULATOR = "open_calculator"
     OPEN_FILE_EXPLORER = "open_file_explorer"
+    # PHX-135
+    DESCRIBE_SCREEN = "describe_screen"
 
 
 # PHX-133: local answers (no tool) and app launches (desktop.open_app).
@@ -224,6 +257,15 @@ _EXACT: tuple[tuple[re.Pattern[str], QuickKind], ...] = (
         ),
         QuickKind.OPEN_FILE_EXPLORER,
     ),
+    # PHX-135 (ADR-247)
+    (
+        re.compile(
+            r"what(?:'s|\s+is)\s+on\s+my\s+screen"
+            r"|(?:describe|look\s+at|read)\s+my\s+screen",
+            re.IGNORECASE,
+        ),
+        QuickKind.DESCRIBE_SCREEN,
+    ),
 )
 _EXACT_TARGETS: dict[QuickKind, tuple[str | None, str]] = {
     QuickKind.OPEN_BROWSER: (GOOGLE_HOME, "Opened your browser."),
@@ -237,6 +279,8 @@ _EXACT_TARGETS: dict[QuickKind, tuple[str | None, str]] = {
     QuickKind.OPEN_NOTEPAD: (None, "Opened Notepad."),
     QuickKind.OPEN_CALCULATOR: (None, "Opened Calculator."),
     QuickKind.OPEN_FILE_EXPLORER: (None, "Opened File Explorer."),
+    # PHX-135: the answer is the vision model's description, set at run time.
+    QuickKind.DESCRIBE_SCREEN: (None, ""),
 }
 _Q = r"(?P<q>.+?)"
 _SEARCHES: tuple[tuple[re.Pattern[str], QuickKind], ...] = tuple(
@@ -325,9 +369,26 @@ def match_quick_command(
     return None
 
 
+def _in_scope(grant: PermissionGrant) -> bool:
+    if grant.tool_id == QUICK_SCREEN_TOOL_ID:
+        # PHX-135 (ADR-247): one exact window, for this session only.
+        return (
+            grant.action == QUICK_SCREEN_ACTION
+            and grant.reason == QUICK_SCREEN_REASON
+            and _SCREEN_RESOURCE.fullmatch(grant.resource) is not None
+            and grant.duration == GrantDuration.SESSION
+        )
+    return QUICK_SCOPES.get(grant.tool_id) == (
+        grant.action,
+        grant.resource,
+        grant.reason,
+    ) and grant.duration in (GrantDuration.SESSION, GrantDuration.PERSISTENT)
+
+
 def quick_grants(grants: object) -> tuple[PermissionGrant, ...]:
     """Caller grants for quick commands: one of the fixed P1 scopes (links,
-    PHX-133 apps), SESSION or PERSISTENT; anything else raises ValueError."""
+    PHX-133 apps), SESSION or PERSISTENT, or (PHX-135) one exact window,
+    SESSION; anything else raises ValueError."""
     if type(grants) not in (tuple, list):
         raise ValueError("Grants require an ordered sequence")
     accepted: list[PermissionGrant] = []
@@ -336,11 +397,9 @@ def quick_grants(grants: object) -> tuple[PermissionGrant, ...]:
             raise ValueError("Expected PermissionGrant instances")
         grant = PermissionGrant.model_validate(grant)
         if (
-            QUICK_SCOPES.get(grant.tool_id)
-            != (grant.action, grant.resource, grant.reason)
+            not _in_scope(grant)
             or grant.actor_id != QUICK_ACTOR_ID
             or grant.risk_level != ToolRiskLevel.P1
-            or grant.duration not in (GrantDuration.SESSION, GrantDuration.PERSISTENT)
         ):
             raise ValueError("Grant is outside the quick command scope")
         accepted.append(grant)
@@ -369,7 +428,8 @@ class QuickCallRecord(BaseModel):
 
     call_id: str
     request_id: str
-    tool_id: str = OPEN_LINK_TOOL_ID  # or (PHX-133) desktop.open_app
+    # or (PHX-133) desktop.open_app, or (PHX-135) screen.capture_window
+    tool_id: str = OPEN_LINK_TOOL_ID
     kind: QuickKind
     decision_status: PermissionStatus
     matched_grant_id: str | None = None
@@ -382,7 +442,8 @@ class QuickCallRecord(BaseModel):
 
 
 class QuickAnswerRecord(BaseModel):
-    """PHX-133 (ADR-237): a local-clock answer; no tool, no model."""
+    """PHX-133 (ADR-237): a local-clock answer; no tool, no model. PHX-135:
+    also a screen request with no screen to capture (nothing was called)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -396,23 +457,76 @@ class QuickOutcome:
     pending: PermissionRequest | None  # set only when approval is required
 
 
+def screen_answer(summary: str) -> str | None:
+    """PHX-135 (ADR-248): the vision summary as plain, bounded answer text.
+
+    Screen text is untrusted data: it is only described back to the user,
+    never planned on or executed; control characters are dropped.
+    """
+    text = " ".join("".join(c if c.isprintable() else " " for c in summary).split())
+    if not text:
+        return None
+    if len(text) > MAX_SCREEN_ANSWER_CHARS:
+        text = text[: MAX_SCREEN_ANSWER_CHARS - 3].rstrip() + "..."
+    return "On your screen: " + text
+
+
+@dataclass(frozen=True)
+class ScreenDescriber:
+    """PHX-135: the window capture tool and the local vision model."""
+
+    tool: ScreenshotCaptureTool
+    vision: VisionLoopService
+    lifecycle: ModelLifecycleManager
+    model_id: str = SCREEN_MODEL_ID
+    locate: Callable[[], ScreenshotCall | None] = foreground_call
+
+    async def describe(self, frame: ScreenshotFrame) -> str | None:
+        """One advisory vision generation (INV-023); None on any failure. The
+        frame only travels in memory to the local model."""
+        loop_id = str(uuid4())
+        try:
+            async with await self.lifecycle.acquire_heavy(
+                provider_id=SCREEN_PROVIDER_ID,
+                model_id=self.model_id,
+                operation_id=loop_id,
+            ):
+                result = await self.vision.run(
+                    VisionLoopRequest(
+                        loop_id=loop_id,
+                        provider_id=SCREEN_PROVIDER_ID,
+                        model_id=self.model_id,
+                        query_text=SCREEN_QUERY,
+                        frames=(frame,),
+                        max_iterations=1,
+                    )
+                )
+        except Exception:
+            return None
+        return screen_answer(result.interpretations[0].summary)
+
+
 class QuickCommandRunner:
     """Runs one matched quick command through ``desktop.open_link``, (PHX-133)
-    ``desktop.open_app``, or the local clock."""
+    ``desktop.open_app``, the local clock, or (PHX-135) the screen."""
 
     def __init__(
         self,
         tool: OpenLinkTool,
         apps: OpenAppTool,
         events: EventPublisher | None = None,
+        screen: ScreenDescriber | None = None,
     ):
         if type(tool) is not OpenLinkTool:
             raise TypeError("Expected an OpenLinkTool")
         if type(apps) is not OpenAppTool:
             raise TypeError("Expected an OpenAppTool")
+        if screen is not None and type(screen) is not ScreenDescriber:
+            raise TypeError("Expected a ScreenDescriber")
         self._tool = tool
         self._apps = apps
         self._events = events if events is not None else EventPublisher(None)
+        self._screen = screen
 
     async def run(
         self,
@@ -425,6 +539,8 @@ class QuickCommandRunner:
         if command.kind in LOCAL_KINDS:  # PHX-133: no tool, nothing to verify
             answer = QuickAnswerRecord(kind=command.kind)
             return QuickOutcome(answer, command.answer, None)
+        if command.kind == QuickKind.DESCRIBE_SCREEN:
+            return await self._run_screen(mission_id, command, grants, session_id)
         started = time.monotonic()
         events = MissionEvents(self._events, mission_id)
         call_id = str(uuid4())
@@ -475,31 +591,104 @@ class QuickCommandRunner:
             else sha256(command.query.encode("utf-8")).hexdigest(),
             duration_ms=duration,
         )
-        if decision == PermissionStatus.APPROVAL_REQUIRED:
-            await events.emit(
-                EventType.PERMISSION_REQUESTED,
-                **tool,
-                call_id=call_id,
-                permission_request_id=request.request_id,
-                risk_level=ToolRiskLevel.P1.value,
-            )
-            return QuickOutcome(record, None, request)
-        if verified:
-            await events.emit(
-                EventType.TOOL_COMPLETED,
-                **tool,
-                call_id=call_id,
-                tool_status=result.status.value,
-                duration_ms=duration,
-            )
-            return QuickOutcome(record, command.answer, None)
-        await events.emit(
-            EventType.TOOL_FAILED,
-            **tool,
-            call_id=call_id,
-            code="tool_failed",
-            decision=decision.value,
-            tool_status=result.status.value,
-            duration_ms=duration,
+        return await _settle(events, record, request, command.answer)
+
+    async def _run_screen(
+        self,
+        mission_id: str,
+        command: QuickCommand,
+        grants: Sequence[PermissionGrant],
+        session_id: str | None,
+    ) -> QuickOutcome:
+        """PHX-135 (ADR-247, ADR-248): capture the foreground window under
+        PermissionEngine, then describe it with the local vision model."""
+        screen = self._screen
+        call = None if screen is None else await asyncio.to_thread(screen.locate)
+        if screen is None or call is None:
+            nothing = QuickAnswerRecord(kind=command.kind)
+            return QuickOutcome(nothing, SCREEN_UNAVAILABLE, None)
+        started = time.monotonic()
+        events = MissionEvents(self._events, mission_id)
+        call_id = str(uuid4())
+        intent = screen.tool.describe(call)
+        request = PermissionRequest(
+            request_id=str(uuid4()),
+            actor_id=QUICK_ACTOR_ID,
+            tool_id=intent.tool_id,
+            action=intent.action,
+            resource=intent.resource,
+            reason=QUICK_SCREEN_REASON,
+            requested_at=datetime.now(UTC),
+            task_id=mission_id,
+            session_id=session_id,
         )
-        return QuickOutcome(record, None, None)
+        await events.emit(
+            EventType.TOOL_REQUESTED,
+            step_id=QUICK_STEP_ID,
+            tool_id=intent.tool_id,
+            call_id=call_id,
+            operation=intent.action,
+        )
+        result = await asyncio.to_thread(
+            screen.tool.execute, call, request, grants=usable_quick_grants(grants)
+        )
+        decision = result.permission_decision.status
+        answer = None
+        if (
+            decision == PermissionStatus.ALLOWED
+            and result.attempted
+            and result.status == ToolResultStatus.SUCCESS
+            and result.frame is not None
+        ):
+            answer = await screen.describe(result.frame)
+        record = QuickCallRecord(
+            call_id=call_id,
+            request_id=request.request_id,
+            tool_id=intent.tool_id,
+            kind=command.kind,
+            decision_status=decision,
+            matched_grant_id=result.permission_decision.matched_grant_id,
+            tool_status=result.status,
+            attempted=result.attempted,
+            verified=answer is not None,
+            duration_ms=elapsed_ms(started),
+        )
+        return await _settle(events, record, request, answer)
+
+
+async def _settle(
+    events: MissionEvents,
+    record: QuickCallRecord,
+    request: PermissionRequest,
+    answer: str | None,
+) -> QuickOutcome:
+    """The quick call's closing event and outcome (ADR-221)."""
+    tool = {"step_id": QUICK_STEP_ID, "tool_id": record.tool_id}
+    if record.decision_status == PermissionStatus.APPROVAL_REQUIRED:
+        await events.emit(
+            EventType.PERMISSION_REQUESTED,
+            **tool,
+            call_id=record.call_id,
+            permission_request_id=request.request_id,
+            risk_level=ToolRiskLevel.P1.value,
+        )
+        return QuickOutcome(record, None, request)
+    if record.verified:
+        await events.emit(
+            EventType.TOOL_COMPLETED,
+            **tool,
+            call_id=record.call_id,
+            tool_status=record.tool_status.value,
+            duration_ms=record.duration_ms,
+        )
+        return QuickOutcome(record, answer, None)
+    await events.emit(
+        EventType.TOOL_FAILED,
+        **tool,
+        call_id=record.call_id,
+        code="tool_failed",
+        decision=record.decision_status.value,
+        tool_status=record.tool_status.value,
+        duration_ms=record.duration_ms,
+    )
+    return QuickOutcome(record, None, None)
