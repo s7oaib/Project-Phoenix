@@ -969,6 +969,50 @@ def test_microphone_falls_back_to_the_device_rate_and_resamples(
     run(scenario())
 
 
+def test_busy_event_loop_is_not_mistaken_for_a_dead_microphone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Live 2026-10-23: the loop was busy for over two seconds while the
+    # device kept calling back; the read timed out and voice went
+    # microphone_unavailable although audio was flowing.
+    device = FakeSoundDevice()
+    monkeypatch.setitem(sys.modules, "sounddevice", device)
+    monkeypatch.setattr(sound, "_STALL_SECONDS", 0.2)
+
+    async def scenario() -> None:
+        mic = sound.SoundDeviceMicrophone()
+        await mic.start()
+        callback = device.inputs[0]["callback"]
+        reader = asyncio.ensure_future(mic.read())
+        await asyncio.sleep(0)
+        # The audio thread delivers while the loop is blocked past the stall
+        # time; the timer and the delivery then land in the same loop turn.
+        threading.Thread(target=callback, args=(tone(1), 480, None, None)).start()
+        time.sleep(0.35)
+        frame = await asyncio.wait_for(reader, 2)
+        assert len(frame.pcm_bytes_for_provider()) == 960
+        await mic.aclose()
+
+    run(scenario())
+
+
+def test_microphone_that_stops_calling_back_still_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    device = FakeSoundDevice()
+    monkeypatch.setitem(sys.modules, "sounddevice", device)
+    monkeypatch.setattr(sound, "_STALL_SECONDS", 0.05)
+
+    async def scenario() -> None:
+        mic = sound.SoundDeviceMicrophone()
+        await mic.start()
+        with pytest.raises(MicrophoneError):
+            await mic.read()
+        await mic.aclose()
+
+    run(scenario())
+
+
 def test_microphone_that_cannot_open_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
