@@ -5,7 +5,7 @@ Only summarized numbers are recorded here: no raw traces, prompts, answers or pr
 content. Live runs used the BLAZE-6 laptop (RTX 3050 6 GB, 23.7 GiB RAM, Windows 11)
 with Ollama and Qwen3.5 2B/4B/9B. The raw run outputs stay on the owner's machine.
 
-Cells marked **PENDING** are filled in by the release coordinator when the run finishes.
+All cells were filled from the 2026-10-22 runs.
 
 ## 1. Test matrix
 
@@ -46,10 +46,10 @@ Two prompt sets were exercised. `phoenix-prompts-v6` is the set on `main`.
 | Document read (PDF, DOCX) | ad hoc live harness (not in the repo) | v6 | 2/2 completed, expected content found | PASS |
 | Document create (Markdown) | ad hoc live harness (not in the repo) | v6, v7 | 0/7 files written (`verification_failed` ×5, `responder_output` ×2); no run claimed a file it did not write | FAIL |
 | Computer control smoke | `scripts/phoenix_control_smoke.py` | v6 | crashed (Playwright handlers not registered; smoke DB cleanup error) | FAIL, fixed in PHX-124 (PR #109, ADR-190) |
-| Computer control smoke re-run | `scripts/phoenix_control_smoke.py` | v6 | **PENDING: control smoke re-run on `main` after PR #109** | PENDING |
+| Computer control smoke re-run | `scripts/phoenix_control_smoke.py` | v6 | PASS (`--tools`, own Tk fixture + example.com read-only) | PASS |
 | Colibri deep-tier gate | `scripts/colibri_gate.py --io-bench --live` | — | INCOMPLETE: success 100%, accuracy 86%, TTFT median 11.3 s, RAM headroom 5.3 GiB, NVMe 1,367 MB/s all PASS; tokens/s NOT MEASURED (tokenizer throughput bug, fixed in PHX-124) | INCOMPLETE |
-| Colibri gate re-run | same | — | **PENDING: Colibri gate re-run result (verdict, tokens/s, VRAM)** | PENDING |
-| Demo rehearsal | `scripts/demo_rehearsal.py` | — | **PENDING: live demo rehearsal results (PASS/FAIL/SKIP/MANUAL per demo 1–8)** | PENDING |
+| Colibri gate re-run | same | — | FAIL (2026-10-22 re-run on 702a92f): tokens/s median 0.41 (needs ≥ 2.0, tokenizer recount, 16 trials) — the only failing criterion; success 100%, accuracy 86%, TTFT median 15.2 s, RAM headroom 5.7 GB, VRAM 0 (engine ran CPU-only, hot tier 0), disk read 1,502 MB/s all PASS. Configuration (3) is measured and rejected. | FAIL |
+| Demo rehearsal | `scripts/demo_rehearsal.py` | — | Live on 702a92f: 0/7 automated demos passed (demo 7 voice MANUAL). Root cause of demos 1, 2, 8 was a product bug (`.txt` reads rejected before PermissionEngine) fixed in PHX-126 (#113); after the fix demos 1, 2, 8 reach the permission prompt every run and passed 2/2, 1–2/2 and 2/2. Demos 3–6 still fail on model unreliability (planner/specialist choices, LEVI rejections); owner-gated prompt proposals are in tickets/PHX-126-demo-flow.md. | PARTIAL |
 
 ## 3. Security review
 
@@ -82,7 +82,7 @@ Full method and history: [`docs/24_TEST_EVALUATION.md`](../24_TEST_EVALUATION.md
 | (1) best single model | 2026-10-18 | 93% (4B, thinking off) / 100% (4B, thinking on) | — | 0.3 s / 7.2 s | one generation by one model |
 | (2) multi-agent, triage | 2026-10-18 | 64% | 69% | 1.1 s | before PHX-109 |
 | (2) multi-agent, triage | 2026-10-22 (v6) | 64% (9/14 scored) | 88% excl. fallbacks (14/16 completed, 0 fallbacks) | 1.09 s (0.85–11.6 s) | DIRECT 14/14 completed, 9/12 scored pass; COMPLEX 0/2 completed; MAHORAGA 2 of 3 actions recovered (67%) |
-| (3) adaptive deep (Colibri) | — | **PENDING: config (3) numbers, only if the Colibri gate re-run passes** | | | NOT RUNNABLE until the gate passes |
+| (3) adaptive deep (Colibri) | — | Not run: the gate failed on decode speed (0.41 tok/s < 2.0) | | | MEASURED AND REJECTED |
 
 Metric datasets (PHX-117, live LEVI, 2026-10-22, prompts v6):
 

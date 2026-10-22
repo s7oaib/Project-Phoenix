@@ -52,7 +52,7 @@ explicit owner deferral.
 | # | Requirement | Status | Evidence |
 |---|---|---|---|
 | M1 | Ollama default provider | DONE | PHX-011, PHX-100; `tests/test_ollama_provider.py`; every live run on 2026-10-22 used Ollama (Qwen3.5 4B/9B). |
-| M2 | Colibri optional deep provider | DONE-WITH-LIMITS | PHX-015, PHX-116 (ADR-120); `tests/test_colibri_provider.py`, `tests/test_colibri_gate.py`. Live gate 2026-10-22: INCOMPLETE (throughput not measured; fixed in PHX-124). **PENDING: Colibri gate re-run result (PASS / FAIL / INCOMPLETE).** |
+| M2 | Colibri optional deep provider | DONE-WITH-LIMITS | PHX-015, PHX-116 (ADR-120); `tests/test_colibri_provider.py`, `tests/test_colibri_gate.py`. Live gate 2026-10-22: INCOMPLETE (throughput not measured; fixed in PHX-124). FAIL (2026-10-22 re-run on 702a92f): tokens/s median 0.41 (needs ≥ 2.0, tokenizer recount, 16 trials) — the only failing criterion; success 100%, accuracy 86%, TTFT median 15.2 s, RAM headroom 5.7 GB, VRAM 0 (engine ran CPU-only, hot tier 0), disk read 1,502 MB/s all PASS. Configuration (3) is measured and rejected. |
 | M3 | Routing uses capability and hardware state | DONE | PHX-007 BLAZE-6, PHX-012, PHX-023; `tests/test_hardware.py`, `tests/test_agent_model_router.py`, `tests/test_model_registry.py`. |
 
 ### Memory/RAG
@@ -67,7 +67,7 @@ explicit owner deferral.
 
 | # | Requirement | Status | Evidence |
 |---|---|---|---|
-| C1 | Browser automation | DONE-WITH-LIMITS | PHX-050, PHX-112 (ADR-150–154), PHX-124 (ADR-190); `tests/test_browser_tool.py`. Playwright Chromium install: PASS. Live control smoke 2026-10-22 crashed; the fix merged in PR #109. **PENDING: control smoke re-run on `main`.** |
+| C1 | Browser automation | DONE-WITH-LIMITS | PHX-050, PHX-112 (ADR-150–154), PHX-124 (ADR-190); `tests/test_browser_tool.py`. Playwright Chromium install: PASS. Live control smoke 2026-10-22 crashed; the fix merged in PR #109. Control smoke `--tools` re-run on 702a92f after PR #109: PASS. |
 | C2 | App/window control | DONE-WITH-LIMITS | PHX-051, PHX-112 (ADR-052, ADR-152); `tests/test_windows_ui_automation.py`. Limit: same pending live control smoke as C1. |
 | C3 | Screenshot/vision | DONE | PHX-052 (ADR-053); `tests/test_screenshot_vision_loop.py`. Vision output is advisory only. |
 | C4 | Keyboard/mouse fallback | OPEN | No raw keyboard or mouse tool exists. Windows control uses native UIA patterns only, and ADR-052 deliberately avoids pywinauto keyboard fallback. Needs an owner decision: build it, or defer it from v0.1.0. |
@@ -102,5 +102,5 @@ explicit owner deferral.
 | G2 | Installer builds on `main` | DONE-WITH-LIMITS | `release-installer` run 39708451160 green; PHX-092 (ADR-125–129). Limit: unsigned installer (O5, optional). |
 | G3 | Security review: no open Critical/High; Mediums fixed | DONE | `docs/security/SECURITY_REVIEW_2026-10-22.md`; PHX-123 merged in PR #108 (ADR-180–189). |
 | G4 | FYP numbers recorded | DONE | `docs/24_TEST_EVALUATION.md`; config (1) and (2) measured; config (3) waits on M2. |
-| G5 | Demo rehearsal | MANUAL | PHX-093, `docs/DEMOS.md`, `scripts/demo_rehearsal.py`. **PENDING: live demo rehearsal results.** |
+| G5 | Demo rehearsal | MANUAL | PHX-093, `docs/DEMOS.md`, `scripts/demo_rehearsal.py`. Live on 702a92f: 0/7 automated demos passed (demo 7 voice MANUAL). Root cause of demos 1, 2, 8 was a product bug (`.txt` reads rejected before PermissionEngine) fixed in PHX-126 (#113); after the fix demos 1, 2, 8 reach the permission prompt every run and passed 2/2, 1–2/2 and 2/2. Demos 3–6 still fail on model unreliability (planner/specialist choices, LEVI rejections); owner-gated prompt proposals are in tickets/PHX-126-demo-flow.md. |
 | G6 | Demo videos recorded | MANUAL | `docs/DEMOS.md` (O1). |
