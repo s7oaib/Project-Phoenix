@@ -1975,20 +1975,23 @@ PHX_128_PATHS = ("phoenix/agents/control_steps.py",)
 # commit so this commit stays reachable).
 PHX_130_COMMIT = "c41bef4cce5e824a1d2c651c81c8b46b3c15421e"
 # PHX-133 moved six of them to its own pin (below).
-PHX_130_PATHS = (
-    "phoenix/models/ollama.py",
-)
+PHX_130_PATHS = ("phoenix/models/ollama.py",)
 # PHX-133 (ADR-235 to ADR-239) intentionally changed the event allowlist
 # (desktop.open_app), MissionTrace (quick_answers), the mission service (app
 # grants, clock answers), the missions and permissions routes (label, unbound
 # app approve) and the backend wiring (app tool). Each left the PHX-130 block
 # and stays pinned, at the PHX-133 implementation commit.
 PHX_133_COMMIT = "340695cb3548c00862a909a0152164aa8a9e1fe3"
+# PHX-136 moved api/missions.py to its own pin (below).
 PHX_133_PATHS = (
-    "phoenix/api/missions.py",
     "phoenix/api/routes/missions.py",
     "phoenix/api/routes/permissions.py",
 )
+# PHX-136 (ADR-250 to ADR-254) intentionally changed the mission service
+# (quick commands match through the runner's Start-menu shortcut index); it
+# left the PHX-133 block and stays pinned, at the PHX-136 implementation commit.
+PHX_136_COMMIT = "0626017bb15ce15f1d9181b8f5f299582d704444"
+PHX_136_PATHS = ("phoenix/api/missions.py",)
 # Microphone stall fix (2026-10-23, local review build) intentionally changed
 # voice/engines/sound.py: a busy event loop is no longer read as a dead
 # microphone; it stays pinned, at the fix commit.
@@ -2098,6 +2101,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_129_PATHS
         and path not in PHX_130_PATHS
         and path not in PHX_133_PATHS
+        and path not in PHX_136_PATHS
         and path not in PHX_MIC_PATHS
         and path not in PHX_131_PATHS
         and path not in PHX_132_PATHS
@@ -2139,6 +2143,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_129_COMMIT, path) for path in PHX_129_PATHS]
     baselines += [(PHX_130_COMMIT, path) for path in PHX_130_PATHS]
     baselines += [(PHX_133_COMMIT, path) for path in PHX_133_PATHS]
+    baselines += [(PHX_136_COMMIT, path) for path in PHX_136_PATHS]
     baselines += [(PHX_MIC_COMMIT, path) for path in PHX_MIC_PATHS]
     baselines += [(PHX_131_COMMIT, path) for path in PHX_131_PATHS]
     baselines += [(PHX_132_COMMIT, path) for path in PHX_132_PATHS]
