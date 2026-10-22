@@ -128,3 +128,4 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-123 Security review fixes — IN_PROGRESS (SR-01–SR-04 and cheap Lows from the 2026-10-22 review; ADR-180–189; implemented and tested on a local branch, awaiting PR review)
 - PHX-124 Live acceptance bug fixes — IN_PROGRESS (real Playwright handler registration, control smoke DB cleanup, Colibri gate tokenizer throughput and explicit VRAM reporting; ADR-190; awaiting PR review and a live gate re-run)
 - PHX-125 Mission reliability fixes — IN_PROGRESS (part A code-only safety: no pass for an unwritten file, repeated JSON keys rejected, disallowed domain retried once; ADR-195–197; part B model-visible inputs owner-gated)
+- PHX-126 Demo flow fixes — IN_PROGRESS (live rehearsal root causes; desktop documents step maps a read_document proposal for a plain-text file to PHOENIX's own read_text, ADR-200; model-only causes and prompt proposals recorded in the ticket)
