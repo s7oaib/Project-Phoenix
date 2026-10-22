@@ -2039,7 +2039,7 @@ PHX_132_PATHS = (
 PHX_131_132_COMMIT = "35c9d287255e692837c78c99f37251d4f26065df"
 PHX_131_132_PATHS = ("apps/desktop/src/adapters/core.ts",)
 # runtime.py carries PHX-131, PHX-132 and PHX-134; pinned at that merge.
-PHX_REVIEW_COMMIT = "0000000000000000000000000000000000000000"
+PHX_REVIEW_COMMIT = "290f6ffa57d0ca8fcf8a293b661e2e04486c06d0"
 PHX_REVIEW_PATHS = ("phoenix/agents/runtime.py",)
 
 
