@@ -45,6 +45,7 @@ from phoenix.agents.control_steps import (
     SECRET_TEXT_NOTE,
     ApprovalSummary,
     ControlApproval,
+    ControlCallRecord,
     ControlKillSwitch,
     ControlStepRunner,
     control_permission_policy,
@@ -758,11 +759,12 @@ def mission(
     approvals: tuple[ControlApproval, ...] = (),
     runtime: PhoenixRuntime | None = None,
     request_id: str = "req",
+    text: str = "What is the release codename?",
 ) -> MissionResult:
     async def exercise() -> MissionResult:
         active = rig.runtime() if runtime is None else runtime
         result: MissionResult = await active.run(
-            PhoenixRequest(request_id=request_id, text="What is the release codename?"),
+            PhoenixRequest(request_id=request_id, text=text),
             OrchestrationPath.COMPLEX,
             grants=grants,
             session_id=SESSION,
@@ -906,6 +908,151 @@ def test_p4_click_needs_one_explicit_approval_and_is_audited(rig: Rig) -> None:
     assert click.request_id == pending.request_id  # the exact request approved
     assert click.audited and click.effect_applied
     assert rig.audit_rows() == 3  # + permission decision and outcome
+
+
+# ---- PHX-128 (ADR-210): a requested action must have been performed
+
+CLICK_REQUEST = "Open the notes page in your browser and click the link on the page."
+
+
+def step_plan(objective: str) -> str:
+    return json.dumps({"steps": [{"objective": objective}]})
+
+
+def verdicts(result: MissionResult) -> list[str]:
+    return [v.verdict.value for v in result.trace.verifications]
+
+
+def test_click_step_that_only_navigated_and_read_fails_levi(rig: Rig) -> None:
+    # Captured live (demo 6): a click was asked for, the control specialist
+    # proposed only navigate and read_page (so no P4 request), and LEVI's model
+    # passed it, so PHOENIX reported a click it never performed.
+    rig.provider.replies["planner"] = step_plan("Open the page and click its link.")
+    result = mission(rig, rig.browser_grants(), text=CLICK_REQUEST)
+    assert (result.kind, result.failure_code) == (
+        MissionKind.FAILED,
+        MissionFailureCode.VERIFICATION_FAILED,
+    )
+    assert verdicts(result) == ["failed"]
+    # The deterministic check is final: LEVI's model is never asked.
+    assert "control_verifier" not in rig.provider.roles()
+    assert "final_answer" not in rig.provider.roles()
+    assert [c.tool_id for c in result.trace.control_calls] == [
+        "browser.session_open",
+        "browser.navigate",
+        "browser.read_page",
+        "browser.session_close",
+    ]
+    assert called(rig, "click") == []
+
+
+def test_control_mission_asking_for_a_click_never_made_fails(rig: Rig) -> None:
+    # The planned step only reads: the final answer fails instead.
+    result = mission(rig, rig.browser_grants(), text=CLICK_REQUEST)
+    assert result.failure_code == MissionFailureCode.VERIFICATION_FAILED
+    assert verdicts(result) == ["passed", "failed"]
+    assert "control_verifier" in rig.provider.roles()
+    assert "final_verifier" not in rig.provider.roles()
+
+
+def test_an_approved_p4_click_completes_the_click_request(rig: Rig) -> None:
+    rig.provider.replies["planner"] = step_plan("Open the page and click its link.")
+    rig.provider.replies["control_specialist"] = actions(navigate(), CLICK)
+    grants = rig.browser_grants(read=False)
+    waiting = mission(rig, grants, text=CLICK_REQUEST)
+    pending = waiting.pending_permission
+    assert pending is not None and pending.tool_id == "browser.click"
+    done = mission(rig, grants, approvals=(approve(pending),), text=CLICK_REQUEST)
+    assert done.kind == MissionKind.COMPLETED, done
+    assert verdicts(done) == ["passed", "passed"]
+    assert called(rig, "click") == [("click", "css=#buy")]
+
+
+def test_a_performed_click_never_overrides_levis_model(rig: Rig) -> None:
+    rig.provider.replies["planner"] = step_plan("Open the page and click its link.")
+    rig.provider.replies["control_specialist"] = actions(navigate(), CLICK)
+    rig.provider.replies["control_verifier"] = PASS.replace("true", "false")
+    grants = rig.browser_grants(read=False)
+    pending = mission(rig, grants, text=CLICK_REQUEST).pending_permission
+    assert pending is not None
+    done = mission(rig, grants, approvals=(approve(pending),), text=CLICK_REQUEST)
+    assert done.failure_code == MissionFailureCode.VERIFICATION_FAILED
+    assert called(rig, "click") == [("click", "css=#buy")]
+    assert rig.provider.roles().count("control_verifier") == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "What is the release codename?",
+        "Open the notes page, but do not click anything, and read the codename.",
+        "Navigate to the notes page and read the release codename.",
+    ],
+)
+def test_read_only_control_requests_are_unaffected(rig: Rig, text: str) -> None:
+    result = mission(rig, rig.browser_grants(), text=text)
+    assert result.kind == MissionKind.COMPLETED, result
+    assert verdicts(result) == ["passed", "passed"]
+
+
+@pytest.mark.parametrize(
+    ("text", "kinds"),
+    [
+        (CLICK_REQUEST, ("click",)),
+        ("Press the OK button in the dialog", ("click",)),
+        ("Type FALCON-2 into the codename field", ("fill",)),
+        ("Fill in the search form", ("fill",)),
+        ("Set the text of the codename box", ("fill",)),
+        ("Close the Notepad window", ("close_window",)),
+        ("Run the codename terminal profile", ("terminal",)),
+        ("Click Save, then close the editor window", ("click", "close_window")),
+        ("Read the release codename from the page.", ()),
+        ("Open the page without clicking any link", ()),
+        ("Don't click anything; just read the page", ()),
+        ("List the open windows and inspect the editor window", ()),
+        ("Take a screenshot of the window", ()),
+        ("Close the browser window", ()),
+        ("Enter the site and read the headline", ()),
+    ],
+)
+def test_requested_action_detection(text: str, kinds: tuple[str, ...]) -> None:
+    assert control_steps.requested_actions(text) == kinds
+
+
+def test_only_a_verified_effect_of_the_step_counts() -> None:
+    def record(**changes: object) -> ControlCallRecord:
+        data: dict[str, object] = {
+            "step_id": "s1",
+            "call_id": "c",
+            "request_id": "r",
+            "tool_id": "browser.click",
+            "action": "click",
+            "risk_level": ToolRiskLevel.P4,
+            "decision_status": PermissionStatus.ALLOWED,
+            "decision_reason": DecisionReason.EXPLICIT_USER_APPROVAL,
+            "tool_status": ToolResultStatus.SUCCESS,
+            "attempted": True,
+            "effect_applied": True,
+            "audited": True,
+        }
+        return ControlCallRecord.model_validate(data | changes)
+
+    performed = control_steps.performed_actions
+    assert performed([record()], ("click",), "s1")
+    assert performed([record()], ("click",))
+    assert not performed([record()], ("click",), "s2")
+    assert not performed([record()], ("click", "fill"))
+    assert not performed([record(tool_id="browser.read_page")], ("click",))
+    assert not performed([record(effect_applied=False)], ("click",))
+    assert not performed([record(attempted=False)], ("click",))
+    assert not performed([record(tool_status=ToolResultStatus.FAILURE)], ("click",))
+    assert not performed(
+        [record(decision_status=PermissionStatus.APPROVAL_REQUIRED)], ("click",)
+    )
+    # A read-only terminal profile never applies an effect, by design.
+    assert performed(
+        [record(tool_id="terminal.inspect", effect_applied=False)], ("terminal",)
+    )
 
 
 def test_an_approval_never_covers_a_different_action(rig: Rig) -> None:

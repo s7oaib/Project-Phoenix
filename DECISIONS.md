@@ -7042,3 +7042,55 @@ prompt additions for the owner.
 
 Consequences: no new capability, risk level or grant scope; only the choice
 between two P1 read tools for one path moves from the model to PHOENIX.
+
+## ADR-210 — No pass for a control action that was never performed
+
+Status: Accepted (PHX-128 owner instruction 2026-10-22; code only, no model-visible text)
+Date: 2026-10-22
+Ticket: PHX-128
+
+Context: in the live demo rehearsal (demo 6) a computer-control mission asked
+PHOENIX to open a page and click a link. The control specialist proposed only
+`navigate` and `read_page`, so no P4 click was requested, yet LEVI's model
+passed it and the mission completed, reporting a click that never happened.
+This is ADR-195's silent false success, for control work.
+
+Decision: LEVI adds one deterministic check (`deterministic.performed_action`)
+in two places, mirroring ADR-195:
+
+- a step routed to `computer_control` whose planned objective asks for a
+  state-changing action, and
+- the final answer of a mission that ran at least one control step, when the
+  user's request asks for one.
+
+`requested_actions` returns the requested action kinds; each kind needs one
+`ControlCallRecord` (of that step, or of any step for the final answer) of one
+of its tools that was ALLOWED, attempted, `success` and applied its effect:
+
+- click: "click"/"double-click", "invoke", "press/activate … button, control
+  or link" → `browser.click`, `windows.invoke_control`;
+- fill: "fill", "set (the) text", "type/enter/input/write/put … into/in …
+  field, box, textbox, input, form, bar or control" → `browser.fill`,
+  `windows.set_text`;
+- close_window: "close … window" (not "browser") → `windows.close_window`;
+- terminal: "run/execute … command, terminal, script or profile" →
+  `terminal.inspect`, `terminal.project`, `terminal.sensitive` (the read-only
+  `terminal.inspect` profile applies no effect by design, so its success
+  counts without one).
+
+A match preceded within two words by "not", "never", "without", "no",
+"nothing" or "n't" is ignored. A failed check is final: the inner LEVI
+responder and its model are not consulted, the step fails
+`verification_failed`, and nothing is retried. A passed check never passes
+anything by itself; the control evidence check and LEVI's model still decide.
+
+Detection prefers routing evidence: the check is offered only to control work,
+never to text, document, knowledge, research or media steps. Within that scope
+the keyword match can only add a failure, so a miss leaves today's behaviour
+and a false match turns a would-be completion into an honest failure.
+Media play/pause is not covered: PHX-113 records media acceptance with
+`effect_applied` false by design, so a media check would need its own evidence
+rule; left for a follow-up.
+Rejected: trusting the model's choice of actions (it is what failed), a
+planner-declared action field (model-visible change, out of scope), and
+counting PHOENIX's teardown `browser.session_close` as closing a window.

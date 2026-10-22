@@ -114,8 +114,11 @@ from phoenix.agents.control_steps import (
     ControlEvidence,
     ControlMission,
     ControlStepRunner,
+    PerformedActionVerificationResponder,
     SecretTextRefused,
     control_grants,
+    performed_actions,
+    requested_actions,
 )
 from phoenix.agents.failsafe import FailSafeDecision, FailSafeTrigger
 from phoenix.agents.final_grounding import (
@@ -1895,6 +1898,26 @@ class PhoenixRuntime:
                             evidence.capability_calls, None if final else step_id
                         ),
                     )
+                # PHX-128 (ADR-210): a control step whose objective asks for a
+                # state-changing action, or the answer of a control mission whose
+                # request asks for one, needs a verified matching control call
+                # (of that step, or of the mission).
+                actions = (
+                    requested_actions(request.text)
+                    if final and controls
+                    else requested_actions(step.objective)
+                    if step_id in controls
+                    else ()
+                )
+                if actions:
+                    levi = _performed_levi(
+                        levi,
+                        performed_actions(
+                            evidence.control_calls,
+                            actions,
+                            None if final else step_id,
+                        ),
+                    )
                 async with asyncio.timeout(limits.verification_timeout_seconds):
                     # PHX-109: only LEVI's failed generation is retried, never
                     # its verdict: a FAILED result returns from here as is.
@@ -2069,6 +2092,20 @@ def _written_levi(
 
     def responder(verifier: ModelBinding) -> VerificationResponder:
         return WrittenFileVerificationResponder(default(verifier), written=written)
+
+    return responder
+
+
+def _performed_levi(
+    default: Callable[[ModelBinding], VerificationResponder],
+    performed: bool,
+) -> Callable[[ModelBinding], VerificationResponder]:
+    """PHX-128 (ADR-210): no verified action, no pass; otherwise LEVI as before."""
+
+    def responder(verifier: ModelBinding) -> VerificationResponder:
+        return PerformedActionVerificationResponder(
+            default(verifier), performed=performed
+        )
 
     return responder
 
