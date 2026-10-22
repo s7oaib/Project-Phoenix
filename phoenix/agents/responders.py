@@ -181,10 +181,27 @@ def _unfenced(text: str) -> str:
     return match.group(1).strip() if match else body
 
 
+class _DuplicateKeyError(Exception):
+    """A JSON object repeated a key (PHX-125, ADR-196)."""
+
+
+def _unique_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value = dict(pairs)
+    if len(value) != len(pairs):
+        raise _DuplicateKeyError
+    return value
+
+
 def parse_json_object(text: str, contract: type[_Wire]) -> _Wire:
-    """Exactly one JSON object, optionally in one code fence, then strict validation."""
+    """Exactly one JSON object, optionally in one code fence, then strict validation.
+
+    PHX-125 (ADR-196): a repeated key at any depth is a schema error, never
+    silently resolved to its last value.
+    """
     try:
-        value = json.loads(_unfenced(text))
+        value = json.loads(_unfenced(text), object_pairs_hook=_unique_keys)
+    except _DuplicateKeyError:
+        raise ResponderOutputError(ResponderErrorCode.SCHEMA) from None
     except (ValueError, RecursionError):
         raise ResponderOutputError(ResponderErrorCode.NOT_JSON) from None
     if not isinstance(value, dict):

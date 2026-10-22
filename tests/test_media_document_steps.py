@@ -39,7 +39,12 @@ from phoenix.agents.capability_steps import (
     capability_grants,
 )
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
-from phoenix.agents.responders import ModelBinding, ResponderErrorCode
+from phoenix.agents.responders import (
+    ModelBinding,
+    ResponderErrorCode,
+    ResponderOutputError,
+    parse_json_object,
+)
 from phoenix.agents.router import RoutingDomain
 from phoenix.agents.runtime import (
     DOCUMENT_TOOL_REASON,
@@ -1548,3 +1553,223 @@ def test_new_modules_stay_provider_neutral() -> None:
             ):
                 assert module in tools, (name, module)
     assert capability_steps.MEDIA_ACTOR_ID == "media"
+
+
+# ---- PHX-125 (ADR-195): no silent false success
+
+
+CREATE_REQUEST = (
+    "Read report.md in my workspace, then create a new Markdown file "
+    "out/summary.md containing a short summary of it."
+)
+
+
+def false_success(stack: Stack, *steps: tuple[str, str]) -> None:
+    """The captured PHX-125 run: every document step only ever reads."""
+    stack.provider.replies.update(
+        {
+            **plan(*steps),
+            "document_capability": proposal(
+                operation="read_document", relative_path="report.md"
+            ),
+            "document_capability_answer": "# Summary\n\nThe codename is PELICAN-7.",
+            "final_answer": "# Summary\n\nThe codename is PELICAN-7.",
+        }
+    )
+
+
+def test_create_step_that_only_read_fails_levi(stack: Stack) -> None:
+    # Captured live (PHX-125): step s2 was asked to create out/summary.md, read
+    # report.md instead, and LEVI's model passed it, so the mission completed
+    # claiming a file that does not exist.
+    false_success(
+        stack,
+        ("read the text of report.md in the user's workspace", "documents"),
+        (
+            "create a new Markdown file out/summary.md containing a short "
+            "summary of the content read from report.md",
+            "documents",
+        ),
+    )
+    result = mission(stack, (stack.document_grant(),), text=CREATE_REQUEST)
+    assert (result.kind, result.failure_code) == (
+        MissionKind.FAILED,
+        MissionFailureCode.VERIFICATION_FAILED,
+    )
+    assert [v.verdict for v in result.trace.verifications] == [
+        VerificationVerdict.PASSED,
+        VerificationVerdict.FAILED,
+    ]
+    # The deterministic check is final: LEVI's model judged s1 only.
+    assert stack.provider.roles().count("capability_verifier") == 1
+    assert "final_answer" not in stack.provider.roles()
+    assert [r.tool_id for r in result.trace.capability_calls] == [
+        "document.read",
+        "document.read",
+    ]
+    assert not (stack.root / "out" / "summary.md").exists()
+
+
+def test_document_mission_asking_for_a_file_never_created_fails(stack: Stack) -> None:
+    # No step was planned to write: the final answer fails instead.
+    false_success(stack, ("Read report.md in the workspace.", "documents"))
+    result = mission(
+        stack,
+        (stack.document_grant(),),
+        text="Read report.md in my workspace and save a summary to out/summary.md",
+    )
+    assert (result.kind, result.failure_code) == (
+        MissionKind.FAILED,
+        MissionFailureCode.VERIFICATION_FAILED,
+    )
+    assert [v.verdict for v in result.trace.verifications] == [
+        VerificationVerdict.PASSED,
+        VerificationVerdict.FAILED,
+    ]
+    assert "final_verifier" not in stack.provider.roles()
+
+
+def test_create_request_with_a_verified_write_completes(stack: Stack) -> None:
+    stack.provider.replies.update(
+        {
+            **plan(
+                ("Read report.md in the workspace.", "documents"),
+                ("Save a summary to out/summary.md.", "documents"),
+            ),
+            # The original request also names report.md: tell steps apart.
+            "document_capability": lambda request: proposal(
+                operation="create_document",
+                relative_path="out/summary.md",
+                title="Summary",
+                sections=[{"heading": "Codename", "paragraphs": ["PELICAN-7"]}],
+            )
+            if "Save a summary" in request.messages[1].text
+            else proposal(operation="read_document", relative_path="report.md"),
+            "document_capability_answer": "Saved the summary to out/summary.md.",
+            "final_answer": "Saved out/summary.md.",
+        }
+    )
+    result = mission(
+        stack,
+        (
+            stack.document_grant(),
+            stack.document_grant("create", "out/summary.md", grant_id="Grant.C"),
+        ),
+        text=CREATE_REQUEST,
+    )
+    assert result.kind is MissionKind.COMPLETED
+    assert [v.verdict for v in result.trace.verifications] == [
+        VerificationVerdict.PASSED
+    ] * 3
+    assert (stack.root / "out" / "summary.md").is_file()
+
+
+def test_write_check_only_adds_a_failure_never_a_pass(stack: Stack) -> None:
+    # A verified write does not override LEVI's model: it still decides.
+    stack.provider.replies.update(
+        {
+            **plan(("Save a summary to out/summary.md.", "documents")),
+            "document_capability": proposal(
+                operation="create_document",
+                relative_path="out/summary.md",
+                title="Summary",
+                sections=[{"heading": "Codename", "paragraphs": ["PELICAN-7"]}],
+            ),
+            "capability_verifier": PASS.replace("true", "false"),
+        }
+    )
+    result = mission(
+        stack, (stack.document_grant("create", "out/summary.md", grant_id="Grant.C"),)
+    )
+    assert result.failure_code is MissionFailureCode.VERIFICATION_FAILED
+    assert stack.provider.roles().count("capability_verifier") == 1
+
+
+def test_write_check_is_limited_to_document_work(stack: Stack) -> None:
+    # Outside a document step and a document mission nothing changes.
+    stack.provider.replies.update(
+        {
+            **plan(("Write the summary to out/summary.md.", "intelligence")),
+            "final_answer": "Here is the summary.",
+        }
+    )
+    result = mission(stack, text="Write a summary and save it to out/summary.md")
+    assert result.kind is MissionKind.COMPLETED
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "create a new Markdown file out/summary.md containing a short summary",
+        "Read report.pdf in my workspace and save a summary to out/summary.md",
+        "Write a summary to out/summary.docx.",
+        "save the summary as summary.md",
+        "create out/data.csv",
+        "generate a CSV file with the rows",
+        "Export the table into a new spreadsheet file",
+    ],
+)
+def test_write_intent_is_recognised(text: str) -> None:
+    assert capability_steps.requires_written_file(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "read the text of report.pdf in the user's workspace",
+        "write a short summary of report.pdf",
+        "write a summary of the text in report.pdf",
+        "produce a summary of the file",
+        "summarize the content read from report.pdf",
+        "store the result in memory",
+        "write the answer to the user",
+        "How do I save a file in Python?",
+        "What is the project codename?",
+    ],
+)
+def test_reads_and_questions_are_not_write_intent(text: str) -> None:
+    assert not capability_steps.requires_written_file(text)
+
+
+def test_only_a_verified_write_of_the_step_counts() -> None:
+    def record(**changes: object) -> CapabilityCallRecord:
+        data: dict[str, object] = {
+            "step_id": "s2",
+            "call_id": "c",
+            "request_id": "r",
+            "tool_id": "document.create",
+            "decision_status": PermissionStatus.ALLOWED,
+            "tool_status": ToolResultStatus.SUCCESS,
+            "attempted": True,
+            "effect_applied": True,
+        }
+        return CapabilityCallRecord.model_validate(data | changes)
+
+    assert capability_steps.wrote_file((record(),), "s2")
+    assert capability_steps.wrote_file((record(),))
+    assert not capability_steps.wrote_file((record(),), "s1")
+    for changes in (
+        {"tool_id": "document.read", "effect_applied": False},
+        {"decision_status": PermissionStatus.APPROVAL_REQUIRED, "attempted": False},
+        {"tool_status": ToolResultStatus.FAILURE, "effect_applied": False},
+        {"effect_applied": False},
+    ):
+        assert not capability_steps.wrote_file((record(**changes),))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"tool_request": {"operation": "create_document",'
+        ' "operation": "read_document", "relative_path": "report.md"}}',
+        '{"tool_request": {"operation": "read_document", "relative_path": "a.md"},'
+        ' "tool_request": {"operation": "read_document", "relative_path": "b.md"}}',
+    ],
+)
+def test_duplicate_keys_are_a_schema_error(text: str) -> None:
+    # PHX-125 (ADR-196): never "the last value wins", at any depth.
+    with pytest.raises(ResponderOutputError) as caught:
+        parse_json_object(text, capability_steps._DocumentEnvelope)
+    assert caught.value.code is ResponderErrorCode.SCHEMA
+    once = '{"tool_request": {"operation": "read_document", "relative_path": "a.md"}}'
+    assert parse_json_object(once, capability_steps._DocumentEnvelope)

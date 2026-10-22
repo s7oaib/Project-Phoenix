@@ -59,13 +59,15 @@ class RecoveryClass(StrEnum):
     PROVIDER_ERROR = "provider_error"
 
 
-# Structural output failures only; oversized, invalid text, unknown step and
-# disallowed domain are not transient and are never retried.
+# Structural output failures, plus an assignment to a domain that was not
+# offered (PHX-125, ADR-197), within the same MAHORAGA budgets; oversized,
+# invalid text and unknown step are not transient and are never retried.
 RETRYABLE_OUTPUT: frozenset[ResponderErrorCode] = frozenset(
     {
         ResponderErrorCode.NOT_JSON,
         ResponderErrorCode.SCHEMA,
         ResponderErrorCode.TRUNCATED,
+        ResponderErrorCode.DISALLOWED_DOMAIN,
     }
 )
 
