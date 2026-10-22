@@ -79,7 +79,6 @@ from phoenix.agents.quick_commands import (
     QuickCallRecord,
     QuickCommand,
     QuickCommandRunner,
-    match_quick_command,
     quick_grants,
 )
 from phoenix.agents.research_steps import mission_grants
@@ -445,7 +444,7 @@ class MissionService:
                 elif (
                     command := None
                     if self._quick is None
-                    else match_quick_command(claimed.text)
+                    else self._quick.match(claimed.text)  # PHX-136: shortcuts
                 ) is not None:
                     outcome = await self._run_quick(mission_id, command, found.grants)
                 else:
