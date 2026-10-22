@@ -1967,9 +1967,17 @@ PHX_125B_COMMIT = "1071c4fefb15ff1410d972e23c1507ae11de975b"
 PHX_125B_PATHS = (
     "phoenix/agents/capability_steps.py",
     "phoenix/agents/control_steps.py",
-    "phoenix/agents/prompts.py",
     "phoenix/agents/responders.py",
     "phoenix/agents/tool_steps.py",
+)
+# PHX-127 (ADR-205; owner-approved 2026-10-22) intentionally changed prompts.py
+# (phoenix-prompts-v8; it left the PHX-125b block) and control_prompts.py
+# (phoenix-control-prompts-v2). Both stay pinned at the PHX-127 implementation
+# commit (the PR must merge with a merge commit so this commit stays reachable).
+PHX_127_COMMIT = "aeac92392a4cce51c6ec5b851772b82155eefd8f"
+PHX_127_PATHS = (
+    "phoenix/agents/control_prompts.py",
+    "phoenix/agents/prompts.py",
 )
 
 
@@ -2012,6 +2020,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_123_124_PATHS
         and path not in PHX_125A_PATHS
         and path not in PHX_125B_PATHS
+        and path not in PHX_127_PATHS
         and path not in PHX_126_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
@@ -2044,6 +2053,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_125A_COMMIT, path) for path in PHX_125A_PATHS]
     baselines += [(PHX_126_COMMIT, path) for path in PHX_126_PATHS]
     baselines += [(PHX_125B_COMMIT, path) for path in PHX_125B_PATHS]
+    baselines += [(PHX_127_COMMIT, path) for path in PHX_127_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
