@@ -137,3 +137,4 @@ Phase 8 status: COMPLETE — native WebView2 acceptance finished on 2026-10-14 (
 - PHX-132 Streaming answers — DONE (DIRECT replies stream word by word to Chat over agent.started answer deltas; voice speaks the first sentence early; ADR-230–234; local branch, not pushed)
 - PHX-134 4B planner — DONE (`PHOENIX_PLANNER_TIER=4b` runs AIZEN's plan and step assignment on qwen3.5:4b; default stays 9b on live evidence: 4B faster but 2/3 vs 3/3; ADR-240–241; local branch, not pushed)
 - PHX-133 More quick commands — DONE (Wikipedia/GitHub/Gmail/Maps/News links, local time/date answers, P1 `desktop.open_app` for Notepad/Calculator/File Explorer; ADR-235–239; local branch, not pushed)
+- PHX-136 Play on YouTube, open anything — DONE (play X / play some music opens a YouTube video, no API key; "open <app>" via Start-menu shortcuts and "open <site>" home pages, one wide P1 scope each; ADR-250–254; local branch, not pushed)

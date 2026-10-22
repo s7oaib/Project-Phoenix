@@ -20,6 +20,18 @@ PHX-133 (ADR-235..239) adds:
   ``desktop.open_app`` (P1, its own fixed scope) launches the app by its fixed
   system path with no arguments.
 
+PHX-136 (ADR-250..254) adds:
+
+- "play X on youtube", "play X" (X names a song, music or video) and "play
+  (some/random) music": the first (or, for music, a random top-5) video of
+  YouTube's results page, fetched after ALLOWED, opens as a watch page on
+  ``www.youtube.com`` (same link scope); a failed fetch opens the results;
+- "open <app>": an installed Start-menu shortcut (fuzzy name match, a tie is
+  not a quick command), ``desktop.open_app`` under its own shortcut scope;
+- "open <site>": a bare domain ("reddit.com") or a known name ("open
+  amazon"), ``https://<domain>/`` only, ``desktop.open_link`` under its own
+  website scope. A shortcut beats a known name unless the text has a TLD.
+
 Polite prefixes ("please", "can you", "Phoenix,", "rise, phoenix", ...) and a
 trailing "please" or punctuation are ignored. Anything else, including a query
 holding a URL scheme, "www." or shell punctuation, is not a quick command and
@@ -36,17 +48,22 @@ when the call was ALLOWED, attempted and succeeded.
 """
 
 import asyncio
+import random
 import re
+import string
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from difflib import SequenceMatcher
 from enum import StrEnum
+from functools import partial
 from hashlib import sha256
 from typing import cast
 from urllib.parse import quote_plus
 from uuid import uuid4
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from phoenix.agents.mission_events import EventPublisher, MissionEvents, elapsed_ms
@@ -59,15 +76,20 @@ from phoenix.security.permissions import (
 )
 from phoenix.tools.open_app import (
     OPEN_APP_TOOL_ID,
+    SHORTCUT_RESOURCE,
     AppName,
     OpenAppResult,
     OpenAppTool,
+    shortcut_key,
 )
 from phoenix.tools.open_link import (
     ALLOWED_HOSTS,
     OPEN_LINK_TOOL_ID,
+    SITE_RESOURCE,
+    OpenLinkInputError,
     OpenLinkResult,
     OpenLinkTool,
+    site_root_url,
 )
 from phoenix.tools.registry import ToolResultStatus, ToolRiskLevel
 
@@ -83,6 +105,13 @@ QUICK_APP_REASON = "PHOENIX quick command: open an allowlisted app"
 QUICK_SCOPES: dict[str, tuple[str, str, str]] = {
     OPEN_LINK_TOOL_ID: (QUICK_ACTION, QUICK_RESOURCE, QUICK_REASON),
     OPEN_APP_TOOL_ID: (QUICK_APP_ACTION, QUICK_APP_RESOURCE, QUICK_APP_REASON),
+}
+# PHX-136 (ADR-252): one wide scope per tool, beside the fixed one above.
+QUICK_SITE_REASON = "PHOENIX quick command: open a public website's home page"
+QUICK_SHORTCUT_REASON = "PHOENIX quick command: open an installed Start-menu app"
+QUICK_WIDE_SCOPES: dict[str, tuple[str, str, str]] = {
+    OPEN_LINK_TOOL_ID: (QUICK_ACTION, SITE_RESOURCE, QUICK_SITE_REASON),
+    OPEN_APP_TOOL_ID: (QUICK_APP_ACTION, SHORTCUT_RESOURCE, QUICK_SHORTCUT_REASON),
 }
 QUICK_STEP_ID = "s1"
 MAX_QUERY_CHARS = 200
@@ -100,6 +129,47 @@ MAPS_HOME = "https://www.google.com/maps/"
 NEWS_HOME = "https://news.google.com/"
 _WIKIPEDIA_SEARCH = "https://en.wikipedia.org/wiki/Special:Search?search="
 _MAPS_SEARCH = "https://www.google.com/maps/search/"
+# PHX-136 (ADR-253): YouTube play, no API key.
+YOUTUBE_WATCH = "https://www.youtube.com/watch?v="
+YOUTUBE_FETCH_TIMEOUT = 5.0
+MAX_RESULTS_PAGE_CHARS = 4_000_000
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+)
+_VIDEO_ID = re.compile(r'"videoId":"([A-Za-z0-9_-]{11})"')
+MUSIC_QUERIES = (
+    "lofi hip hop",
+    "chill pop hits",
+    "bollywood hits",
+    "relaxing piano",
+    "top songs 2026",
+    "acoustic covers",
+)
+MUSIC_PICK_FROM = 5
+# PHX-136 (ADR-251): known names -> one fixed domain (https home page only).
+KNOWN_SITES: dict[str, tuple[str, str]] = {
+    "amazon": ("www.amazon.com", "Amazon"),
+    "reddit": ("www.reddit.com", "Reddit"),
+    "netflix": ("www.netflix.com", "Netflix"),
+    "chatgpt": ("chatgpt.com", "ChatGPT"),
+    "instagram": ("www.instagram.com", "Instagram"),
+    "facebook": ("www.facebook.com", "Facebook"),
+    "twitter": ("x.com", "X"),
+    "x": ("x.com", "X"),
+    "linkedin": ("www.linkedin.com", "LinkedIn"),
+    "spotify web": ("open.spotify.com", "Spotify Web"),
+}
+# A bare domain: labels, then a TLD from a fixed generic set or two letters
+# that are not common file extensions ("notes.md" is a file, not a site).
+_DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?P<tld>[a-z]{2,24})")
+_GENERIC_TLDS = frozenset(
+    "com org net edu gov io ai co app dev me tv info biz xyz online site store "
+    "tech blog news shop cloud live today world".split()
+)
+_FILE_TLDS = frozenset("md py js ts cs rs sh db gz ps rb pl".split())
+_TARGET = re.compile(r"[A-Za-z0-9][A-Za-z0-9 .+'_-]{0,59}")
+SHORTCUT_MIN_RATIO = 0.8
 _WEEKDAYS = (
     "Monday",
     "Tuesday",
@@ -144,6 +214,11 @@ class QuickKind(StrEnum):
     OPEN_NOTEPAD = "open_notepad"
     OPEN_CALCULATOR = "open_calculator"
     OPEN_FILE_EXPLORER = "open_file_explorer"
+    # PHX-136
+    PLAY_YOUTUBE = "play_youtube"
+    PLAY_MUSIC = "play_music"
+    OPEN_SITE = "open_site"
+    OPEN_SHORTCUT = "open_shortcut"
 
 
 # PHX-133: local answers (no tool) and app launches (desktop.open_app).
@@ -153,6 +228,7 @@ APP_KINDS: dict[QuickKind, AppName] = {
     QuickKind.OPEN_CALCULATOR: AppName.CALCULATOR,
     QuickKind.OPEN_FILE_EXPLORER: AppName.FILE_EXPLORER,
 }
+PLAY_KINDS = frozenset({QuickKind.PLAY_YOUTUBE, QuickKind.PLAY_MUSIC})
 
 
 @dataclass(frozen=True)
@@ -161,6 +237,7 @@ class QuickCommand:
     url: str | None  # None for a local answer or an app (PHX-133)
     answer: str
     query: str | None = None
+    shortcut: str | None = None  # PHX-136: an indexed Start-menu shortcut key
 
     @property
     def app(self) -> AppName | None:
@@ -248,7 +325,7 @@ _SEARCHES: tuple[tuple[re.Pattern[str], QuickKind], ...] = tuple(
     for pattern in (
         rf"search\s+(?:on\s+)?{site}\s+for\s+{_Q}",
         rf"search\s+for\s+{_Q}\s+on\s+{site}",
-        rf"(?:play|find|watch)\s+{_Q}\s+on\s+{site}"
+        rf"(?:find|watch)\s+{_Q}\s+on\s+{site}"
         if site == "youtube"
         else rf"{site}\s+{_Q}",
     )
@@ -273,6 +350,14 @@ _SEARCH_TARGETS: dict[QuickKind, tuple[str, str]] = {
     QuickKind.SEARCH_WIKIPEDIA: (_WIKIPEDIA_SEARCH, "Wikipedia search"),
     QuickKind.SEARCH_MAPS: (_MAPS_SEARCH, "Google Maps search"),
 }
+# PHX-136 (ADR-253): play commands; "play X" alone only for songs or videos.
+_PLAY_MUSIC = re.compile(
+    r"play\s+(?:some\s+|random\s+)?music(?:\s+on\s+youtube)?", re.IGNORECASE
+)
+_PLAY_ON_YOUTUBE = re.compile(rf"play\s+{_Q}\s+on\s+youtube", re.IGNORECASE)
+_PLAY = re.compile(rf"play\s+{_Q}", re.IGNORECASE)
+_MEDIA_WORD = re.compile(r"\b(?:songs?|music|videos?|youtube)\b", re.IGNORECASE)
+_OPEN_TARGET = re.compile(rf"{_OPEN}\s+(?P<t>.+)", re.IGNORECASE)
 # A query is plain search text: no link, no shell or markup punctuation.
 _UNSAFE_QUERY = re.compile(r"://|\bwww\.|[;|&<>`$\\{}\[\]]|[\x00-\x1f\x7f]")
 
@@ -287,12 +372,141 @@ def _clock_answer(kind: QuickKind, now: datetime) -> str:
     return f"Today is {weekday}, {now.day} {_MONTHS[now.month - 1]} {now.year}."
 
 
+def best_shortcut(target: str, names: frozenset[str]) -> str | None:
+    """PHX-136 (ADR-250): the shortcut key target names, or None.
+
+    Exact key first; else keys holding target's words as whole words, or close
+    spellings (ratio >= 0.8), ranked by (whole words, ratio); a tie is None.
+    """
+    key = shortcut_key(target)
+    if len(key) < 2:
+        return None
+    if key in names:
+        return key
+    words = key.split()
+    scored: list[tuple[tuple[bool, float], str]] = []
+    for name in names:
+        parts = name.split()
+        whole = any(
+            parts[i : i + len(words)] == words
+            for i in range(len(parts) - len(words) + 1)
+        )
+        ratio = SequenceMatcher(None, key, name).ratio()
+        if whole or ratio >= SHORTCUT_MIN_RATIO:
+            scored.append(((whole, ratio), name))
+    if not scored:
+        return None
+    scored.sort(reverse=True)
+    if len(scored) > 1 and scored[0][0] == scored[1][0]:
+        return None  # ambiguous: the normal pipeline decides
+    return scored[0][1]
+
+
+def _open_target(raw: str, shortcuts: frozenset[str]) -> QuickCommand | None:
+    """PHX-136: "open <app or site>"; domain (TLD), shortcut, then known name."""
+    target = re.sub(r"^(?:the|my)\s+", "", raw.strip(" \"'"), flags=re.IGNORECASE)
+    target = re.sub(r"\s+(?:app|website|site)$", "", target, flags=re.IGNORECASE)
+    if not _TARGET.fullmatch(target):
+        return None
+    lower = target.lower()
+    if "." in lower:  # a domain or nothing (never a file name or a path)
+        domain = _DOMAIN.fullmatch(lower)
+        tld = "" if domain is None else domain.group("tld")
+        if tld not in _GENERIC_TLDS and (len(tld) != 2 or tld in _FILE_TLDS):
+            return None
+        try:
+            url = site_root_url(f"https://{lower}/")
+        except OpenLinkInputError:
+            return None
+        return QuickCommand(QuickKind.OPEN_SITE, url, f"Opened {lower}.", lower)
+    name = best_shortcut(lower, shortcuts)
+    if name is not None:
+        return QuickCommand(
+            QuickKind.OPEN_SHORTCUT,
+            None,
+            f"Opened {string.capwords(name)}.",
+            lower,
+            shortcut=name,
+        )
+    known = KNOWN_SITES.get(shortcut_key(lower))
+    if known is None:
+        return None
+    domain_name, label = known
+    return QuickCommand(
+        QuickKind.OPEN_SITE, f"https://{domain_name}/", f"Opened {label}.", lower
+    )
+
+
+def _play(body: str) -> QuickCommand | None:
+    """PHX-136 (ADR-253): a YouTube play command; url is the results fallback."""
+    if _PLAY_MUSIC.fullmatch(body):
+        query = random.choice(MUSIC_QUERIES)
+        return QuickCommand(
+            QuickKind.PLAY_MUSIC,
+            _YOUTUBE_SEARCH + quote_plus(query, safe=""),
+            f"Playing {query} on YouTube.",
+            query,
+        )
+    found = _PLAY_ON_YOUTUBE.fullmatch(body)
+    if found is None:
+        found = _PLAY.fullmatch(body)
+        if found is None or not _MEDIA_WORD.search(found.group("q")):
+            return None
+    query = found.group("q").strip(" \"'")
+    if not query or len(query) > MAX_QUERY_CHARS or _UNSAFE_QUERY.search(query):
+        return None
+    return QuickCommand(
+        QuickKind.PLAY_YOUTUBE,
+        _YOUTUBE_SEARCH + quote_plus(query, safe=""),
+        f"Playing {query} on YouTube.",
+        query,
+    )
+
+
+def video_ids(page: str, limit: int) -> tuple[str, ...]:
+    """PHX-136: the first distinct ``videoId`` values of a results page."""
+    found: list[str] = []
+    for match in _VIDEO_ID.finditer(page[:MAX_RESULTS_PAGE_CHARS]):
+        if match.group(1) not in found:
+            found.append(match.group(1))
+            if len(found) >= limit:
+                break
+    return tuple(found)
+
+
+def find_youtube_video(query: str, pick_random: bool) -> str | None:
+    """PHX-136 (ADR-253): a watch URL for query from YouTube's public results
+    page (fixed host, no API key, 5 s, no redirects), or None."""
+    try:
+        response = httpx.get(
+            _YOUTUBE_SEARCH + quote_plus(query, safe=""),
+            headers={"User-Agent": _USER_AGENT, "Accept-Language": "en-US,en;q=0.9"},
+            timeout=YOUTUBE_FETCH_TIMEOUT,
+            follow_redirects=False,
+        )
+    except httpx.HTTPError:
+        return None
+    if response.status_code != 200:
+        return None
+    ids = video_ids(response.text, MUSIC_PICK_FROM if pick_random else 1)
+    if not ids:
+        return None
+    return YOUTUBE_WATCH + (random.choice(ids) if pick_random else ids[0])
+
+
+VideoFinder = Callable[[str, bool], str | None]
+
+
 def match_quick_command(
-    text: str, *, now: datetime | None = None
+    text: str,
+    *,
+    now: datetime | None = None,
+    shortcuts: frozenset[str] = frozenset(),
 ) -> QuickCommand | None:
     """The quick command text asks for, or None (then the normal pipeline).
 
-    ``now`` (tests) replaces the local clock for the time and date answers.
+    ``now`` (tests) replaces the local clock for the time and date answers;
+    ``shortcuts`` (PHX-136) are the indexed Start-menu shortcut keys.
     """
     if type(text) is not str or len(text) > MAX_TEXT_CHARS:
         return None
@@ -308,6 +522,8 @@ def match_quick_command(
                 return QuickCommand(kind, None, _clock_answer(kind, local))
             url, answer = _EXACT_TARGETS[kind]
             return QuickCommand(kind, url, answer)
+    if body.lower().startswith("play "):  # PHX-136
+        return _play(body)
     for pattern, kind in _SEARCHES:
         found = pattern.fullmatch(body)
         if found is None:
@@ -322,12 +538,25 @@ def match_quick_command(
             f"Opened {site} for {query}.",
             query,
         )
-    return None
+    opened = _OPEN_TARGET.fullmatch(body)  # PHX-136
+    return None if opened is None else _open_target(opened.group("t"), shortcuts)
+
+
+def _scope(command: QuickCommand) -> tuple[str, tuple[str, str, str]]:
+    """The tool and its one scope for a quick command (PHX-136: wide scopes)."""
+    if command.shortcut is not None:
+        return OPEN_APP_TOOL_ID, QUICK_WIDE_SCOPES[OPEN_APP_TOOL_ID]
+    if command.app is not None:
+        return OPEN_APP_TOOL_ID, QUICK_SCOPES[OPEN_APP_TOOL_ID]
+    if command.kind == QuickKind.OPEN_SITE:
+        return OPEN_LINK_TOOL_ID, QUICK_WIDE_SCOPES[OPEN_LINK_TOOL_ID]
+    return OPEN_LINK_TOOL_ID, QUICK_SCOPES[OPEN_LINK_TOOL_ID]
 
 
 def quick_grants(grants: object) -> tuple[PermissionGrant, ...]:
     """Caller grants for quick commands: one of the fixed P1 scopes (links,
-    PHX-133 apps), SESSION or PERSISTENT; anything else raises ValueError."""
+    PHX-133 apps) or (PHX-136) the wide website or shortcut scope, SESSION or
+    PERSISTENT; anything else raises ValueError."""
     if type(grants) not in (tuple, list):
         raise ValueError("Grants require an ordered sequence")
     accepted: list[PermissionGrant] = []
@@ -335,9 +564,13 @@ def quick_grants(grants: object) -> tuple[PermissionGrant, ...]:
         if type(grant) is not PermissionGrant:
             raise ValueError("Expected PermissionGrant instances")
         grant = PermissionGrant.model_validate(grant)
+        scope = (grant.action, grant.resource, grant.reason)
+        allowed = (
+            QUICK_SCOPES.get(grant.tool_id),
+            QUICK_WIDE_SCOPES.get(grant.tool_id),
+        )
         if (
-            QUICK_SCOPES.get(grant.tool_id)
-            != (grant.action, grant.resource, grant.reason)
+            scope not in allowed
             or grant.actor_id != QUICK_ACTOR_ID
             or grant.risk_level != ToolRiskLevel.P1
             or grant.duration not in (GrantDuration.SESSION, GrantDuration.PERSISTENT)
@@ -405,6 +638,7 @@ class QuickCommandRunner:
         tool: OpenLinkTool,
         apps: OpenAppTool,
         events: EventPublisher | None = None,
+        find_video: VideoFinder = find_youtube_video,
     ):
         if type(tool) is not OpenLinkTool:
             raise TypeError("Expected an OpenLinkTool")
@@ -413,6 +647,11 @@ class QuickCommandRunner:
         self._tool = tool
         self._apps = apps
         self._events = events if events is not None else EventPublisher(None)
+        self._find_video = find_video
+
+    def match(self, text: str) -> QuickCommand | None:
+        """PHX-136: match_quick_command with this runner's shortcut index."""
+        return match_quick_command(text, shortcuts=self._apps.shortcut_names)
 
     async def run(
         self,
@@ -429,8 +668,7 @@ class QuickCommandRunner:
         events = MissionEvents(self._events, mission_id)
         call_id = str(uuid4())
         app = command.app
-        tool_id = OPEN_LINK_TOOL_ID if app is None else OPEN_APP_TOOL_ID
-        action, resource, reason = QUICK_SCOPES[tool_id]
+        tool_id, (action, resource, reason) = _scope(command)
         request = PermissionRequest(
             request_id=str(uuid4()),
             actor_id=QUICK_ACTOR_ID,
@@ -448,11 +686,25 @@ class QuickCommandRunner:
         )
         usable = usable_quick_grants(grants)
         result: OpenAppResult | OpenLinkResult
-        if app is not None:
+        reply = command.answer
+        if command.shortcut is not None:  # PHX-136
+            result = await asyncio.to_thread(
+                self._apps.open_shortcut, command.shortcut, request, usable
+            )
+        elif app is not None:
             result = await asyncio.to_thread(self._apps.open, app, request, usable)
         else:
             url = cast(str, command.url)
-            result = await asyncio.to_thread(self._tool.open, url, request, usable)
+            resolve: Callable[[], str | None] | None = None
+            if command.kind in PLAY_KINDS:  # PHX-136: fetched only once ALLOWED
+                query = cast(str, command.query)
+                pick = command.kind == QuickKind.PLAY_MUSIC
+                resolve = partial(self._find_video, query, pick)
+            result = await asyncio.to_thread(
+                self._tool.open, url, request, usable, resolve=resolve
+            )
+            if command.kind in PLAY_KINDS and result.url == url:
+                reply = f"Opened YouTube search for {command.query}."
         decision = result.decision.status
         verified = (
             decision == PermissionStatus.ALLOWED
@@ -492,7 +744,7 @@ class QuickCommandRunner:
                 tool_status=result.status.value,
                 duration_ms=duration,
             )
-            return QuickOutcome(record, command.answer, None)
+            return QuickOutcome(record, reply, None)
         await events.emit(
             EventType.TOOL_FAILED,
             **tool,

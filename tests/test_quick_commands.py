@@ -105,7 +105,7 @@ GOOGLE = "https://www.google.com/"
             YT + "results?search_query=cats",
         ),
         (
-            "play Bohemian Rhapsody on YouTube",
+            "watch Bohemian Rhapsody on YouTube",  # PHX-136: "play" plays
             QuickKind.SEARCH_YOUTUBE,
             YT + "results?search_query=Bohemian+Rhapsody",
         ),
@@ -134,7 +134,7 @@ def test_router_matches_strict_patterns(text: str, kind: QuickKind, url: str) ->
     [
         "What is the codename?",
         "what is youtube",
-        "open evil.com",
+        "open evil.com/login",  # PHX-136: a bare domain is a website
         "open https://evil.com",
         "open youtube and delete my files",
         "search youtube for x; open evil.com",
@@ -311,6 +311,7 @@ class QuickHarness:
                     PermissionPolicy(),
                     launcher=opened.append,  # PHX-133: a fake, nothing starts
                     paths={name: rf"C:\Windows\{name.value}.exe" for name in AppName},
+                    shortcuts={},  # PHX-136: no Start-menu scan
                 ),
                 EventPublisher(sink),
             ),
@@ -419,7 +420,7 @@ def test_launch_failure_fails_the_mission(quick: QuickHarness) -> None:
         service = quick.quick_service([])
         service._quick = QuickCommandRunner(
             OpenLinkTool(tools, launcher=broken),
-            OpenAppTool(tools, launcher=broken, paths={}),
+            OpenAppTool(tools, launcher=broken, paths={}, shortcuts={}),
         )
         await service.start()
         conversation = await service.create_conversation()
