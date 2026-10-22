@@ -43,7 +43,12 @@ from typing import Final, Literal
 import httpx
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from phoenix.agents.mission_events import EventPayloadError, EventSink, check_event
+from phoenix.agents.mission_events import (
+    EventPayloadError,
+    EventSink,
+    check_event,
+    is_answer_delta,
+)
 from phoenix.agents.runtime import MissionTrace
 from phoenix.api.structured_logging import log_entry
 from phoenix.core.events import EventEnvelope, EventSeverity, EventType
@@ -481,6 +486,8 @@ class MetricsCollector:
             self._rejected += 1
             return
         self._observed += 1
+        if is_answer_delta(event):
+            return  # PHX-132 (ADR-232): answer text is never logged
         self._log(event)
         payload = event.payload
         kind = event.event_type

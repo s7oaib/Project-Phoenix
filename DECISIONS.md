@@ -7224,3 +7224,78 @@ loads the model as before). Both Ollama providers send `keep_alive: "30m"`
 before), so the model stays loaded between missions instead of Ollama's 5
 minute default. INV-023: the warm-up is one tiny generation, and Ollama runs
 requests for one loaded model in order.
+
+
+## ADR-230 — DIRECT answers stream through the provider's own stream
+
+Status: Accepted (PHX-132 owner goal: answers appear word by word)
+Date: 2026-10-24
+Ticket: PHX-132
+
+Decision: `phoenix/agents/answer_stream.py` adds `StreamingProvider`, a
+`ModelProvider` wrapper whose `generate` consumes the wrapped provider's
+`stream` (Ollama `stream: true`, which already existed), hands each text delta
+to a callback (split at 2048 characters) and returns the assembled
+`GenerationResponse` (text joined; finish reason, usage and metrics from the
+final chunk). The unchanged responder (`_generate`) then applies its identity,
+record, truncation, encoding and size checks, so the final answer and the
+mission result equal the non-streaming ones. `responders.py` and `ollama.py`
+are unchanged; every other provider use stays non-streaming.
+
+## ADR-231 — Only PHOENIX's DIRECT reply streams, only its first attempt
+
+Status: Accepted
+Date: 2026-10-24
+Ticket: PHX-132
+
+Decision: `PhoenixRuntime(partial_answers=...)` (optional; the backend passes
+one `PartialAnswers`) streams the DIRECT reply. Planned/COMPLEX missions,
+tool output, LEVI and KAIDO's reply are untouched (KAIDO deferred: it has its
+own generation helper). A MAHORAGA retry of the DIRECT reply does not stream,
+so deltas never mix attempts; the stored answer always comes from the final
+result. `PartialAnswers` keeps the text so far of at most 8 missions in memory
+for the voice responder; it is never persisted.
+
+## ADR-232 — Answer deltas reuse `agent.started`; the one text field
+
+Status: Accepted (owner: answer text is shown to the user anyway)
+Date: 2026-10-24
+Ticket: PHX-132
+
+Decision: no new event type (the vocabulary stays 32). A delta is
+`agent.started` from agent `phoenix`, correlation = the mission ID, no task
+ID, with exactly `mission_id` (that same UUID) and `answer_delta` (1-2048
+characters of UTF-8 text). This narrows ADR-087: it is the only text an event
+may carry, and only PHOENIX's DIRECT answer; prompts, tool output, paths and
+secrets still cannot pass. `check_event` refuses any other shape;
+`MetricsCollector` counts but never logs a delta (`is_answer_delta`), so no
+answer text reaches `/metrics` logs or the Python log. Events flow over the
+existing `WS /events` bridge and the Rust proxy unchanged (no new route).
+
+## ADR-233 — Voice speaks the first sentence early
+
+Status: Accepted
+Date: 2026-10-24
+Ticket: PHX-132
+
+Decision: `VoiceResponder.respond_with_preview(request, preview)` (default:
+`respond`) lets the voice responder call `preview(first_sentence)` once.
+`MissionVoiceResponder` polls `PartialAnswers` while the mission runs and
+passes `first_spoken_sentence` (the start of `speakable_text`, none in code
+or links). The manager synthesizes and plays it as an ordinary playback
+(`voice.speaking`, barge-in and sleep work as before), returns to THINKING,
+and after the draft speaks only the rest (the full text if the start does not
+match, e.g. after a retry). A barge-in during the preview ends the turn as
+INTERRUPTED at once; a preview synthesis or playback failure only skips the
+preview.
+
+## ADR-234 — Desktop shows the live answer until the stored one arrives
+
+Status: Accepted
+Date: 2026-10-24
+Ticket: PHX-132
+
+Decision: `core.ts` appends deltas of the active mission to an in-memory
+live answer shown as an assistant message `[Answering…]`; deltas are never
+traces, metrics or logs. The stored answer (REST) replaces it; a settled
+mission, a new send or any stream reconnect drops it.

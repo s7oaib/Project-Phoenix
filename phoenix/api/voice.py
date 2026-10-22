@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Final, Protocol
 from uuid import uuid4
 
+from phoenix.agents.answer_stream import PartialAnswers
 from phoenix.agents.mission_events import EventPublisher, EventSink
 from phoenix.agents.registry import AgentRegistry
 from phoenix.api.missions import MissionService, NotFoundError
@@ -50,6 +51,7 @@ from phoenix.voice.engines.pipeline import (
     VoicePipelineConfig,
     VoicePipelineState,
     VoiceStateChange,
+    first_spoken_sentence,
     speakable_text,
     strip_wake_phrase,
 )
@@ -97,6 +99,7 @@ _SETTLED: Final = frozenset(
 )
 
 ComponentStatus = str  # "available" | "degraded" | "unavailable"
+Preview = Callable[[str], Awaitable[bool]]
 
 
 @dataclass(frozen=True)
@@ -186,9 +189,11 @@ class MissionVoiceResponder(VoiceResponder):
         *,
         on_mission: Callable[[str, str], Awaitable[None]] | None = None,
         wait_seconds: float = MISSION_WAIT_SECONDS,
+        partial_answers: PartialAnswers | None = None,
     ) -> None:
         super().__init__("voice_mission_responder")
         self._missions = missions
+        self._partials = partial_answers
         self._on_mission = on_mission
         self._wait = wait_seconds
         self.conversation_id: str | None = None
@@ -210,13 +215,26 @@ class MissionVoiceResponder(VoiceResponder):
         self.conversation_id = conversation_id
         return mission_id
 
-    async def _settled(self, mission_id: str) -> MissionRecord | None:
+    async def _settled(
+        self, mission_id: str, preview: Preview | None = None
+    ) -> MissionRecord | str | None:
+        """The settled record, None on timeout, or the previewed sentence when
+        the user barged in during it (PHX-132: the turn ends at once)."""
         try:
             async with asyncio.timeout(self._wait):
                 while True:
                     record = await self._missions.get_mission(mission_id)
                     if record.status in _SETTLED:
                         return record
+                    if preview is not None and self._partials is not None:
+                        sentence = first_spoken_sentence(
+                            self._partials.text(mission_id)
+                        )
+                        if sentence is not None:
+                            go_on, preview = await preview(sentence), None
+                            if not go_on:
+                                return sentence
+                            continue
                     await asyncio.sleep(_POLL_SECONDS)
         except TimeoutError:
             return None
@@ -230,6 +248,18 @@ class MissionVoiceResponder(VoiceResponder):
         return None
 
     async def respond(self, request: VoiceResponseRequest) -> VoiceResponseDraft:
+        return await self._respond(request, None)
+
+    async def respond_with_preview(
+        self, request: VoiceResponseRequest, preview: Preview
+    ) -> VoiceResponseDraft:
+        """PHX-132 (ADR-233): a DIRECT answer's first sentence is spoken while
+        the rest is still being generated."""
+        return await self._respond(request, preview)
+
+    async def _respond(
+        self, request: VoiceResponseRequest, preview: Preview | None
+    ) -> VoiceResponseDraft:
         accepted = VoiceResponseRequest.model_validate(request)
         text = strip_wake_phrase(accepted.transcript_text).strip()
         if not text:
@@ -240,10 +270,17 @@ class MissionVoiceResponder(VoiceResponder):
             if self._on_mission is not None:
                 with contextlib.suppress(Exception):
                     await self._on_mission(accepted.turn_id, mission_id)
-            record = await self._settled(mission_id)
-            spoken = _spoken_outcome(
-                record, await self._answer(record) if record else None
-            )
+            try:
+                settled = await self._settled(mission_id, preview)
+            finally:
+                if self._partials is not None:
+                    self._partials.discard(mission_id)
+            if isinstance(settled, str):
+                spoken = settled
+            else:
+                spoken = _spoken_outcome(
+                    settled, await self._answer(settled) if settled else None
+                )
         return VoiceResponseDraft(
             session_id=accepted.session_id,
             turn_id=accepted.turn_id,
@@ -357,8 +394,10 @@ class VoiceService:
         factory: ComponentFactory | None = None,
         config: VoicePipelineConfig | None = None,
         models_dir: Path | None = None,
+        partial_answers: PartialAnswers | None = None,
     ) -> None:
         self._missions = missions
+        self._partials = partial_answers
         self._publisher = EventPublisher(events)
         self._probes = tuple(probes) if probes is not None else None
         self._factory = factory or local_components(models_dir)
@@ -463,7 +502,9 @@ class VoiceService:
         try:
             components = await self._factory()
             responder = MissionVoiceResponder(
-                self._missions, on_mission=self._note_mission
+                self._missions,
+                on_mission=self._note_mission,
+                partial_answers=self._partials,
             )
             self._responder = responder
             pipeline = VoicePipeline(

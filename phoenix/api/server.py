@@ -67,6 +67,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from alembic import command
+from phoenix.agents.answer_stream import PartialAnswers
 from phoenix.agents.capability_steps import CapabilityTools
 from phoenix.agents.control_steps import (
     ControlStepRunner,
@@ -793,6 +794,8 @@ async def open_services(
             windows=WindowsUITool(tools, policy, audit),
         )
         stack.callback(control.close)
+        # PHX-132 (ADR-231): DIRECT answers stream to Chat and to voice.
+        partials = PartialAnswers()
 
         def build_runtime(workspace_root: str | None = None) -> PhoenixRuntime:
             """PHX-104: one runtime per workspace root; None has no documents."""
@@ -819,6 +822,7 @@ async def open_services(
                     youtube=youtube,
                 ),
                 control=control,
+                partial_answers=partials,
             )
 
         runtime = build_runtime()
@@ -849,6 +853,7 @@ async def open_services(
             ),
             factory=voice_factory,
             models_dir=config.voice_models_dir,
+            partial_answers=partials,
         )
         services = BackendServices(
             settings=settings,

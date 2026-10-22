@@ -1092,4 +1092,17 @@ test('PHX-129 Settings lists active "always" grants and Remove revokes one (neve
   assert.match(render(setup.SettingsPanel, { connection: empty.store.getSnapshot().connection, store: empty.store }), /None\. &quot;Always allow&quot; on a read-only \(P1\) request/);
 });
 
+test('PHX-132 a DIRECT answer delta renders a live answer that the stored answer replaces', () => {
+  const event = (payload, extra = {}) => core.readEvent({ event_id: 'e1', event_type: 'agent.started', timestamp: AT, task_id: null, agent_id: 'phoenix', payload, severity: 'info', correlation_id: RERUN, ...extra });
+  assert.deepEqual(plain(core.answerDelta(event({ mission_id: RERUN, answer_delta: 'Paris is' }))), { missionId: RERUN, text: 'Paris is' });
+  assert.equal(core.answerDelta(event({ mission_id: RERUN, answer_delta: 'x', role: 'direct' })), undefined);
+  assert.equal(core.answerDelta(event({ mission_id: RERUN, answer_delta: 'x' }, { agent_id: 'verifier' })), undefined);
+  assert.equal(core.answerDelta(event({ role: 'direct' })), undefined);
+  const live = core.withPartials([], new Map([[RERUN, 'Paris is the capital']]));
+  assert.deepEqual(plain(live.map((message) => [message.id, message.role, message.content])), [[`${RERUN}:partial`, 'assistant', `${core.PARTIAL_BADGE}\nParis is the capital`]]);
+  const stored = core.toChatMessages(page([{ message_id: `${RERUN}:answer`, role: 'phoenix', text: 'Paris is the capital of France.', created_at: AT }]), new Map([[RERUN, 'verified']]));
+  const final = core.withPartials(stored, new Map([[RERUN, 'Paris is the capital']]));
+  assert.deepEqual(plain(final.map((message) => message.id)), [`${RERUN}:answer`]);
+});
+
 export { loader };

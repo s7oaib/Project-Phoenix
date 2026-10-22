@@ -93,6 +93,7 @@ from pydantic import (
 )
 
 from phoenix.agents import control_prompts, prompts
+from phoenix.agents.answer_stream import PartialAnswers, StreamingProvider
 from phoenix.agents.capability_steps import (
     CapabilityCallRecord,
     CapabilityStepRunner,
@@ -712,7 +713,10 @@ class PhoenixRuntime:
         research_tool: WebResearchTool | None = None,
         capabilities: CapabilityTools | None = None,
         control: ControlStepRunner | None = None,
+        partial_answers: PartialAnswers | None = None,
     ) -> None:
+        # PHX-132 (ADR-231): with partial_answers the DIRECT reply streams.
+        self._partials = partial_answers
         registry = (
             build_default_agent_registry() if agent_registry is None else agent_registry
         )
@@ -1507,6 +1511,31 @@ class PhoenixRuntime:
     async def _direct(
         self, request: PhoenixRequest, evidence: _Evidence, events: MissionEvents
     ) -> str:
+        partials = self._partials
+        attempts = 0
+
+        async def delta(text: str) -> None:
+            # PHX-132 (ADR-231): display text only; never stored or verified.
+            assert partials is not None
+            partials.feed(request.request_id, text)
+            await events.emit(
+                EventType.AGENT_STARTED,
+                agent_id="phoenix",
+                mission_id=request.request_id,
+                answer_delta=text,
+            )
+
+        def streamed(binding: ModelBinding) -> ModelBinding:
+            # Only the first attempt streams, so a recovery retry never
+            # appends to an earlier attempt's text; the final answer is the
+            # mission result either way (identical checks in _generate).
+            nonlocal attempts
+            attempts += 1
+            if partials is None or attempts > 1:
+                return binding
+            partials.start(request.request_id)
+            return replace(binding, provider=StreamingProvider(binding.provider, delta))
+
         async with _agent_phase(events, "phoenix", "direct"):
             health = await self._health(evidence)
             result = await self._recovering(
@@ -1518,7 +1547,7 @@ class PhoenixRuntime:
                 attempt=lambda binding: self._orchestrator.execute(
                     request,
                     OrchestrationPath.DIRECT,
-                    direct_responder=ModelDirectResponder(binding),
+                    direct_responder=ModelDirectResponder(streamed(binding)),
                 ),
             )
         assert result.text is not None  # COMPLETED is the only direct outcome.
