@@ -837,6 +837,8 @@ def test_lazy_loader_calls_sync_start_only(monkeypatch: pytest.MonkeyPatch) -> N
         "sync_playwright",
         lambda: SimpleNamespace(start=start),
     )
+    # PHX-123 (ADR-184): the folder check runs first; trusted here.
+    monkeypatch.setattr(module, "verify_launch_browsers", lambda: None)
     assert _REAL_START() is sentinel
     assert calls == ["start"]
 
@@ -1316,6 +1318,43 @@ def test_dead_session_cleared(
     assert backend.names().count("stop") == 1
 
 
+def test_unverified_browser_folder_is_never_launched(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # PHX-123 (SR-03, ADR-184): verification precedes the Playwright import.
+    from phoenix.tools import browser_setup
+
+    folder = tmp_path / "browsers"
+    (folder / "chromium-1").mkdir(parents=True)
+    (folder / "chromium-1" / "chrome.exe").write_bytes(b"exe")
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(folder))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setattr(module, "_start_playwright", _REAL_START)
+    engine = create_engine(f"sqlite:///{tmp_path / 'audit.db'}")
+    cast(Table, AuditEventRow.__table__).create(engine)
+    tool = BrowserTool(
+        registry(),
+        PermissionPolicy(),
+        AuditTrail(sessionmaker(bind=engine), registry()),
+    )
+    try:
+        result = execute(tool, call())  # no manifest: refused before any import
+        assert result.status is ToolResultStatus.FAILURE
+        assert result.error_code is BrowserErrorCode.BROWSER_UNVERIFIED
+        assert tool.active_session_id is None
+        manifest = browser_setup.manifest_path()
+        browser_setup.write_manifest(folder, manifest)
+        (folder / "chromium-1" / "chrome.exe").write_bytes(b"planted")
+        result = execute(tool, call())
+        assert result.error_code is BrowserErrorCode.BROWSER_UNVERIFIED
+        (folder / "chromium-1" / "chrome.exe").write_bytes(b"exe")
+        # Verified: it goes on to Playwright (forbidden here -> unavailable).
+        result = execute(tool, call())
+        assert result.error_code is BrowserErrorCode.BROWSER_UNAVAILABLE
+    finally:
+        engine.dispose()
+
+
 @pytest.mark.parametrize("stage", ("context_close", "browser_close", "stop"))
 def test_close_failure_explicit_state_cleared(
     runtime: tuple[BrowserTool, AuditTrail, Engine, FakeRuntime], stage: str
@@ -1518,7 +1557,19 @@ def test_static_boundary_schema_event_and_dependency() -> None:
                 "phoenix.security.audit",
                 "phoenix.security.permissions",
                 "phoenix.tools.registry",
+                # PHX-123 (ADR-184): stdlib-only folder/manifest verification.
+                "phoenix.tools.browser_setup",
             )
+    setup_tree = ast.parse(
+        (ROOT / "phoenix" / "tools" / "browser_setup.py").read_text("utf-8")
+    )
+    assert not [
+        node
+        for node in ast.walk(setup_tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module
+        and node.module.startswith("phoenix")
+    ]
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))

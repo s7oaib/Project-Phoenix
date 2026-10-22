@@ -1850,6 +1850,10 @@ def test_no_action_persistence_or_dependency_change() -> None:
             # PHX-048 (ADR-094) changes filesystem.py; it is hash-pinned
             # (PHX_048_PATHS in test_prompt_injection_defenses.py).
             "phoenix/tools/terminal.py",
+            # PHX-123 (ADR-184) verifies the browser folder before launch;
+            # browser.py is hash-pinned (PHX_123_PATHS in
+            # test_prompt_injection_defenses.py).
+            ":(exclude)phoenix/tools/browser.py",
             ":(exclude)apps/desktop/src/App.tsx",
             ":(exclude)apps/desktop/src/styles.css",
             # PHX-111 (ADR-135) adds web_research_enabled; config.py is

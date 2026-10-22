@@ -99,6 +99,7 @@ FAILURE_CODES: Final = frozenset(
         "tool_rejected",
         "tool_failed",
         "rate_limited",  # PHX-111
+        "secret_text_refused",  # PHX-123
         "permission_denied",
         "interrupted",
         "internal_error",

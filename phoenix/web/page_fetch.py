@@ -3,10 +3,15 @@
 ADR-136: httpx plus the standard-library HTML parser; no new dependency, no
 JavaScript, cookies, credentials or downloads. Every hop (the first URL and at
 most ``max_redirects`` redirects) must pass the PHX-053 public-URL admission and
-resolve only to globally routable addresses. The DNS answer and httpx's own
-connection are separate lookups, so a hostile resolver could still rebind
-between them (documented limitation, as for BrowserTool). Bodies are capped in
-bytes before decoding. The text is untrusted data, never instructions (INV-017).
+resolve only to globally routable addresses. Bodies are capped in bytes before
+decoding. The text is untrusted data, never instructions (INV-017).
+
+PHX-123 (ADR-181): the connection goes to the address PHOENIX vetted, never a
+second lookup (no DNS rebinding between check and connect); the URL's host
+stays the Host header and the TLS server name, so certificates are still
+checked against the hostname. Each redirect hop is resolved and vetted again,
+may not downgrade https to http, and only ports 80 and 443 are fetched. One
+deadline bounds the whole fetch, redirects and body included.
 """
 
 from __future__ import annotations
@@ -24,7 +29,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
-from phoenix.web.search import SearchProviderError, SearchResult
+from phoenix.web.search import SearchProviderError, SearchResult, public_ip
 
 __all__ = (
     "FetchedPage",
@@ -73,6 +78,7 @@ _BLOCK = frozenset(
 _TEXT_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
 _SPACE = re.compile(r"\s+")
 _USER_AGENT = "PHOENIX/0.1 (local desktop assistant)"
+_PORTS = (None, 80, 443)
 
 
 class PageFetchErrorCode(StrEnum):
@@ -170,17 +176,18 @@ async def _system_resolver(host: str) -> tuple[str, ...]:
 
 def _global(address: str) -> bool:
     try:
-        ip = ipaddress.ip_address(address.split("%", 1)[0])
+        return public_ip(ipaddress.ip_address(address.split("%", 1)[0]))
     except ValueError:
         return False
-    return ip.is_global and not (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_multicast
-        or ip.is_reserved
-        or ip.is_unspecified
-    )
+
+
+def _pinned(url: str, address: str) -> tuple[str, str, str]:
+    """(URL to the vetted address, Host header, TLS server name) for ``url``."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").encode("idna").decode("ascii").lower()
+    header = host if parts.port is None else f"{host}:{parts.port}"
+    target = str(httpx.URL(url).copy_with(host=address.split("%", 1)[0]))
+    return target, header, host
 
 
 class PageFetcher(ABC):
@@ -205,8 +212,11 @@ class HttpPageFetcher(PageFetcher):
         timeout_seconds: float = 10.0,
         max_bytes: int = 1_000_000,
         max_redirects: int = 3,
+        deadline_seconds: float = 30.0,
     ) -> None:
         if not 0 < timeout_seconds <= 60 or not 0 < max_bytes <= 5_000_000:
+            raise ValueError("Invalid page fetch limits")
+        if not 0 < deadline_seconds <= 120:
             raise ValueError("Invalid page fetch limits")
         if not 0 <= max_redirects <= 5:
             raise ValueError("Invalid page fetch limits")
@@ -216,31 +226,57 @@ class HttpPageFetcher(PageFetcher):
             headers={"User-Agent": _USER_AGENT, "Accept": "text/html, text/plain"},
             follow_redirects=False,
             trust_env=False,
+            # A pooled connection is bound to one vetted address and TLS name.
+            limits=httpx.Limits(max_keepalive_connections=0),
         )
         self._resolve = _system_resolver if resolver is None else resolver
         self._max_bytes = max_bytes
         self._max_redirects = max_redirects
+        self._deadline = deadline_seconds
 
-    async def _check_host(self, url: str) -> None:
-        host = urlsplit(url).hostname or ""
+    async def _check_host(self, url: str) -> str:
+        """The vetted address to connect to; every answer must be global."""
+        parts = urlsplit(url)
+        if parts.port not in _PORTS:
+            raise PageFetchError(PageFetchErrorCode.BLOCKED_URL)
+        host = parts.hostname or ""
         try:
             addresses = await self._resolve(host)
         except (OSError, UnicodeError):
             raise PageFetchError(PageFetchErrorCode.UNAVAILABLE) from None
         if not addresses or not all(_global(item) for item in addresses):
             raise PageFetchError(PageFetchErrorCode.BLOCKED_URL)
+        return addresses[0]
 
     async def fetch(self, url: str, *, max_chars: int) -> FetchedPage:
         if type(max_chars) is not int or not 1 <= max_chars <= 50000:
             raise ValueError("Invalid max_chars")
         current = _admit(url)
+        try:
+            async with asyncio.timeout(self._deadline):
+                return await self._fetch(current, max_chars)
+        except TimeoutError:
+            raise PageFetchError(PageFetchErrorCode.TIMEOUT) from None
+
+    async def _fetch(self, current: str, max_chars: int) -> FetchedPage:
         for _ in range(self._max_redirects + 1):
-            await self._check_host(current)
+            address = await self._check_host(current)
+            target, host_header, server_name = _pinned(current, address)
             try:
-                async with self._client.stream("GET", current) as response:
+                async with self._client.stream(
+                    "GET",
+                    target,
+                    headers={"Host": host_header},
+                    extensions={"sni_hostname": server_name},
+                ) as response:
                     if response.is_redirect:
                         location = response.headers.get("location", "")
-                        current = _admit(urljoin(current, location))
+                        following = _admit(urljoin(current, location))
+                        if current.startswith("https:") and not following.startswith(
+                            "https:"
+                        ):
+                            raise PageFetchError(PageFetchErrorCode.BLOCKED_URL)
+                        current = following
                         continue
                     if response.status_code != 200:
                         raise PageFetchError(PageFetchErrorCode.HTTP_STATUS)

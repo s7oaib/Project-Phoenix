@@ -6758,6 +6758,150 @@ pre-registered; whole-latency throughput on short answers is dominated by
 prefill, which the FYP reports as measured. `phoenix/tools/browser.py` is
 hash-pinned at the PHX-124 implementation commit.
 
+## ADR-180 — HTTP client libraries log warnings only
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-123 (security review SR-01)
+
+httpx logs `HTTP Request: GET <full URL>` at INFO, so search queries, Spotify
+parameters and query-string codes reached `phoenix.jsonl` and stderr (INV-018).
+`configure_logging` now sets the `httpx`, `httpcore`, `hpack` and `urllib3` loggers
+(`QUIET_LOGGERS`) to WARNING (or the configured level if higher) and
+`LoggingHandle.close` restores their previous levels. An allowlist of `phoenix.*`
+loggers was rejected: it would silence uvicorn and future subsystems' errors. A
+regression test sends a real httpx request whose URL has a query and asserts no part of
+it reaches the stream or the file.
+
+## ADR-181 — Page fetch connects to the address it vetted
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-123 (security review SR-02)
+
+`HttpPageFetcher` resolved the host to vet it and httpx resolved it again to connect,
+so a TTL-0 rebinding answer could reach loopback or the LAN. Each hop now resolves once,
+requires every answer to be public, and sends the request to the first vetted address:
+the URL host is replaced by that IP, the `Host` header keeps the hostname (with an
+explicit port) and httpcore's `sni_hostname` extension keeps the TLS server name, so
+certificates are still verified against the hostname. Keep-alive is off so a pooled
+connection is never reused for another name. Every redirect hop is admitted, resolved
+and vetted again. Rejected: verifying the peer after connect (the request would already
+be on the wire) and a custom network backend (more code for the same effect). The
+Playwright browser keeps its own route guard; its rebinding window is unchanged
+(ADR-189).
+
+## ADR-182 — Redaction covers quoted keys and authorization schemes
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-123 (security review SR-10)
+
+The key=value redaction pattern now accepts a closing quote after the key
+(`{"api_key": "..."}`, `{'password': '...'}`) and consumes an authorization scheme
+with its credential (`Authorization: Basic <cred>`, Digest, Negotiate, NTLM) instead of
+redacting only the scheme word. Logs still carry IDs, codes and timings only;
+redaction remains defence in depth.
+
+## ADR-183 — Page fetch: protocol ranges, no downgrade, ports 80/443, one deadline
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-123 (security review SR-05, SR-06, SR-07)
+
+`phoenix.web.search.public_ip` is the one public-address rule for URL admission and DNS
+answers: Python 3.11's `is_global` plus explicit denial of `192.0.0.0/24`, all of 6to4
+`2002::/16` and Teredo `2001::/32` (both embed IPv4 a relay forwards to), and IPv4-mapped
+IPv6 judged by its IPv4 address. Page fetch refuses a redirect from https to http and any
+port other than 80 or 443 (`blocked_url`), and one `asyncio.timeout` (default 30 s)
+bounds the whole fetch, redirects and body included (`timeout`), so a drip-fed page can
+no longer hold a step until its 300 s limit. The tool-level `wait_for` with the
+definition timeout was not added: the fetch deadline already bounds the I/O.
+
+## ADR-184 — The browser folder is verified against a per-user manifest
+
+Status: Accepted (owner's instruction; supersedes the review's "move the folder")
+Date: 2026-10-22
+Ticket: PHX-123 (security review SR-03)
+
+`D:\Phoenix\browsers` (1.6 GB, installed) stays where it is and its ACLs are not
+changed. `scripts/install_control_browser.py --install` (also when Chromium is already
+present) records `%LOCALAPPDATA%\PHOENIX\browser-manifest.json`: the folder path and the
+SHA-256 of every `.exe`/`.dll` under the Playwright build folders (`<name>-<digits>`).
+Before Playwright is imported for `session_open`, BrowserTool verifies the folder its
+Playwright uses against that manifest; a missing or unreadable manifest, another
+folder, or any changed, missing or extra executable refuses the launch with
+`browser_unverified` (status `failure`). The check without `--install` reports
+"installed and verified" or exits 1. Residual: the manifest is trust-on-first-use (run
+`--install` only on a trusted folder), and a swap between verification and launch is
+not prevented; verification hashes about 600 MB, under a second warm and several
+seconds from a cold disk cache.
+
+## ADR-185 — PHOENIX refuses to type secret-looking text
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-123 (security review SR-04)
+
+A P4 `browser.fill` or `windows.set_text` whose text `looks_like_secret` used to ask
+for a one-time approval showing only `[hidden: N characters]`, which the owner could
+not read; the sha256 resource binding proves integrity, not informed consent. The
+control step now fails before any approval is requested (`SecretTextRefused`, a
+`ToolStepRejected`), with the new mission failure code `secret_text_refused`
+(MissionFailureCode, the event allowlist). The desktop mission line says PHOENIX does
+not type passwords, keys or other secrets and the owner should type it. The masking
+rule in approval summaries (ADR-151, ADR-173) is kept as defence in depth but no P4 text
+request reaches it masked. Rejected: a client-side reveal control (it would send the
+secret to the webview and still rely on the owner reading it).
+
+## ADR-186 — The desktop backend log is capped per launch
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-123 (security review SR-11)
+
+The Rust shell pipes the backend's stderr and a helper thread copies at most 4 MiB
+(`MAX_LOG_BYTES`) into `phoenix.desktop-backend.log` (still truncated at each launch),
+then keeps draining the pipe so the backend never blocks. Rotation was rejected: the
+structured, redacted log is `phoenix.jsonl`; this file only exists to diagnose startup.
+
+## ADR-187 — The native proxy refuses separators in an upload filename
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-123 (security review SR-14)
+
+For the `filename` query key only, `encoded_text_ok` refuses escapes that decode to `/`,
+`\`, `:` or a control byte (`%00`-`%1F`, `%7F`), matching the backend's own rule; search
+text (`q`) may still carry them. The misleading test case that was refused only because
+of an extra `&limit=1` now has companions that are refused for the encoded separators
+alone.
+
+## ADR-188 — Supply chain: pinned actions, bounded model downloads
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-123 (security review SR-12, SR-13)
+
+Every `uses:` in `.github/workflows/` names a full commit SHA with the tag it was taken
+from as a comment (`# v4`), resolved on 2026-10-22. Dependabot was not added (a
+configuration change outside this ticket). `scripts/voice_setup.py` aborts a model
+download, deleting the partial file, as soon as more bytes arrive than the pinned
+`size_bytes`.
+
+## ADR-189 — Security review findings deferred
+
+Status: Accepted (owner's instruction: skip Lows that need a design change)
+Date: 2026-10-22
+Ticket: PHX-123
+
+Deferred, with reasons (the review document records each status):
+SR-08 (hwnd-bound inspect grants: binding pid and creation time needs a new
+`WindowsUICall` field and an inspect-time check, and capping the duration needs the
+approve route; design change); SR-09 (provenance labels across steps: planner and
+prompt design); browser ports and rebinding in Playwright (the browser's route guard is
+its own design, PHX-112). Info items SR-15 to SR-27 are recorded, not changed here.
+
 ## ADR-195 — No pass for a file that was never written
 
 Status: Accepted (PHX-125 owner instruction; code only, no model-visible text)
@@ -6831,7 +6975,7 @@ follows `RETRYABLE_OUTPUT` and now admits `disallowed_domain`. `OVERSIZED`,
 
 ## ADR-198 — Model inputs carry only what their step needs (phoenix-prompts-v7)
 
-Status: Proposed (owner-gated; branch `feature/PHX-125b-model-inputs`)
+Status: Accepted (approved by owner 2026-10-22)
 Date: 2026-10-22
 Ticket: PHX-125
 
@@ -6860,7 +7004,7 @@ changes; ADR-195's deterministic check stays the backstop for a missing write.
 
 ## ADR-199 — Two new routing and answer rules, rendered only when relevant
 
-Status: Proposed (owner-gated; exact text in tickets/PHX-125-mission-reliability.md)
+Status: Accepted (approved by owner 2026-10-22; exact text in tickets/PHX-125-mission-reliability.md)
 Date: 2026-10-22
 Ticket: PHX-125
 
@@ -6873,3 +7017,28 @@ look-ups in the user's uploaded documents and saved memories to
 file and never claims a save. Each is its own constant; neither is rendered
 in any other case. Rejected: editing the v5/v6 constants in place (would
 change every rendering, not only the relevant ones).
+
+## ADR-200 — A read_document proposal for a plain-text file becomes PHOENIX's own read_text
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-126
+
+Context: the live demo rehearsal on main 702a92f failed demos 1, 2 and 8 with
+`tool_rejected` and no permission prompt. Trace capture showed the desktop
+composition routes documents steps to `CapabilityStepRunner`, which offers both
+`read_text` (filesystem) and `read_document`; the live model proposed
+`read_document` for `.txt` files, and `DocumentFileCall` reads only PDF, DOCX,
+Markdown and CSV, so PHOENIX rejected the proposal before PermissionEngine.
+
+Decision: when the filesystem tool is composed and a `read_document` proposal
+names a path whose extension is not in `READ_EXTENSIONS`, PHOENIX builds its
+own P1 `filesystem.read_text` call for the same relative path, exactly as for a
+`read_text` proposal. PermissionEngine decides; the user approves the
+`filesystem.read_text` request; actor, reason, risk, grants and LEVI's tool
+evidence check are those of PHX-046. Without the filesystem tool the proposal
+is still rejected. Prompt text is unchanged; the ticket records the proposed
+prompt additions for the owner.
+
+Consequences: no new capability, risk level or grant scope; only the choice
+between two P1 read tools for one path moves from the model to PHOENIX.

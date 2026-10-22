@@ -1233,6 +1233,53 @@ def test_filesystem_operations_keep_phx046_evidence(stack: Stack) -> None:
     assert "Original request" not in stack.provider.prompt("document_verifier")
 
 
+def _plain_text_read(stack: Stack) -> None:
+    stack.provider.replies["document_capability"] = proposal(
+        operation="read_document", relative_path="secrets.txt"
+    )
+
+
+def test_read_document_of_plain_text_asks_for_read_text(stack: Stack) -> None:
+    """PHX-126 (ADR-200): the live models propose read_document for a .txt.
+
+    With the filesystem tool composed (the desktop backend), PHOENIX builds its
+    own P1 read_text of the same path; PermissionEngine still decides.
+    """
+    _plain_text_read(stack)
+    waiting = mission(stack, filesystem=True)
+    assert waiting.kind is MissionKind.WAITING_PERMISSION
+    pending = waiting.pending_permission
+    assert pending is not None
+    assert (pending.tool_id, pending.action, pending.actor_id, pending.reason) == (
+        "filesystem.read_text",
+        "read_text",
+        "document_analyst",
+        DOCUMENT_TOOL_REASON,
+    )
+    assert pending.resource == str(stack.root / "secrets.txt")
+    (record,) = waiting.trace.tool_calls
+    assert not record.attempted and waiting.trace.capability_calls == ()
+
+
+def test_read_document_of_plain_text_completes_with_its_grant(stack: Stack) -> None:
+    _plain_text_read(stack)
+    resource = str(stack.root / "secrets.txt")
+    fs_grant = grant(
+        "filesystem.read_text",
+        "read_text",
+        resource,
+        "P1",
+        actor="document_analyst",
+        reason=DOCUMENT_TOOL_REASON,
+        grant_id="Grant.Txt",
+    )
+    done = mission(stack, (fs_grant,), filesystem=True)
+    assert done.kind is MissionKind.COMPLETED
+    (record,) = done.trace.tool_calls
+    assert record.operation.value == "read_text" and record.attempted
+    assert done.trace.capability_calls == ()
+
+
 def test_capability_missions_use_the_v5_capability_planner(stack: Stack) -> None:
     # PHX-120 (ADR-160): AIZEN plans with CAPABILITY_PLANNING_SYSTEM and the
     # assignment describes documents with the v5 capability text.

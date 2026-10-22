@@ -87,6 +87,31 @@ def _identifier(value: object) -> str:
     return normalized
 
 
+# PHX-123 (ADR-183): ranges Python 3.11's ``is_global`` admits but that can
+# reach this machine or its network: IETF protocol assignments, 6to4 and
+# Teredo (both embed an IPv4 address a relay would forward to).
+_DENIED_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in ("192.0.0.0/24", "2002::/16", "2001::/32")
+)
+
+
+def public_ip(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Whether ``address`` is globally routable and reaches no local network."""
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        return public_ip(address.ipv4_mapped)
+    if any(address in network for network in _DENIED_NETWORKS):
+        return False
+    return address.is_global and not (
+        address.is_loopback
+        or address.is_private
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+    )
+
+
 def _url(value: object) -> str:
     # Check before stripping: urlsplit otherwise removes some control characters.
     if type(value) is not str or _controls(value) or "\\" in value:
@@ -131,15 +156,7 @@ def _url(value: object) -> str:
         ):
             raise ValueError("invalid_response") from None
     else:
-        if (
-            not address.is_global
-            or address.is_loopback
-            or address.is_private
-            or address.is_link_local
-            or address.is_multicast
-            or address.is_reserved
-            or address.is_unspecified
-        ):
+        if not public_ip(address):
             raise ValueError("invalid_response")
     return normalized
 

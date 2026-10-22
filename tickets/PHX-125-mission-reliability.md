@@ -2,7 +2,7 @@
 
 ## Status
 IN_PROGRESS (part A, code-only safety fixes: implemented and tested; part B,
-model-visible inputs: owner-gated, on its own branch)
+model-visible inputs: approved by owner 2026-10-22, on its own branch)
 
 ## Phase
 M3 capabilities (live-run follow-up, 2026-10-22)
@@ -39,7 +39,7 @@ changes):
 3. `DISALLOWED_DOMAIN` is retryable output, bounded by the existing budgets
    (ADR-197).
 
-Part B, branch `feature/PHX-125b-model-inputs` (owner-gated, not approved;
+Part B, branch `feature/PHX-125b-model-inputs` (approved by owner 2026-10-22;
 exact text under "Owner approval needed"):
 4. Render the documents routing sentence only when `documents` is offered
    (ADR-198).
@@ -76,7 +76,7 @@ pins in `tests/test_prompt_injection_defenses.py`.
 
 ## Owner approval needed (part B, `phoenix-prompts-v7`)
 
-Nothing below is approved. Every other v6 constant is byte-identical
+Approved by owner 2026-10-22 (all four items below). Every other v6 constant is byte-identical
 (hash-pinned in `tests/test_phoenix_runtime.py`).
 
 1. `ASSIGNMENT_SYSTEM` (changed). Before (v6), between "names above." and

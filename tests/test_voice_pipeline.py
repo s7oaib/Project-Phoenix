@@ -1640,6 +1640,44 @@ def test_setup_check_never_downloads(tmp_path: Path) -> None:
     assert list(tmp_path.iterdir()) == []
 
 
+def test_setup_download_stops_at_the_pinned_size(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # PHX-123 (SR-13, ADR-188): an oversized body never fills the disk.
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "phoenix_voice_setup", ROOT / "scripts" / "voice_setup.py"
+    )
+    assert spec is not None and spec.loader is not None
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    reads: list[int] = []
+
+    class Endless:
+        def __enter__(self) -> Endless:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self, size: int) -> bytes:
+            reads.append(size)
+            return b"x" * 1024
+
+    monkeypatch.setattr(script.urllib.request, "urlopen", lambda *a, **k: Endless())
+    file = voice_models.ModelFile(
+        relative_path="model.bin",
+        url="https://huggingface.co/x/resolve/" + "0" * 40 + "/model.bin",
+        size_bytes=4096,
+        sha256="0" * 64,
+    )
+    target = tmp_path / "model.bin"
+    with pytest.raises(ValueError, match="larger than pinned size"):
+        script._download(file, target)
+    assert len(reads) == 5 and list(tmp_path.iterdir()) == []
+
+
 def test_engines_stay_offline_on_the_cpu() -> None:
     for path in ("whisper.py", "piper.py", "sound.py", "pipeline.py", "models.py"):
         source = (ROOT / "phoenix/voice/engines" / path).read_text("utf-8")

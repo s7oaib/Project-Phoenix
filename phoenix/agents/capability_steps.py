@@ -97,6 +97,7 @@ from phoenix.security.prompt_injection import (
     UntrustedContentOrigin,
 )
 from phoenix.tools.document_files import (
+    READ_EXTENSIONS,
     DocumentFileCall,
     DocumentFileInputError,
     DocumentFileOperation,
@@ -497,6 +498,16 @@ class CapabilityStepRunner:
         operation = wire.operation
         if operation not in self._document_operations():
             raise ToolStepRejected("Operation is not on the document allowlist")
+        name = wire.relative_path.rsplit("/", 1)[-1].lower()
+        if (
+            operation == "read_document"
+            and self._filesystem is not None
+            and not name.endswith(READ_EXTENSIONS)
+        ):
+            # PHX-126 (ADR-200): a read_document proposal for a plain-text file
+            # (e.g. .txt) is PHOENIX's own P1 filesystem read_text of the same
+            # path, still asked of PermissionEngine; nothing else changes.
+            operation = FilesystemOperation.READ_TEXT.value
         if operation in ("read_document", "create_document"):
             tool = self._tools.documents
             assert tool is not None  # documents domain requires the tool

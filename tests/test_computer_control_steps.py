@@ -49,6 +49,7 @@ from phoenix.agents.control_steps import (
     ControlStepRunner,
     control_permission_policy,
     control_tool_definitions,
+    looks_like_secret,
 )
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
 from phoenix.agents.responders import ResponderErrorCode
@@ -1590,7 +1591,11 @@ def test_spoofed_window_title_shows_the_real_process_and_executable(
     "secret",
     ["Sup3r$ecretPass", "gh" + "p_" + "a1" * 18, "my key is sk-live-x"],
 )
-def test_secret_looking_text_is_masked_with_a_note(rig: Rig, secret: str) -> None:
+def test_secret_looking_fill_is_refused_without_an_approval(
+    rig: Rig, secret: str
+) -> None:
+    # PHX-123 (SR-04, ADR-185): no unreadable "[hidden]" approval; the step
+    # fails with a clear code and the owner types the secret themselves.
     fill: dict[str, object] = {
         "tool": "browser",
         "operation": "fill",
@@ -1599,17 +1604,36 @@ def test_secret_looking_text_is_masked_with_a_note(rig: Rig, secret: str) -> Non
     }
     rig.provider.replies["control_specialist"] = actions(navigate(), fill)
     runner = rig.runner()
-    waiting = mission(rig, rig.browser_grants(read=False), runtime=rig.runtime(runner))
-    summary = summary_of(runner, waiting)
-    assert summary.tool_id == "browser.fill"
-    assert summary.page_url == NOTES_URL  # the page the browser reached
-    assert summary.element is not None and "#q" in summary.element
-    assert summary.text_masked is True
-    assert summary.text == f"[hidden: {len(secret)} characters]"
-    assert summary.note == SECRET_TEXT_NOTE
-    assert secret not in summary.model_dump_json()
+    result = mission(rig, rig.browser_grants(read=False), runtime=rig.runtime(runner))
+    assert result.kind == MissionKind.FAILED and result.pending_permission is None
+    assert result.failure_code == MissionFailureCode.SECRET_TEXT_REFUSED
+    assert runner._summaries == {}  # nothing was put up for approval
     assert called(rig, "fill") == []
     runner.close()
+
+
+@pytest.mark.parametrize(
+    "secret",
+    ["Sup3r$ecretPass", "gh" + "p_" + "a1" * 18, "my key is sk-live-x"],
+)
+def test_secret_looking_set_text_is_refused_and_approvals_cannot_force_it(
+    rig: Rig, secret: str
+) -> None:
+    rig.provider.replies["control_specialist"] = actions(
+        {
+            "tool": "windows",
+            "operation": "set_text",
+            "window_title": FIXTURE_TITLE,
+            "automation_id": "codename",
+            "text": secret,
+        }
+    )
+    grants = (rig.windows_grant(listing()),)
+    result = mission(rig, grants)
+    assert result.kind == MissionKind.FAILED and result.pending_permission is None
+    assert result.failure_code == MissionFailureCode.SECRET_TEXT_REFUSED
+    assert rig.desktop.effects == []
+    assert looks_like_secret(secret) and SECRET_TEXT_NOTE  # display rule unchanged
 
 
 @pytest.mark.parametrize("plain", ["FALCON-2", "Meeting moved to 3 pm", "hello world"])
@@ -1960,6 +1984,96 @@ def test_browser_setup_uses_a_phoenix_owned_folder(
     import os
 
     assert os.environ["PLAYWRIGHT_BROWSERS_PATH"] == str(tmp_path)
+
+
+def _browser_folder(root: Path) -> tuple[Path, Path]:
+    folder = root / "browsers"
+    build = folder / "chromium-1234" / "chrome-win64"
+    build.mkdir(parents=True)
+    (build / "chrome.exe").write_bytes(b"exe")
+    (build / "chrome.DLL").write_bytes(b"dll")
+    (build / "resources.pak").write_bytes(b"pak")  # data, not executable
+    (folder / "chrome-win").mkdir()  # not a Playwright build folder
+    (folder / "chrome-win" / "stray.exe").write_bytes(b"stray")
+    return folder, build
+
+
+def test_browser_manifest_records_and_verifies_the_executables(
+    tmp_path: Path,
+) -> None:
+    # PHX-123 (SR-03, ADR-184): the folder may be writable by others; launch
+    # only what the owner's per-user manifest recorded.
+    local = tmp_path / "local"
+    manifest = browser_setup.manifest_path({"LOCALAPPDATA": str(local)})
+    assert manifest == local / "PHOENIX" / "browser-manifest.json"
+    for bad in ({}, {"LOCALAPPDATA": "relative"}):
+        with pytest.raises(ValueError):
+            browser_setup.manifest_path(bad)
+    folder, build = _browser_folder(tmp_path)
+    untrusted = browser_setup.BrowserNotTrusted
+    with pytest.raises(untrusted):
+        browser_setup.verify_browsers(folder, manifest)  # no manifest yet
+    with pytest.raises(untrusted):
+        browser_setup.write_manifest(tmp_path / "empty", manifest)
+    assert browser_setup.write_manifest(folder, manifest) == 2
+    recorded = json.loads(manifest.read_text("utf-8"))
+    assert set(recorded["files"]) == {
+        "chromium-1234/chrome-win64/chrome.exe",
+        "chromium-1234/chrome-win64/chrome.DLL",
+    }
+    browser_setup.verify_browsers(folder, manifest)
+    (build / "resources.pak").write_bytes(b"changed data")  # not recorded
+    browser_setup.verify_browsers(folder, manifest)
+    for tamper, undo in (
+        (
+            lambda: (build / "chrome.DLL").write_bytes(b"planted"),
+            lambda: (build / "chrome.DLL").write_bytes(b"dll"),
+        ),
+        (
+            lambda: (build / "extra.exe").write_bytes(b"x"),
+            lambda: (build / "extra.exe").unlink(),
+        ),
+        (
+            lambda: (build / "chrome.exe").unlink(),
+            lambda: (build / "chrome.exe").write_bytes(b"exe"),
+        ),
+    ):
+        tamper()
+        with pytest.raises(untrusted):
+            browser_setup.verify_browsers(folder, manifest)
+        undo()
+        browser_setup.verify_browsers(folder, manifest)
+    other, _ = _browser_folder(tmp_path / "other")
+    with pytest.raises(untrusted):
+        browser_setup.verify_browsers(other, manifest)  # recorded for another folder
+    manifest.write_text("{not json", "utf-8")
+    with pytest.raises(untrusted):
+        browser_setup.verify_browsers(folder, manifest)
+
+
+def test_install_script_records_and_checks_the_manifest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "phoenix_install_control_browser",
+        Path(__file__).resolve().parents[1] / "scripts" / "install_control_browser.py",
+    )
+    assert spec is not None and spec.loader is not None
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    folder, build = _browser_folder(tmp_path)
+    monkeypatch.setenv("PHOENIX_BROWSERS_PATH", str(folder))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setattr(script.subprocess, "run", None)  # never downloads here
+    assert script.main([]) == 1  # installed but no manifest yet
+    assert script.main(["--install"]) == 0  # already installed: records only
+    assert script.main([]) == 0
+    (build / "chrome.exe").write_bytes(b"planted")
+    assert script.main([]) == 1
+    monkeypatch.setenv("LOCALAPPDATA", "relative")
+    assert script.main([]) == 2
 
 
 def test_isolated_browser_context_is_fresh_for_every_session(rig: Rig) -> None:
