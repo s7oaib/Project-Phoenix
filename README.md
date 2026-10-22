@@ -27,6 +27,12 @@ AI planning (PHX-130, ADR-220). The first time, PHOENIX asks to open links;
 choose **Always allow** (the approve API's `{"duration": "always"}`) and it
 never asks again. Revoke it any time under Settings, Permissions (grants).
 
+PHX-133 adds "open wikipedia", "search wikipedia for <x>", "open github",
+"open gmail", "open maps", "search maps for <x>", "directions to <x>", "open
+google news"; "what time is it" / "what's the date" (answered at once from
+the local clock); and "open notepad", "open calculator", "open file
+explorer" / "open files" (one separate **Always allow** covers the apps).
+
 ## Primary stack
 
 - Desktop: Tauri 2

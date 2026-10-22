@@ -7360,3 +7360,87 @@ Ticket: PHX-134
 Decision: unset or blank means the default; any value other than `9b`/`4b`
 (case and whitespace ignored) raises `ValueError` when the table is built,
 instead of guessing a model.
+
+## ADR-235 — More quick-command links: four more exact hosts
+
+Status: Accepted (PHX-133 owner request 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-133
+
+Decision: `desktop.open_link`'s allowlist becomes exactly the quick-command
+template hosts: `www.google.com`, `www.youtube.com`, plus `en.wikipedia.org`,
+`github.com`, `mail.google.com` and `news.google.com`. New commands: "open
+wikipedia", "search wikipedia for X" (`/wiki/Special:Search?search=`), "open
+github", "open gmail", "open (google) maps" (`www.google.com/maps/`), "search
+maps for X" and "directions to X" (`www.google.com/maps/search/X`), "open
+google news". Same strict full-match router, query cap, unsafe-query refusal
+and `quote_plus` encoding as ADR-220; the tool still re-checks every URL. The
+link scope's resource names the allowlist, so it changes: a PHX-130 "Always
+allow" (two hosts) no longer matches and the user is asked once more. A grant
+never silently widens to hosts the user did not approve.
+
+## ADR-236 — `desktop.open_app` launches a fixed app list, as P1
+
+Status: Accepted (PHX-133)
+Date: 2026-10-23
+Ticket: PHX-133
+
+Decision: new ToolRegistry tool `desktop.open_app` (P1, PermissionEngine-
+decided). Its input is a closed `AppName` (notepad, calculator, explorer),
+never a path or argument. Each name maps to one fixed file under the Windows
+directory, read from `GetSystemWindowsDirectoryW` (not PATH or
+`%SystemRoot%`) once when the tool is built, kept only if the file exists:
+`System32\notepad.exe`, `System32\calc.exe`, `explorer.exe`. Launch is
+`os.startfile(path)` (ShellExecute "open", no shell, no arguments). Commands:
+"open notepad", "open calculator", "open file explorer" / "open files".
+Paint is left out: on Windows 11 it is a Store app with no fixed system path.
+
+P1, not P2: the effect equals the P1 link launch (a window appears; PHOENIX
+does not drive, read or close it); nothing is read, written or sent, and with
+no arguments the app cannot be pointed at a file or command; a fixed absolute
+path cannot be hijacked by PATH. P2 would also lose the desktop's "Always
+allow", which PHX-129 offers for P1 only, and the owner wants one approval.
+Its own single fixed scope (actor `phoenix`, action `open_app`, resource
+`allowlist:calculator,explorer,notepad`, fixed reason): one "Always allow"
+covers the app list and only it; the link grant does not cover apps and vice
+versa. The approve route treats it as unbound (no workspace path), like links.
+An app missing on the machine fails `tool_failed` after the permission check,
+with nothing launched.
+
+## ADR-237 — Time and date answered from the local clock, with no tool
+
+Status: Accepted (PHX-133)
+Date: 2026-10-23
+Ticket: PHX-133
+
+Decision: "what time is it", "what's the (current) time", "what's the date",
+"what's today's date", "what day is it" are answered by the router from the
+local clock with fixed English wording ("It's 3:07 PM.", "Today is Saturday,
+24 October 2026."). No tool, no permission, no model; the mission completes at
+once. The trace records `quick_answers` (the kind only; new optional
+`MissionTrace` field) and the detail API labels it "quick". Anything longer
+("what time is it in London") takes the normal pipeline.
+
+## ADR-238 — LEVI verification of the new quick commands
+
+Status: Accepted (PHX-133)
+Date: 2026-10-23
+Ticket: PHX-133
+
+Decision: ADR-221 applies to `desktop.open_app` unchanged: the answer is
+reported only when the call was ALLOWED, attempted and succeeded. A clock
+answer has no action to verify and no generated text; it is computed, not
+claimed.
+
+## ADR-239 — Quick-command event vocabulary and pins
+
+Status: Accepted (PHX-133)
+Date: 2026-10-23
+Ticket: PHX-133
+
+Decision: the PHX-103 event allowlist gains tool `desktop.open_app` and
+operation `open_app`. The intentionally changed protected sources (event
+allowlist, MissionTrace, mission service, missions and permissions routes,
+backend wiring; listed in the ticket) move from the PHX-130 pin to a PHX-133 pin at the
+implementation commit; `ollama.py` stays at PHX-130. New modules
+(`open_app.py`) are not on origin/main and need no guard exclusion.

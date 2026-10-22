@@ -1974,11 +1974,20 @@ PHX_128_PATHS = ("phoenix/agents/control_steps.py",)
 # pinned, at the PHX-130 implementation commit (the PR must merge with a merge
 # commit so this commit stays reachable).
 PHX_130_COMMIT = "c41bef4cce5e824a1d2c651c81c8b46b3c15421e"
+# PHX-133 moved six of them to its own pin (below).
 PHX_130_PATHS = (
+    "phoenix/models/ollama.py",
+)
+# PHX-133 (ADR-235 to ADR-239) intentionally changed the event allowlist
+# (desktop.open_app), MissionTrace (quick_answers), the mission service (app
+# grants, clock answers), the missions and permissions routes (label, unbound
+# app approve) and the backend wiring (app tool). Each left the PHX-130 block
+# and stays pinned, at the PHX-133 implementation commit.
+PHX_133_COMMIT = "340695cb3548c00862a909a0152164aa8a9e1fe3"
+PHX_133_PATHS = (
     "phoenix/api/missions.py",
     "phoenix/api/routes/missions.py",
     "phoenix/api/routes/permissions.py",
-    "phoenix/models/ollama.py",
 )
 # Microphone stall fix (2026-10-23, local review build) intentionally changed
 # voice/engines/sound.py: a busy event loop is no longer read as a dead
@@ -2027,9 +2036,7 @@ PHX_131_PATHS = (
 PHX_132_COMMIT = "f685a38dbe88fa0ccd7d4f9fb237b472344d2b68"
 PHX_132_PATHS = (
     "phoenix/agents/answer_stream.py",
-    "phoenix/agents/mission_events.py",
     "phoenix/api/observability.py",
-    "phoenix/api/server.py",
     "phoenix/api/voice.py",
     "phoenix/voice/conversation/__init__.py",
     "phoenix/voice/engines/pipeline.py",
@@ -2039,8 +2046,12 @@ PHX_132_PATHS = (
 PHX_131_132_COMMIT = "35c9d287255e692837c78c99f37251d4f26065df"
 PHX_131_132_PATHS = ("apps/desktop/src/adapters/core.ts",)
 # runtime.py carries PHX-131, PHX-132 and PHX-134; pinned at that merge.
-PHX_REVIEW_COMMIT = "290f6ffa57d0ca8fcf8a293b661e2e04486c06d0"
-PHX_REVIEW_PATHS = ("phoenix/agents/runtime.py",)
+PHX_REVIEW_COMMIT = "0000000000000000000000000000000000000000"
+PHX_REVIEW_PATHS = (
+    "phoenix/agents/mission_events.py",
+    "phoenix/agents/runtime.py",
+    "phoenix/api/server.py",
+)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -2086,6 +2097,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_128_PATHS
         and path not in PHX_129_PATHS
         and path not in PHX_130_PATHS
+        and path not in PHX_133_PATHS
         and path not in PHX_MIC_PATHS
         and path not in PHX_131_PATHS
         and path not in PHX_132_PATHS
@@ -2126,6 +2138,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_128_COMMIT, path) for path in PHX_128_PATHS]
     baselines += [(PHX_129_COMMIT, path) for path in PHX_129_PATHS]
     baselines += [(PHX_130_COMMIT, path) for path in PHX_130_PATHS]
+    baselines += [(PHX_133_COMMIT, path) for path in PHX_133_PATHS]
     baselines += [(PHX_MIC_COMMIT, path) for path in PHX_MIC_PATHS]
     baselines += [(PHX_131_COMMIT, path) for path in PHX_131_PATHS]
     baselines += [(PHX_132_COMMIT, path) for path in PHX_132_PATHS]

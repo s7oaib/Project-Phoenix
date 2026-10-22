@@ -3,11 +3,12 @@
 The tool opens a link in the user's normal default browser and nothing else:
 PHOENIX does not drive, read or close the page (owner decision 2026-10-23). The
 URL must be ``https`` on a host in ``ALLOWED_HOSTS`` (exactly the quick-command
-template hosts) with no user info, port or fragment; anything else is refused
-before PermissionEngine is asked. PermissionEngine decides every call (P1,
-ADR-220); only ALLOWED launches. The launch is ``os.startfile`` on Windows (no
-shell, no arguments) and ``webbrowser.open`` elsewhere. P1 writes no durable
-audit row (INV-007 covers P3/P4); the mission trace records the call.
+template hosts; PHX-133 added four) with no user info, port or fragment;
+anything else is refused before PermissionEngine is asked. PermissionEngine
+decides every call (P1, ADR-220); only ALLOWED launches. The launch is
+``os.startfile`` on Windows (no shell, no arguments) and ``webbrowser.open``
+elsewhere. P1 writes no durable audit row (INV-007 covers P3/P4); the mission
+trace records the call.
 """
 
 import os
@@ -33,7 +34,17 @@ from phoenix.tools.registry import (
 )
 
 OPEN_LINK_TOOL_ID = "desktop.open_link"
-ALLOWED_HOSTS: frozenset[str] = frozenset({"www.google.com", "www.youtube.com"})
+# PHX-133 (ADR-235): plus Wikipedia, GitHub, Gmail and Google News.
+ALLOWED_HOSTS: frozenset[str] = frozenset(
+    {
+        "en.wikipedia.org",
+        "github.com",
+        "mail.google.com",
+        "news.google.com",
+        "www.google.com",
+        "www.youtube.com",
+    }
+)
 MAX_URL_CHARS = 2048
 Launcher = Callable[[str], None]
 
@@ -74,8 +85,9 @@ def open_link_tool_definitions() -> tuple[ToolDefinition, ...]:
         ToolDefinition(
             tool_id=OPEN_LINK_TOOL_ID,
             description=(
-                "Open one allowlisted https link (Google or YouTube) in the "
-                "user's default browser; no page control."
+                "Open one allowlisted https link (Google, YouTube, Wikipedia, "
+                "GitHub, Gmail, Google Maps or News) in the user's default "
+                "browser; no page control."
             ),
             input_schema={
                 "type": "object",

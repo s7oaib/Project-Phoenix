@@ -43,6 +43,7 @@ from phoenix.api.routes.schemas import (
 )
 from phoenix.persistence.missions import GrantRecord
 from phoenix.security.permissions import GrantDuration
+from phoenix.tools.open_app import OPEN_APP_TOOL_ID
 from phoenix.tools.open_link import OPEN_LINK_TOOL_ID
 
 router = APIRouter()
@@ -103,10 +104,11 @@ async def approve(
     # grant outside the active root; it can only be denied.
     # PHX-111/PHX-120: research and media requests name no workspace path;
     # PHX-112: neither do computer-control requests.
-    # PHX-130: nor do quick-command link requests (an allowlist, not a path).
+    # PHX-130: nor do quick-command link requests (an allowlist, not a path);
+    # PHX-133: nor app requests.
     unbound = (
         record.request.tool_id
-        in (*RESEARCH_TOOL_IDS, *MEDIA_TOOL_IDS, OPEN_LINK_TOOL_ID)
+        in (*RESEARCH_TOOL_IDS, *MEDIA_TOOL_IDS, OPEN_LINK_TOOL_ID, OPEN_APP_TOOL_ID)
         or record.request.actor_id == CONTROL_ACTOR_ID
     )
     if not unbound and not services.workspace.covers(record.request.resource):
