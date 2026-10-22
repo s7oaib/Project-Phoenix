@@ -124,5 +124,19 @@ Nothing below is approved. Every other v6 constant is byte-identical
    After: that block is gone; the inputs start at "Expected output:". The
    final answer and final verifier still receive the original request.
 
+## Live verification (branch B, 2026-10-22, qwen3.5 4B/9B on Ollama, temp data dirs)
+
+| Check | Before (v6, diagnosis) | After (v7 + part A) |
+|---|---|---|
+| `phoenix_knowledge_smoke.py --runs 5` | 2/5 completed (3 `disallowed_domain`) | 5/5 completed, 5/5 cited |
+| `phoenix_mission_smoke.py` x5 | 5/6 completed | 4/5 completed (1 `verification_failed`) |
+| Document create (read report.pdf, write out/summary.md) | 0/4 written; 1 false success (completed, no file) | 0/5 written; 0 false successes (3 `verification_failed` caught by ADR-195 on a create step that read, 2 `not_json` proposals) |
+
+Open: the 4B document specialist still proposes `read_document` for most
+create steps and sometimes returns non-JSON proposals (capability proposals
+are not retried, PHX-109 R10); one run reached an approved `document.create`
+and then failed `not_json` on the re-run proposal. Document create is not
+yet reliable live; it now fails honestly instead of claiming a file.
+
 ## Completion evidence
 Report changed files, commands/tests, results, decisions, assumptions, and known limitations.
