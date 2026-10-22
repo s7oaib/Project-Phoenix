@@ -1950,7 +1950,7 @@ PHX_123_124_PATHS = ("phoenix/tools/browser.py",)
 # origin/main (PR #108) was merged in. All four stay pinned, at the PHX-125a
 # merge resolution commit (the PR must merge with a merge commit so this
 # commit stays reachable).
-PHX_125A_COMMIT = "b97a7c4cc246b979d2434415e1b579deb8fa45ae"
+PHX_125A_COMMIT = "c987efbb50a11bfee98da1c2b5eaabe0e4ed5317"
 PHX_125A_PATHS = (
     "phoenix/agents/capability_steps.py",
     "phoenix/agents/mission_recovery.py",
