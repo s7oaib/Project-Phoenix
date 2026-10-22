@@ -142,14 +142,25 @@ fn route_matches(template: &str, path: &str) -> bool {
 
 /// `encodeURIComponent` output: unreserved bytes and complete `%XX` escapes only, so no raw
 /// `&`, `=`, `+`, `#`, `/`, space or control byte reaches the backend's query parser.
-fn encoded_text_ok(value: &str) -> bool {
+/// PHX-123 (ADR-187): a `filename` is a display name, so escapes for `/`, `\`, `:` and
+/// control bytes are refused here too (the backend refuses them as well).
+fn encoded_text_ok(value: &str, filename: bool) -> bool {
     let bytes = value.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
         let byte = bytes[index];
         if byte == b'%' {
-            let hex = bytes.get(index + 1..index + 3);
-            if !hex.is_some_and(|pair| pair.iter().all(u8::is_ascii_hexdigit)) {
+            let Some(pair) = bytes.get(index + 1..index + 3) else {
+                return false;
+            };
+            let Some(decoded) = std::str::from_utf8(pair)
+                .ok()
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+                .filter(|_| pair.iter().all(u8::is_ascii_hexdigit))
+            else {
+                return false;
+            };
+            if filename && (decoded < 0x20 || decoded == 0x7f || b"/\\:".contains(&decoded)) {
                 return false;
             }
             index += 3;
@@ -171,7 +182,7 @@ fn query_ok(query: &str, keys: &[&str]) -> bool {
         let fresh = !seen.contains(&key);
         seen.push(key);
         let value_ok = if TEXT_KEYS.contains(&key) {
-            encoded_text_ok(value)
+            encoded_text_ok(value, key == "filename")
         } else {
             value.len() <= 64
                 && value
@@ -422,6 +433,8 @@ mod tests {
                 "GET",
                 "/memory/search?q=caf%C3%A9%20notes&limit=5".to_owned(),
             ),
+            // PHX-123: search text may still hold `/` and `:` (only filenames may not).
+            ("GET", "/memory/search?q=a%2Fb%3Ac".to_owned()),
             ("DELETE", format!("/memory/{ID}")),
         ] {
             let admitted =
@@ -635,6 +648,14 @@ mod tests {
             ("POST", "/files/upload?filename=a&filename=b"),
             ("POST", "/files/upload?filename=a&b"),
             ("POST", "/files/upload?filename=..%2F..%2Fx&limit=1"),
+            // PHX-123 (SR-14): refused for the encoded separators alone, no extra key.
+            ("POST", "/files/upload?filename=..%2F..%2Fx.md"),
+            ("POST", "/files/upload?filename=..%5Cx.md"),
+            ("POST", "/files/upload?filename=C%3Ax.md"),
+            ("POST", "/files/upload?filename=x%00.md"),
+            ("POST", "/files/upload?filename=x%1F.md"),
+            ("POST", "/files/upload?filename=x%7F.md"),
+            ("POST", "/files/upload?filename=x%2f.md"),
             ("POST", "/files/upload/x?filename=a"),
         ] {
             assert_eq!(

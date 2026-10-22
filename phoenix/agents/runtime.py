@@ -111,6 +111,7 @@ from phoenix.agents.control_steps import (
     ControlEvidence,
     ControlMission,
     ControlStepRunner,
+    SecretTextRefused,
     control_grants,
 )
 from phoenix.agents.failsafe import FailSafeDecision, FailSafeTrigger
@@ -415,6 +416,8 @@ class MissionFailureCode(StrEnum):
     TOOL_FAILED = "tool_failed"
     # PHX-111 (ADR-138): the search provider throttled PHOENIX; never retried.
     RATE_LIMITED = "rate_limited"
+    # PHX-123 (ADR-185): a P4 fill of secret-looking text; the owner types it.
+    SECRET_TEXT_REFUSED = "secret_text_refused"
 
 
 class StepVerification(_Value):
@@ -2155,6 +2158,8 @@ def _failure_code(error: Exception) -> MissionFailureCode | None:
         return MissionFailureCode.NO_ELIGIBLE_MODEL
     if isinstance(error, _VerificationFailed):
         return MissionFailureCode.VERIFICATION_FAILED
+    if isinstance(error, SecretTextRefused):
+        return MissionFailureCode.SECRET_TEXT_REFUSED
     if isinstance(error, ToolStepRejected):
         return MissionFailureCode.TOOL_REJECTED
     if isinstance(error, ResearchRateLimited):

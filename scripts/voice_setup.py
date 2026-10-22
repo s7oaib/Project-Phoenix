@@ -60,7 +60,14 @@ def _download(file: ModelFile, target: Path) -> None:
     )
     with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:  # noqa: S310
         with partial.open("wb") as handle:
+            written = 0
             while chunk := response.read(_CHUNK):
+                written += len(chunk)
+                if written > file.size_bytes:
+                    # PHX-123 (ADR-188): never write past the pinned size.
+                    handle.close()
+                    partial.unlink()
+                    raise ValueError(f"{file.relative_path}: larger than pinned size")
                 handle.write(chunk)
     if partial.stat().st_size != file.size_bytes or _digest(partial) != file.sha256:
         partial.unlink()
