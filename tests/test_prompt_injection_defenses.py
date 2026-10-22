@@ -1974,15 +1974,24 @@ PHX_128_PATHS = ("phoenix/agents/control_steps.py",)
 # pinned, at the PHX-130 implementation commit (the PR must merge with a merge
 # commit so this commit stays reachable).
 PHX_130_COMMIT = "c41bef4cce5e824a1d2c651c81c8b46b3c15421e"
+# PHX-133 moved six of them to its own pin (below).
 PHX_130_PATHS = (
+    "phoenix/api/routes/schemas.py",
+    "phoenix/models/ollama.py",
+)
+# PHX-133 (ADR-235 to ADR-239) intentionally changed the event allowlist
+# (desktop.open_app), MissionTrace (quick_answers), the mission service (app
+# grants, clock answers), the missions and permissions routes (label, unbound
+# app approve) and the backend wiring (app tool). Each left the PHX-130 block
+# and stays pinned, at the PHX-133 implementation commit.
+PHX_133_COMMIT = "340695cb3548c00862a909a0152164aa8a9e1fe3"
+PHX_133_PATHS = (
     "phoenix/agents/mission_events.py",
     "phoenix/agents/runtime.py",
     "phoenix/api/missions.py",
     "phoenix/api/routes/missions.py",
     "phoenix/api/routes/permissions.py",
-    "phoenix/api/routes/schemas.py",
     "phoenix/api/server.py",
-    "phoenix/models/ollama.py",
 )
 # Microphone stall fix (2026-10-23, local review build) intentionally changed
 # voice/engines/sound.py: a busy event loop is no longer read as a dead
@@ -2048,6 +2057,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_128_PATHS
         and path not in PHX_129_PATHS
         and path not in PHX_130_PATHS
+        and path not in PHX_133_PATHS
         and path not in PHX_MIC_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
@@ -2083,6 +2093,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_128_COMMIT, path) for path in PHX_128_PATHS]
     baselines += [(PHX_129_COMMIT, path) for path in PHX_129_PATHS]
     baselines += [(PHX_130_COMMIT, path) for path in PHX_130_PATHS]
+    baselines += [(PHX_133_COMMIT, path) for path in PHX_133_PATHS]
     baselines += [(PHX_MIC_COMMIT, path) for path in PHX_MIC_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
