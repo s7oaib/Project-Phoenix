@@ -321,6 +321,27 @@ class StepAssignments(_Value):
     assignments: tuple[StepAssignment, ...] = Field(min_length=1)
 
 
+def assignment_system(
+    allowed: tuple[RoutingDomain, ...], descriptions: Mapping[str, str]
+) -> str:
+    """ASSIGNMENT_SYSTEM with only the routing rules of offered domains (v7)."""
+    offered = {domain.value for domain in allowed}
+    rules = "".join(
+        rule
+        for name, rule in (
+            ("documents", prompts.ASSIGNMENT_DOCUMENTS_RULE),
+            ("knowledge_rag", prompts.ASSIGNMENT_KNOWLEDGE_RULE),
+        )
+        if name in offered
+    )
+    return prompts.ASSIGNMENT_SYSTEM.format(
+        domains="\n".join(
+            f"- {domain.value}: {descriptions[domain.value]}" for domain in allowed
+        ),
+        rules=rules,
+    )
+
+
 class ModelStepAssignmentResponder:
     """PHOENIX-owned step-to-domain proposal restricted to an explicit allowlist."""
 
@@ -344,12 +365,7 @@ class ModelStepAssignmentResponder:
         self._descriptions = descriptions
 
     async def assign(self, plan: AizenPlan) -> StepAssignments:
-        system = prompts.ASSIGNMENT_SYSTEM.format(
-            domains="\n".join(
-                f"- {domain.value}: {self._descriptions[domain.value]}"
-                for domain in self._allowed
-            )
-        )
+        system = assignment_system(self._allowed, self._descriptions)
         user = _evidence(
             self._guard,
             f"{plan.request_id}:assignment",

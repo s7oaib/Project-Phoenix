@@ -719,10 +719,8 @@ class CapabilityStepRunner:
         prior = tuple(
             (identity, model, identity, "output", text) for identity, text in evidence
         )
-        fixed = (
-            f"Original request:\n{user_request}",
-            f"Expected output:\n{handoff.expected_output_schema}",
-        )
+        # PHX-125 (v7): the step sees its objective, not the whole request.
+        fixed = (f"Expected output:\n{handoff.expected_output_schema}",)
         boundary = f"{handoff.task_id}:{handoff.step_id}"
         role, system, task = self._system(domain)
         proposal = await _generate(
@@ -894,6 +892,12 @@ class CapabilityStepRunner:
             if domain == RoutingDomain.DOCUMENTS
             else ("media_answer", prompts.MEDIA_ANSWER_SYSTEM)
         )
+        if prepared.tool_id == "document.read" or (
+            prepared.filesystem is not None
+            and prepared.filesystem.operation == FilesystemOperation.READ_TEXT
+        ):
+            # PHX-125 (v7): a read reports the file, never a save.
+            answer_system = f"{answer_system}\n{prompts.DOCUMENT_READ_ANSWER_RULE}"
         answer = await _generate(
             binding,
             answer_role,
@@ -1085,7 +1089,6 @@ class CapabilityVerificationResponder(ModelVerificationResponder):
         )
         user = "\n\n".join(
             (
-                f"Original request:\n{self._original_request}",
                 f"Expected output:\n{request.expected_output_schema}",
                 f"Completion rule:\n{request.completion_rule}",
                 _guarded(

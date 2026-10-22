@@ -73,6 +73,7 @@ from phoenix.agents.responders import (
     _evidence,
     _generate,
     _PlanWire,
+    assignment_system,
     parse_json_object,
 )
 from phoenix.agents.router import RoutingDomain
@@ -1553,12 +1554,7 @@ class ControlAssignmentResponder:
         self._allowed = allowed_domains
 
     async def assign(self, plan: AizenPlan) -> StepAssignments:
-        system = prompts.ASSIGNMENT_SYSTEM.format(
-            domains="\n".join(
-                f"- {domain.value}: {self._descriptions[domain.value]}"
-                for domain in self._allowed
-            )
-        )
+        system = assignment_system(self._allowed, self._descriptions)
         user = _evidence(
             self._guard,
             f"{plan.request_id}:assignment",

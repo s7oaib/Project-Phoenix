@@ -1225,6 +1225,12 @@ def test_filesystem_operations_keep_phx046_evidence(stack: Stack) -> None:
     assert "document_verifier" in stack.provider.roles()
     system = stack.provider.system("document_capability")
     assert "- read_text:" in system and "- create_document:" in system
+    # PHX-125 (v7): a filesystem read gets the read rule; the document
+    # verifier input no longer carries the original request.
+    assert stack.provider.system("document_capability_answer").endswith(
+        "\n" + prompts.DOCUMENT_READ_ANSWER_RULE
+    )
+    assert "Original request" not in stack.provider.prompt("document_verifier")
 
 
 def test_capability_missions_use_the_v5_capability_planner(stack: Stack) -> None:
@@ -1508,7 +1514,7 @@ def test_document_tool_requires_canonical_registry(stack: Stack) -> None:
 def test_capability_prompts_are_part_of_v5() -> None:
     # PHX-120 (ADR-160): the approved draft moved verbatim into prompts.py
     # (unchanged in PHX-121's v6, hash-pinned in test_phoenix_runtime.py).
-    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v6"
+    assert prompts.PROMPT_SET_VERSION == "phoenix-prompts-v7"
     for name in (
         "DOCUMENT_CAPABILITY_SYSTEM",
         "DOCUMENT_CAPABILITY_ANSWER_SYSTEM",
@@ -1773,3 +1779,41 @@ def test_duplicate_keys_are_a_schema_error(text: str) -> None:
     assert caught.value.code is ResponderErrorCode.SCHEMA
     once = '{"tool_request": {"operation": "read_document", "relative_path": "a.md"}}'
     assert parse_json_object(once, capability_steps._DocumentEnvelope)
+
+
+def test_v7_step_inputs_omit_the_original_request(stack: Stack) -> None:
+    # PHX-125 (ADR-198, ADR-199): proposal, answer and LEVI see the step, not
+    # the whole request; a read answer gets the read rule.
+    text = "SENTINEL-REQUEST: what is the project codename?"
+    assert mission(stack, (stack.document_grant(),), text=text).kind is (
+        MissionKind.COMPLETED
+    )
+    for role in ("document_capability", "document_capability_answer"):
+        assert "Original request" not in stack.provider.prompt(role)
+        assert "SENTINEL-REQUEST" not in stack.provider.prompt(role)
+    assert "Original request" not in stack.provider.prompt("capability_verifier")
+    assert "SENTINEL-REQUEST" in stack.provider.prompt("final_answer")
+    assert stack.provider.system("document_capability_answer") == (
+        prompts.DOCUMENT_CAPABILITY_ANSWER_SYSTEM
+        + "\n"
+        + prompts.DOCUMENT_READ_ANSWER_RULE
+    )
+
+
+def test_v7_read_rule_is_not_rendered_for_a_create(stack: Stack) -> None:
+    stack.provider.replies.update(
+        {
+            **plan(("Save a summary to out/summary.md.", "documents")),
+            "document_capability": proposal(
+                operation="create_document",
+                relative_path="out/summary.md",
+                title="Summary",
+                sections=[{"heading": "Codename", "paragraphs": ["PELICAN-7"]}],
+            ),
+        }
+    )
+    grants = (stack.document_grant("create", "out/summary.md", grant_id="Grant.C"),)
+    assert mission(stack, grants).kind is MissionKind.COMPLETED
+    assert stack.provider.system("document_capability_answer") == (
+        prompts.DOCUMENT_CAPABILITY_ANSWER_SYSTEM
+    )

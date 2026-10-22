@@ -39,8 +39,14 @@ changes):
 3. `DISALLOWED_DOMAIN` is retryable output, bounded by the existing budgets
    (ADR-197).
 
-Part B, branch `feature/PHX-125b-model-inputs` (owner-gated): see that
-branch's version of this file.
+Part B, branch `feature/PHX-125b-model-inputs` (owner-gated, not approved;
+exact text under "Owner approval needed"):
+4. Render the documents routing sentence only when `documents` is offered
+   (ADR-198).
+5. Remove "Original request" from the capability tool-proposal, capability
+   answer and verifier inputs and the document verifier input (ADR-198).
+6. New conditional rules: knowledge routing, read answers (ADR-199).
+7. `phoenix-prompts-v7`; every other v6 constant byte-identical.
 
 ## Non-goals
 New tools, new permissions, a planner-declared operation field, retries of a
@@ -67,6 +73,56 @@ pins in `tests/test_prompt_injection_defenses.py`.
 - Text-only steps and missions are unaffected.
 - Repeated keys at any depth give `schema`; a disallowed domain is retried
   once and then keeps its code.
+
+## Owner approval needed (part B, `phoenix-prompts-v7`)
+
+Nothing below is approved. Every other v6 constant is byte-identical
+(hash-pinned in `tests/test_phoenix_runtime.py`).
+
+1. `ASSIGNMENT_SYSTEM` (changed). Before (v6), between "names above." and
+   "Reply with":
+
+   ```
+   If "documents" is one of the allowed domains, assign every step that reads a
+   file, lists a directory or inspects a file's metadata to "documents".
+   ```
+
+   After (v7): that place holds `{rules}`, and the same two lines, byte for
+   byte, are the new constant `ASSIGNMENT_DOCUMENTS_RULE`, rendered only when
+   `documents` is offered. With `documents` offered the rendered prompt is
+   byte-identical to v6; without it the sentence is absent.
+
+2. `ASSIGNMENT_KNOWLEDGE_RULE` (new; rendered into `{rules}` after the
+   documents rule, only when `knowledge_rag` is offered):
+
+   ```
+   If "knowledge_rag" is one of the allowed domains, assign every step that looks
+   up, searches or reads the user's uploaded documents or saved memories to
+   "knowledge_rag".
+   ```
+
+3. `DOCUMENT_READ_ANSWER_RULE` (new; appended on its own line after
+   `DOCUMENT_CAPABILITY_ANSWER_SYSTEM`, which is unchanged, only when the
+   step's tool call read a file: `document.read` or filesystem `read_text`):
+
+   ```
+   For a read, report only what the file says; never say that a file was or will
+   be created or saved.
+   ```
+
+4. Removed model input (code, not a constant). Before: the user turn of the
+   capability tool proposal (`document_capability`, `media_specialist`), the
+   capability answer (`document_capability_answer`, `media_answer`), the
+   capability verifier (`capability_verifier`) and the document verifier
+   (`document_verifier`) began with
+
+   ```
+   Original request:
+   <the user's request>
+   ```
+
+   After: that block is gone; the inputs start at "Expected output:". The
+   final answer and final verifier still receive the original request.
 
 ## Completion evidence
 Report changed files, commands/tests, results, decisions, assumptions, and known limitations.
