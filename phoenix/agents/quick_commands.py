@@ -190,6 +190,11 @@ KNOWN_SITES: dict[str, tuple[str, str]] = {
     "x": ("x.com", "X"),
     "linkedin": ("www.linkedin.com", "LinkedIn"),
     "spotify web": ("open.spotify.com", "Spotify Web"),
+    # PHX-137 (ADR-256): used only when no installed app matches the name.
+    "spotify": ("open.spotify.com", "Spotify Web"),
+    "whatsapp": ("web.whatsapp.com", "WhatsApp Web"),
+    "youtube music": ("music.youtube.com", "YouTube Music"),
+    "discord": ("discord.com", "Discord"),
 }
 # A bare domain: labels, then a TLD from a fixed generic set or two letters
 # that are not common file extensions ("notes.md" is a file, not a site).

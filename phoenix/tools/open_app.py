@@ -16,10 +16,19 @@ files under the all-users and current-user Start-menu ``Programs`` folders are
 scanned once when the tool is built (``scan_shortcuts``); a request names a
 shortcut of that index only, never a path, and the ``.lnk`` is started with
 ``os.startfile`` and no arguments. Uninstaller shortcuts are never indexed.
+
+PHX-137 (ADR-255, ADR-256): the same index also holds Microsoft Store (UWP)
+apps that ``Get-StartApps`` lists, collected once at startup by one fixed
+PowerShell command (no user text, 10 s timeout, failures ignored). Such an
+entry is ``APPS_FOLDER + AppID`` with the AppID matching a strict
+package-family pattern; a ``.lnk`` keeps a name it already holds.
 """
 
 import ctypes
+import json
 import os
+import re
+import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -47,6 +56,13 @@ AppLauncher = Callable[[str], None]
 # PHX-136 (ADR-250): the shortcut scope's resource; any indexed Start-menu app.
 SHORTCUT_RESOURCE = "start-menu:installed-app-shortcuts"
 MAX_SHORTCUTS = 2000
+# PHX-137 (ADR-255): a Store app is launched through the Apps folder by AppID.
+APPS_FOLDER = "shell:AppsFolder\\"
+STORE_APP_ID = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9.-]{0,99}_[a-z0-9]{13}![A-Za-z][A-Za-z0-9.]{0,63}"
+)
+START_APPS_TIMEOUT_SECONDS = 10.0
+StartAppsReader = Callable[[], str]
 
 
 class AppName(StrEnum):
@@ -125,6 +141,68 @@ def scan_shortcuts(roots: Sequence[Path]) -> Mapping[str, str]:
     return MappingProxyType(found)
 
 
+def is_shortcut_target(target: object) -> bool:
+    """An absolute ``.lnk`` path or (PHX-137) an Apps-folder Store AppID."""
+    if type(target) is not str:
+        return False
+    if target.startswith(APPS_FOLDER):
+        return STORE_APP_ID.fullmatch(target[len(APPS_FOLDER) :]) is not None
+    path = PureWindowsPath(target)
+    return path.is_absolute() and path.suffix.lower() == ".lnk"
+
+
+def read_start_apps() -> str:
+    """PHX-137: ``Get-StartApps`` as JSON from one fixed command; "" on failure."""
+    root = windows_directory()
+    if root is None:
+        return ""
+    shell = root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    command = "Get-StartApps | ConvertTo-Json -Compress"
+    try:
+        done = subprocess.run(  # noqa: S603 - fixed executable and arguments
+            [str(shell), "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True,
+            timeout=START_APPS_TIMEOUT_SECONDS,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout.decode("utf-8", "replace") if done.returncode == 0 else ""
+
+
+def scan_start_apps(read: StartAppsReader = read_start_apps) -> Mapping[str, str]:
+    """PHX-137: key -> ``APPS_FOLDER + AppID`` for listed Store apps."""
+    try:
+        listed = json.loads(read() or "[]")
+    except ValueError:
+        return MappingProxyType({})
+    if isinstance(listed, dict):
+        listed = [listed]
+    found: dict[str, str] = {}
+    for app in listed if isinstance(listed, list) else ():
+        if not isinstance(app, dict) or len(found) >= MAX_SHORTCUTS:
+            continue
+        name, app_id = app.get("Name"), app.get("AppID")
+        if type(name) is not str or type(app_id) is not str:
+            continue
+        key = shortcut_key(name)
+        if key and "uninstall" not in key and STORE_APP_ID.fullmatch(app_id):
+            found.setdefault(key, APPS_FOLDER + app_id)
+    return MappingProxyType(found)
+
+
+def installed_apps() -> Mapping[str, str]:
+    """Start-menu ``.lnk`` index plus (PHX-137) Store apps; a ``.lnk`` wins."""
+    found = dict(scan_shortcuts(start_menu_roots()))
+    if sys.platform == "win32":
+        for key, target in scan_start_apps().items():
+            if len(found) >= MAX_SHORTCUTS:
+                break
+            found.setdefault(key, target)
+    return MappingProxyType(found)
+
+
 def default_app_launcher(path: str) -> None:
     """Start the executable at path with no arguments; raises if the OS refuses."""
     if sys.platform != "win32":
@@ -193,17 +271,15 @@ class OpenAppTool:
             raise ValueError("App paths must be absolute, by AppName")
         self._paths: Mapping[AppName, str] = MappingProxyType(dict(resolved))
         # PHX-136: the Start-menu index, scanned once here (startup).
-        links = scan_shortcuts(start_menu_roots()) if shortcuts is None else shortcuts
+        links = installed_apps() if shortcuts is None else shortcuts
         if any(
             type(key) is not str
             or key != shortcut_key(key)
             or not key
-            or type(path) is not str
-            or not PureWindowsPath(path).is_absolute()
-            or PureWindowsPath(path).suffix.lower() != ".lnk"
+            or not is_shortcut_target(path)
             for key, path in links.items()
         ):
-            raise ValueError("Shortcuts must be absolute .lnk paths by key")
+            raise ValueError("Shortcuts must be .lnk paths or Store AppIDs by key")
         self._shortcuts: Mapping[str, str] = MappingProxyType(dict(links))
 
     @property
@@ -241,7 +317,7 @@ class OpenAppTool:
         request: PermissionRequest,
         grants: Sequence[PermissionGrant] = (),
     ) -> OpenAppResult:
-        """PHX-136: launch an indexed Start-menu shortcut, no arguments."""
+        """PHX-136/137: launch an indexed shortcut or Store app, no arguments."""
         path = self._shortcuts.get(name) if type(name) is str else None
         if path is None:
             raise OpenAppInputError("Unknown shortcut")

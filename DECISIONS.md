@@ -7618,3 +7618,40 @@ Decision: `phoenix/api/missions.py` (matches through the runner's shortcut
 index) leaves the PHX-133 pin for a PHX-136 pin at the implementation commit.
 `quick_commands.py`, `open_link.py` and `open_app.py` are not on origin/main
 and need no pin.
+
+## ADR-255 — Store apps in the app index
+
+Status: Accepted (PHX-137)
+Date: 2026-10-23
+Ticket: PHX-137
+
+Decision: `desktop.open_app`'s shortcut index also holds apps listed by
+`Get-StartApps`, read once at startup by one fixed command (System32
+`powershell.exe -NoProfile -NonInteractive -Command "Get-StartApps |
+ConvertTo-Json -Compress"`, no user text, 10 s timeout, any failure = no Store
+apps). Only AppIDs matching the strict package-family pattern
+(`<name>_<13 chars>!<app>`) are kept, launched as
+`os.startfile("shell:AppsFolder\<AppID>")` with no arguments. A `.lnk` keeps a
+name it already holds (Win32 apps stay on their shortcut). Same P1 shortcut
+scope; no new permission.
+
+## ADR-256 — App first, then known website
+
+Status: Accepted (PHX-137)
+Date: 2026-10-23
+Ticket: PHX-137
+
+Decision: "open spotify / whatsapp / youtube music / discord" opens the
+installed app when one matches, else the known site's home page under the
+existing website scope (open.spotify.com, web.whatsapp.com, music.youtube.com,
+discord.com). Discord opens `https://discord.com/`, not `/app`: the website
+scope allows home pages only, and widening it would be a new permission.
+
+## ADR-257 — PHX-137 pins
+
+Status: Accepted (PHX-137)
+Date: 2026-10-23
+Ticket: PHX-137
+
+Decision: `open_app.py` and `quick_commands.py` are not on origin/main and need
+no pin; no pinned file changes.
