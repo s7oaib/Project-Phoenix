@@ -56,9 +56,10 @@ class FakeColibri(ModelProvider):
         self,
         status: ProviderHealthStatus = ProviderHealthStatus.HEALTHY,
         served: bool = True,
+        usage: bool = True,
     ) -> None:
         super().__init__("colibri")
-        self.status, self.served = status, served
+        self.status, self.served, self.usage = status, served, usage
 
     async def __aenter__(self) -> Self:
         return self
@@ -106,7 +107,8 @@ class FakeColibri(ModelProvider):
             text="",
             is_final=True,
             finish_reason="stop",
-            usage=TokenUsage(input_tokens=10, output_tokens=40),
+            # Live Colibri v2.0.0 reports no usage at all (PHX-124).
+            usage=TokenUsage(input_tokens=10, output_tokens=40) if self.usage else None,
         )
 
     async def cancel(self, operation_id: str) -> CancellationResult:
@@ -275,6 +277,105 @@ def test_live_run_measures_the_served_model_without_content(tmp_path: Path) -> N
     summary = (out / gate.SUMMARY_NAME).read_text("utf-8")
     assert "Colibri deep-tier gate — INCOMPLETE" in summary
     assert "Engine disk reads during the run: 0.50 GiB" in summary
+
+
+def _word_tokenizer(model_dir: Path) -> None:
+    """A tiny local tokenizer.json: one token per whitespace-separated word."""
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import Whitespace
+
+    tokenizer = Tokenizer(WordLevel({"[UNK]": 0}, unk_token="[UNK]"))
+    tokenizer.pre_tokenizer = Whitespace()
+    model_dir.mkdir()
+    tokenizer.save(str(model_dir / "tokenizer.json"))
+
+
+def test_missing_usage_without_tokenizer_is_never_pass(tmp_path: Path) -> None:
+    code, out = _live(tmp_path, FakeColibri(usage=False))
+    results = json.loads((out / gate.RESULTS_NAME).read_text("utf-8"))
+    statuses = {c["id"]: c["status"] for c in results["criteria"]}
+    assert statuses["tokens_per_second_median"] == "NOT_MEASURED"
+    assert code == 1 and results["verdict"] == "INCOMPLETE"
+    assert results["live"]["throughput_method"] is None
+    summary = (out / gate.SUMMARY_NAME).read_text("utf-8")
+    assert "Throughput method: NOT MEASURED (0 trials" in summary
+
+
+def test_missing_usage_is_measured_by_the_model_tokenizer(tmp_path: Path) -> None:
+    model = tmp_path / "model"
+    _word_tokenizer(model)
+    out = tmp_path / "out"
+    code = gate.main(
+        ["--live", "--out", str(out), "--model-dir", str(model)],
+        provider_factory=lambda: FakeColibri(usage=False),
+        process_io=_engine_io(),
+        resource_probe=FixedProbe(),
+    )
+    text = (out / gate.RESULTS_NAME).read_text("utf-8")
+    results = json.loads(text)
+    live = results["live"]
+    assert live["throughput_method"] == "tokenizer_recount"
+    assert live["throughput_trials"] == 16 and live["tokens_per_second_median"] > 0
+    statuses = {c["id"]: c["status"] for c in results["criteria"]}
+    assert statuses["tokens_per_second_median"] != "NOT_MEASURED"
+    assert code == 1 and results["verdict"] == "INCOMPLETE"  # NVMe not measured
+    long = [a for a in ANSWERS.values() if len(a) >= 12]
+    assert long and not any(a in text for a in long)  # counts only, never text
+
+
+def test_counting_provider_counts_streamed_text_per_operation() -> None:
+    import asyncio
+
+    async def run() -> dict[str, int]:
+        provider = gate.CountingProvider(FakeColibri(), lambda s: len(s.split()))
+        prompt, answer = next(iter(ANSWERS.items()))
+        request = GenerationRequest.model_validate(
+            {
+                "operation_id": "Op.A",
+                "model_id": "m",
+                "messages": [{"role": "user", "text": prompt}],
+            }
+        )
+        chunks = [chunk async for chunk in provider.stream(request)]
+        assert "".join(c.text for c in chunks) == answer and chunks[-1].is_final
+        assert provider.provider_id == "colibri"
+        counts: dict[str, int] = provider.output_tokens
+        return counts
+
+    counts = asyncio.run(run())
+    assert counts == {"Op.A": len(next(iter(ANSWERS.values())).split())}
+
+
+def test_load_token_counter_is_local_and_optional(tmp_path: Path) -> None:
+    assert gate.load_token_counter(tmp_path / "absent") is None
+    model = tmp_path / "model"
+    _word_tokenizer(model)
+    counter = gate.load_token_counter(model)
+    assert counter is not None and counter("one two three") == 3
+
+
+def test_summary_reports_a_zero_vram_reading_explicitly(tmp_path: Path) -> None:
+    class IdleGpu(FixedProbe):
+        def sample(self) -> ResourceSnapshot:
+            return ResourceSnapshot(
+                system_ram_used_bytes=12 * gate.GIB,
+                gpus=(GpuReading(index=0, name="fixture", used_mib=0, total_mib=6144),),
+            )
+
+    out = tmp_path / "out"
+    gate.main(
+        ["--live", "--out", str(out), "--model-dir", str(tmp_path / "none")],
+        provider_factory=lambda: FakeColibri(),
+        process_io=_engine_io(),
+        resource_probe=IdleGpu(),
+    )
+    live = json.loads((out / gate.RESULTS_NAME).read_text("utf-8"))["live"]
+    assert (live["max_gpu_used_mib"], live["gpu_samples"]) == (0, 32)
+    assert live["gpu_samples_expected"] == 32
+    summary = (out / gate.SUMMARY_NAME).read_text("utf-8")
+    assert "device-wide peak 0 MiB in 32/32" in summary
+    assert "engine held no GPU memory (CPU-only run)" in summary
 
 
 @pytest.mark.parametrize(

@@ -33,6 +33,8 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -114,13 +116,20 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _audit(directory: Path, registry: ToolRegistry) -> AuditTrail:
+@contextmanager
+def _audit(directory: Path, registry: ToolRegistry) -> Iterator[AuditTrail]:
+    """Disposes the engine on exit, before the temp folder is removed:
+    Windows cannot delete an open SQLite file (WinError 32, PHX-124)."""
     database = directory / "smoke-audit.db"
     config = Config(str(ROOT / "alembic.ini"))
     url = f"sqlite:///{database}"
     config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
     command.upgrade(config, "head")
-    return AuditTrail(sessionmaker(create_engine(url)), registry)
+    engine = create_engine(url)
+    try:
+        yield AuditTrail(sessionmaker(engine), registry)
+    finally:
+        engine.dispose()
 
 
 def _request(intent: Any) -> PermissionRequest:
@@ -186,7 +195,13 @@ def run_tools(directory: Path) -> dict[str, Any]:
         raise SystemExit("PHOENIX Chromium missing: run install_control_browser.py")
     use_phoenix_browsers(path)
     registry = ToolRegistry(control_tool_definitions())
-    audit = _audit(directory, registry)
+    with _audit(directory, registry) as audit:
+        return _tool_steps(path, registry, audit)
+
+
+def _tool_steps(
+    path: Path, registry: ToolRegistry, audit: AuditTrail
+) -> dict[str, Any]:
     policy = control_permission_policy()
     steps: list[dict[str, Any]] = []
     browser = BrowserTool(registry, policy, audit)
@@ -266,8 +281,12 @@ async def run_mission(base_url: str) -> dict[str, Any]:
     use_phoenix_browsers(path)
     registry = ToolRegistry(control_tool_definitions())
     policy = control_permission_policy()
-    with tempfile.TemporaryDirectory(prefix="phoenix-control-") as directory:
-        audit = _audit(Path(directory), registry)
+    with (
+        tempfile.TemporaryDirectory(
+            prefix="phoenix-control-", ignore_cleanup_errors=True
+        ) as directory,
+        _audit(Path(directory), registry) as audit,
+    ):
         runner = ControlStepRunner(
             registry=registry,
             policy=policy,
@@ -333,6 +352,7 @@ async def run_mission(base_url: str) -> dict[str, Any]:
                 grants.append(_grant(pending, risk))
         runner.close()
         answer = None if result is None else result.text
+        # Built inside the with: the audit DB is read before it is disposed.
         return {
             "runs": runs,
             "answer_chars": None if answer is None else len(answer),
@@ -362,7 +382,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(plan, indent=2))
         return 0
     if args.tools:
-        with tempfile.TemporaryDirectory(prefix="phoenix-control-") as directory:
+        with tempfile.TemporaryDirectory(
+            prefix="phoenix-control-", ignore_cleanup_errors=True
+        ) as directory:
             report = run_tools(Path(directory))
         name = "phoenix-control-tools-smoke.json"
         ok = all(step["status"] == "success" for step in report["steps"])

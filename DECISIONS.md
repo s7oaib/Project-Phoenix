@@ -6696,6 +6696,68 @@ Rejected: forcing the COMPLEX path or approving "always" (the rehearsal would no
 mirror the desktop demo), and a backend test hook (the rehearsal must exercise the real
 launch path).
 
+## ADR-190 — Live acceptance fixes: Playwright handlers, smoke cleanup, gate throughput and VRAM reporting
+
+Status: Accepted (recommended option, under the owner's instruction)
+Date: 2026-10-22
+Ticket: PHX-124
+
+Context: the first live acceptance run on BLAZE-6 found three defects that the
+offline fakes hid. (1) Every browser call failed `browser_unavailable`:
+Playwright's sync API caches each handler's wrapper as an attribute on a bound
+method's instance (`_pw_impl_instance_route`), and `_Session` is a slotted
+dataclass, so `context.route("**/*", session.route)` raised `AttributeError`
+(the same applied to every `.on(...)` handler). (2) `phoenix_control_smoke.py`
+crashed on Windows with WinError 32 removing its temp folder, because the audit
+engine's pooled connection still held `smoke-audit.db` open, so no report was
+written. (3) The Colibri gate said INCOMPLETE because Colibri v2.0.0 reports no
+output-token usage, and recorded `vram_fraction` 0.0.
+
+Decision:
+
+- **Browser.** `_open` registers closures (`lambda route: session.route(route)`
+  and likewise for each event) instead of bound methods. Behaviour, policy and
+  the route/redirect guards are unchanged. The browser fakes now pass every
+  registration through Playwright's real `ImplToApiMapping.wrap_handler`, so a
+  handler Playwright cannot wrap fails offline. Verified live: real Chromium
+  from `D:\Phoenix\browsers` opened through `BrowserTool`, the route closure
+  fired and aborted a `127.0.0.1` fixture request (`ERR_BLOCKED_BY_CLIENT`,
+  zero requests reached the fixture server) and the session closed cleanly.
+- **Control smoke.** `_audit` is a context manager that disposes the engine
+  before the temp folder is removed. The temp folders also use
+  `ignore_cleanup_errors=True`, so a leftover handle can never stop the report
+  from being written.
+- **Gate throughput.** The metric stays output tokens / whole latency
+  (ADR-079) and the 2 tok/s floor is unchanged. Provider-reported output tokens
+  are used when present. Otherwise the gate wraps the served provider in a
+  delegating `CountingProvider` that re-encodes each operation's streamed text
+  with the model's own `tokenizer.json` from the container folder (local file,
+  `tokenizers` already in the lock, `add_special_tokens=False`) and keeps only
+  the count; the text is dropped (ADR-029). Accuracy: re-encoding decoded text
+  with the same BPE tokenizer normally gives the generated count exactly, or
+  within a few tokens where the model emitted a non-canonical split. Tokens
+  that were never streamed (special/EOS tokens, any reasoning the server keeps
+  hidden) are not counted, so the figure is a lower bound and can only make the
+  minimum-throughput criterion harder to pass. The report records
+  `throughput_method` (`provider_usage` or `tokenizer_recount`) and the trial
+  count. No usage and no local tokenizer still gives NOT_MEASURED, so the
+  verdict is INCOMPLETE, never PASS. Counting streamed chunks was rejected:
+  Colibri's speculative decoding can emit more than one token per chunk.
+- **Gate VRAM.** The 0.0 was a true reading, not a missed process: the probe's
+  nvidia-smi `memory.used` is device-wide, it read 0 MiB before the run and at
+  the trial boundaries, and the serve banner shows `hot=0` with the expert
+  kernel in RAM, so this engine run held no GPU memory (CPU-only). The gate
+  keeps the criterion but now records `gpu_samples` / `gpu_samples_expected`
+  (each nvidia-smi call is bounded to 1 s, so a busy host can drop samples)
+  and the summary states the device-wide peak and, for 0 MiB, that the engine
+  held no GPU memory. `phoenix/models/benchmark.py` is unchanged.
+
+Limitations: the live gate has not been re-run with these changes (it needs
+the GPU and Colibri, which this ticket did not run). The throughput floor is
+pre-registered; whole-latency throughput on short answers is dominated by
+prefill, which the FYP reports as measured. `phoenix/tools/browser.py` is
+hash-pinned at the PHX-124 implementation commit.
+
 ## ADR-180 — HTTP client libraries log warnings only
 
 Status: Accepted (recommended option, under the owner's instruction)
