@@ -103,6 +103,7 @@ from phoenix.agents.capability_steps import (
     requires_written_file,
     wrote_file,
 )
+from phoenix.agents.chat_context import ContextSource, chat_prompt
 from phoenix.agents.combined_planning import (
     CombinedPlanningResponder,
     capability_lines,
@@ -262,6 +263,7 @@ from phoenix.agents.triage import (
     TriageOutcome,
     fallback_reason,
     rule_decides_direct,
+    rule_wants_research,
 )
 from phoenix.agents.verifier import (
     LeviVerifier,
@@ -640,6 +642,8 @@ class _Evidence:
     kaido: KaidoRecord | None = None
     # PHX-110: retrievals and verified citations (cited text stays in memory).
     knowledge: KnowledgeLedger = field(default_factory=KnowledgeLedger)
+    # PHX-140 (ADR-264): the caller's conversation context for DIRECT/KAIDO.
+    context: ContextSource | None = None
 
     @property
     def recovery_actions(self) -> int:
@@ -934,6 +938,7 @@ class PhoenixRuntime:
         session_id: str | None = None,
         decided_by: TriageOutcome = TriageOutcome.CLIENT,
         approvals: Sequence[ControlApproval] = (),
+        context: ContextSource | None = None,
     ) -> MissionResult:
         """grants and session_id are caller (user) evidence for document steps.
 
@@ -997,7 +1002,7 @@ class PhoenixRuntime:
             raise PhoenixRuntimeError("Caller task already owns an active mission")
         mission = _Mission(task, control=mission_control)
         self._active[request.request_id] = mission
-        evidence = _Evidence(directive)
+        evidence = _Evidence(directive, context=context)
         if directive is not None:
             evidence.triage_outcome = decider
         events = MissionEvents(self._events, request.request_id)
@@ -1180,8 +1185,12 @@ class PhoenixRuntime:
                 {**record, "outcome": "unavailable"}
             )
             raise
+        # PHX-140 (ADR-264): KAIDO sees the same context when it fits.
+        prompt = await chat_prompt(self._guard, request.text, evidence.context)
+        if not within_budget(prompt):
+            prompt = request.text
         async with _agent_phase(events, KAIDO_AGENT_ID, KAIDO_ROLE):
-            text = await kaido_answer(binding, request.text)
+            text = await kaido_answer(binding, prompt)
         evidence.kaido = KaidoRecord.model_validate({**record, "outcome": "answered"})
         return text
 
@@ -1520,6 +1529,14 @@ class PhoenixRuntime:
         trace and published as agent.failed (role triage) with the reason.
         """
         async with _agent_phase(events, "phoenix", TRIAGE_ROLE) as phase:
+            # PHX-140 (ADR-266): a clearly current/online question goes to the
+            # research planner when web research is enabled.
+            if self._research is not None and rule_wants_research(request.text):
+                evidence.triage_outcome = TriageOutcome.DECIDED
+                evidence.path = OrchestrationPath.COMPLEX
+                phase.result["triage_outcome"] = TriageOutcome.DECIDED.value
+                phase.result["path"] = OrchestrationPath.COMPLEX.value
+                return OrchestrationPath.COMPLEX
             # PHX-131 (ADR-225): a clearly simple request goes DIRECT by rule,
             # with no generation; anything else is triaged by the model.
             if rule_decides_direct(request.text):
@@ -1581,6 +1598,10 @@ class PhoenixRuntime:
             partials.start(request.request_id)
             return replace(binding, provider=StreamingProvider(binding.provider, delta))
 
+        # PHX-140 (ADR-264): the reply sees the conversation and memories as
+        # guarded data; triage, plan and trace keep the user's own text.
+        prompt = await chat_prompt(self._guard, request.text, evidence.context)
+        asked = PhoenixRequest(request_id=request.request_id, text=prompt)
         async with _agent_phase(events, "phoenix", "direct"):
             health = await self._health(evidence)
             result = await self._recovering(
@@ -1590,7 +1611,7 @@ class PhoenixRuntime:
                 role=RecoveryRole.DIRECT,
                 binding=self._control("phoenix", health, evidence),
                 attempt=lambda binding: self._orchestrator.execute(
-                    request,
+                    asked,
                     OrchestrationPath.DIRECT,
                     direct_responder=ModelDirectResponder(streamed(binding)),
                 ),

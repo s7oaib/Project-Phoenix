@@ -7703,3 +7703,67 @@ set it aside. `phoenix/api/server.py` (tool wiring) and
 `phoenix/agents/mission_events.py` (event allowlist) leave the PHX-135 pin
 for a PHX-138 pin at the implementation commit. `quick_commands.py` and the
 new tool are not on origin/main and need no pin.
+
+## ADR-264 — Conversation context for DIRECT and KAIDO replies
+
+Status: Accepted (PHX-140; owner approved feature 2026-10-23)
+Date: 2026-10-24
+Ticket: PHX-140
+
+Decision: a DIRECT or KAIDO reply sees the last 6 turns of its own
+conversation (user and PHOENIX message text before the current request,
+capped at 3,000 chars, newest kept) so follow-ups work. The history enters the
+prompt only as one guarded item (`_guarded`, origin `model_output`, field
+`recent_turns`, lines labelled `User:`/`PHOENIX:`); no new prompt sentence.
+Triage, planning and the trace keep the user's own text. KAIDO uses it only
+when it fits its budget. Any failure leaves it out. Voice already reuses one
+conversation per voice run.
+
+## ADR-265 — Saved memories in chat
+
+Status: Accepted (PHX-140; owner approved feature 2026-10-23)
+Date: 2026-10-24
+Ticket: PHX-140
+
+Decision: for DIRECT/KAIDO replies only, the top 3 user memories from the
+PHX-110 KnowledgeService search (P0 internal retrieval, the store's similarity
+floor, nothing when nothing is indexed) are added as guarded items (origin
+`external_text`, field `saved_memory`), retrieved only when the reply runs.
+
+## ADR-266 — Research rule for current/online questions
+
+Status: Accepted (PHX-140; owner approved feature 2026-10-23)
+Date: 2026-10-24
+Ticket: PHX-140
+
+Decision: `rule_wants_research` (deterministic, conservative: a short request
+with news, headlines, latest, weather, forecast, price, score, today, tonight,
+"who won" or a year from the current one on, and no local word such as my,
+file, open, play, time, date) sends the request COMPLEX, where the research
+planner can search, only while web research is enabled. Every search still
+needs the user's P1 permission. Limitation: recorded as triage `decided`,
+because migration 0010 keeps `rule` DIRECT-only.
+
+## ADR-267 — Web research on by default
+
+Status: Accepted (PHX-140; owner approved feature 2026-10-23)
+Date: 2026-10-24
+Ticket: PHX-140
+
+Decision: `web_research_enabled` defaults to true;
+`PHOENIX_WEB_RESEARCH_ENABLED=0` opts out for a launch. `tests/conftest.py`
+opts tests out unless they set it themselves.
+
+## ADR-268 — Follow-up quick commands and PHX-140 pins
+
+Status: Accepted (PHX-140; owner approved feature 2026-10-23)
+Date: 2026-10-24
+Ticket: PHX-140
+
+Decision: "play another one"/"next song" run play_music again; "summarise
+that/this video" summarises the last video a play opened in the same
+conversation (memory only, at most 256 conversations), else the normal
+pipeline. runtime.py, triage.py, api/missions.py, api/server.py and
+core/config.py leave their earlier pins for a PHX-140 pin at the
+implementation commit; quick_commands.py and chat_context.py are not on
+origin/main and need no pin.

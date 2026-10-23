@@ -68,7 +68,7 @@ import re
 import string
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from enum import StrEnum
@@ -464,6 +464,16 @@ _SUMMARY_SEARCH = re.compile(
     re.IGNORECASE,
 )
 _OPEN_TARGET = re.compile(rf"{_OPEN}\s+(?P<t>.+)", re.IGNORECASE)
+# PHX-140 (ADR-268): another random song, and the conversation's last video.
+_NEXT_SONG = re.compile(
+    r"play\s+(?:another|(?:the\s+)?next)\s+(?:one|song)"
+    r"|(?:another|(?:the\s+)?next)\s+song",
+    re.IGNORECASE,
+)
+_LAST_VIDEO = re.compile(
+    rf"{_SUMMARIZE}\s+(?:that|this|the|the\s+last)\s+(?:youtube\s+)?video",
+    re.IGNORECASE,
+)
 # A query is plain search text: no link, no shell or markup punctuation.
 _UNSAFE_QUERY = re.compile(r"://|\bwww\.|[;|&<>`$\\{}\[\]]|[\x00-\x1f\x7f]")
 
@@ -650,6 +660,10 @@ def match_quick_command(
         summary = _summary(body)
         if summary is not None:
             return summary
+        if _LAST_VIDEO.fullmatch(body):  # PHX-140: the caller supplies the url
+            return QuickCommand(QuickKind.SUMMARIZE_YOUTUBE, None, NO_CAPTIONS)
+    if _NEXT_SONG.fullmatch(body):  # PHX-140 (ADR-268)
+        return _play("play music")
     if body.lower().startswith("play "):  # PHX-136
         return _play(body)
     for pattern, kind in _SEARCHES:
@@ -769,6 +783,7 @@ class QuickOutcome:
     record: QuickCallRecord | QuickAnswerRecord
     answer: str | None  # set only when verified
     pending: PermissionRequest | None  # set only when approval is required
+    video_id: str | None = None  # PHX-140: the YouTube video a play opened
 
 
 def screen_answer(summary: str) -> str | None:
@@ -983,7 +998,12 @@ class QuickCommandRunner:
             else sha256(command.query.encode("utf-8")).hexdigest(),
             duration_ms=duration,
         )
-        return await _settle(events, record, request, reply)
+        outcome = await _settle(events, record, request, reply)
+        opened = result.url if isinstance(result, OpenLinkResult) else None
+        if verified and command.kind in PLAY_KINDS and opened is not None:
+            # PHX-140 (ADR-268): remembered for "summarise that video".
+            outcome = replace(outcome, video_id=youtube_video_id(opened))
+        return outcome
 
     async def _run_screen(
         self,

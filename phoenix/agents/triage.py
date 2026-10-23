@@ -21,9 +21,17 @@ PHX-131 (ADR-225): before the model, a deterministic rule
 (``rule_decides_direct``) sends a clearly simple request DIRECT without a
 generation, recorded as ``rule``. It only ever chooses DIRECT; anything it is
 not sure of goes to the model triage above, unchanged.
+
+PHX-140 (ADR-266): before that, ``rule_wants_research`` sends a clearly
+current/online question (news, weather, prices, scores, "who won", today, a
+year from the current one on) COMPLEX, where the research planner can search
+the web, only while web research is enabled. Recorded as ``decided`` (the
+``rule`` outcome stays DIRECT-only, migration 0010); every search still needs
+the user's permission.
 """
 
 import re
+from datetime import date
 from enum import StrEnum
 from typing import Literal
 
@@ -148,6 +156,42 @@ def rule_decides_direct(text: str) -> bool:
         and _RULE_SHAPE.search(lowered) is None
         and lowered.count("?") <= 1
         and _RULE_BLOCKED.isdisjoint(_RULE_WORD.findall(lowered))
+    )
+
+
+# PHX-140 (ADR-266): current/online wording, and local wording that vetoes it.
+_RESEARCH_WORDS = frozenset(
+    "news headlines latest weather forecast price prices score scores "
+    "today tonight".split()
+)
+_RESEARCH_VETO = frozenset(
+    """
+    my mine me i file files folder document documents doc docs note notes
+    memory memories remember remind reminder alarm timer calendar schedule
+    open play write draft create make save screen app apps email time date day
+    """.split()
+)
+_YEAR = re.compile(r"\b(?:19|20)\d\d\b")
+
+
+def rule_wants_research(text: str, year: int | None = None) -> bool:
+    """True only for a short, clearly current/online question (PHX-140).
+
+    Deterministic and conservative; it grants nothing. ``year`` (tests)
+    replaces the current year.
+    """
+    lowered = text.strip().lower()
+    words = set(_RULE_WORD.findall(lowered))
+    current = date.today().year if year is None else year
+    return (
+        0 < len(lowered) <= RULE_MAX_CHARS
+        and len(lowered.split()) <= RULE_MAX_WORDS
+        and _RESEARCH_VETO.isdisjoint(words)
+        and (
+            not _RESEARCH_WORDS.isdisjoint(words)
+            or "who won" in " ".join(lowered.split())
+            or any(int(found) >= current for found in _YEAR.findall(lowered))
+        )
     )
 
 
