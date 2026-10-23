@@ -2055,15 +2055,19 @@ PHX_REVIEW_PATHS = ("phoenix/agents/runtime.py",)  # two moved to PHX-135
 # commit.
 PHX_135_COMMIT = "1db015a76d95e2ed40430ce3b7117af5e50fca26"
 PHX_135_PATHS = (  # api/missions.py moved to the PHX-135/136 merge pin
-    "phoenix/agents/mission_events.py",
     "phoenix/api/routes/permissions.py",
-    "phoenix/api/server.py",
     "phoenix/api/voice.py",
-)
+)  # mission_events.py and server.py moved to the PHX-138 pin
 # api/missions.py carries both PHX-135 and PHX-136; pinned at the merge
 # resolution commit.
 PHX_135_136_COMMIT = "974c91422f1e5a0deefcb5d7ff877e9433eeb6ab"
 PHX_135_136_PATHS = ("phoenix/api/missions.py",)
+# PHX-138 (ADR-258 to ADR-260) intentionally changed the event allowlist
+# (web.youtube_transcript) and the backend wiring (caption tool, summarizer);
+# both left the PHX-135 pin and stay pinned at the PHX-138 implementation
+# commit.
+PHX_138_COMMIT = "bc87fb14d367e2ede573e65b9d9540394dc78655"
+PHX_138_PATHS = ("phoenix/agents/mission_events.py", "phoenix/api/server.py")
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -2119,6 +2123,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_REVIEW_PATHS
         and path not in PHX_135_PATHS
         and path not in PHX_135_136_PATHS
+        and path not in PHX_138_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2163,6 +2168,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_REVIEW_COMMIT, path) for path in PHX_REVIEW_PATHS]
     baselines += [(PHX_135_COMMIT, path) for path in PHX_135_PATHS]
     baselines += [(PHX_135_136_COMMIT, path) for path in PHX_135_136_PATHS]
+    baselines += [(PHX_138_COMMIT, path) for path in PHX_138_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
