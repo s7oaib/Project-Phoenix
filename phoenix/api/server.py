@@ -70,6 +70,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from alembic import command
 from phoenix.agents.answer_stream import PartialAnswers
 from phoenix.agents.capability_steps import CapabilityTools
+from phoenix.agents.chat_context import recall_memories
 from phoenix.agents.control_steps import (
     ControlStepRunner,
     control_permission_policy,
@@ -923,6 +924,8 @@ async def open_services(
                     partials=partials,  # PHX-139 (ADR-262): streams
                 ),
             ),
+            # PHX-140 (ADR-265): saved memories for DIRECT replies (P0, internal).
+            recall=partial(recall_memories, knowledge),
         )
         observer.bind_traces(missions.get_trace)
         settings_store = SettingsStore(session_factory)
