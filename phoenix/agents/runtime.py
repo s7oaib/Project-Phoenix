@@ -355,6 +355,9 @@ def default_tier_table(planner: str | None = None) -> ModelTierTable:
         )
 
     t0, t1, t2, code = "qwen3.5:2b", "qwen3.5:4b", "qwen3.5:9b", "qwen2.5-coder:7b"
+    # PHX-141 (ADR-269): DIRECT answers on llama3.2 (same FYP accuracy, ~2.7x
+    # faster); T1 stays the fallback and the triage model.
+    direct = "llama3.2:latest"
     tier = planner_tier() if planner is None else planner
     if tier not in PLANNER_TIERS:
         raise ValueError(f"planner tier must be one of {', '.join(PLANNER_TIERS)}")
@@ -362,7 +365,7 @@ def default_tier_table(planner: str | None = None) -> ModelTierTable:
     return ModelTierTable(
         roles=MappingProxyType(
             {
-                "phoenix": refs(t1, t0),
+                "phoenix": refs(direct, t1, t0),
                 # PHX-047 (ADR-083): PHOENIX's step assignment runs on T2;
                 # PHX-134 (ADR-240) can move it and AIZEN's plan to T1.
                 "assignment": plan,
