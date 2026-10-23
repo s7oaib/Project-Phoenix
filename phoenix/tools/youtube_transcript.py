@@ -40,6 +40,7 @@ CAPTION_TIMEOUT = 15.0  # per network call
 CAPTION_TOOL_TIMEOUT = 40.0
 MAX_TRANSCRIPT_CHARS = 12000
 MAX_CAPTION_BYTES = 2_000_000
+MAX_CACHED_VIDEOS = 32
 _VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 _YOUTUBE_HOSTS = frozenset({"youtube.com", "www.youtube.com", "m.youtube.com"})
 _TAG = re.compile(r"<[^>]*>")
@@ -177,6 +178,8 @@ class YouTubeTranscriptTool:
         registry.require(YOUTUBE_TRANSCRIPT_TOOL_ID)
         self._engine = PermissionEngine(registry, policy)
         self._fetch = fetch
+        # PHX-139 (ADR-262): captions per video ID, this session, memory only.
+        self._cache: dict[str, str | None] = {}
 
     def read(
         self,
@@ -198,7 +201,13 @@ class YouTubeTranscriptTool:
             video_id = youtube_video_id(locate() or "")
             if video_id is None:
                 return TranscriptResult(decision, ToolResultStatus.FAILURE, True)
-            text = self._fetch(video_id)
+            if video_id in self._cache:
+                text = self._cache[video_id]
+            else:
+                text = self._fetch(video_id)
+                if len(self._cache) >= MAX_CACHED_VIDEOS:
+                    self._cache.pop(next(iter(self._cache)))
+                self._cache[video_id] = text
         except Exception:
             return TranscriptResult(decision, ToolResultStatus.FAILURE, True)
         return TranscriptResult(decision, ToolResultStatus.SUCCESS, True, text)

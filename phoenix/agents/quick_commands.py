@@ -81,6 +81,7 @@ from uuid import uuid4
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from phoenix.agents.answer_stream import DeltaSink, PartialAnswers, StreamingProvider
 from phoenix.agents.mission_events import EventPublisher, MissionEvents, elapsed_ms
 from phoenix.agents.tool_steps import _guarded
 from phoenix.core.events import EventType
@@ -177,6 +178,11 @@ SUMMARY_SYSTEM = (
 )
 SUMMARY_TASK = "Summarise this YouTube video's transcript in 4 to 6 sentences."
 MAX_SUMMARY_CHARS = 1500
+# PHX-139 (ADR-262): a shorter prompt and reply for a faster summary.
+SUMMARY_HEAD_CHARS = 2500
+SUMMARY_TAIL_CHARS = 1500
+SUMMARY_INPUT_CHARS = SUMMARY_HEAD_CHARS + SUMMARY_TAIL_CHARS
+SUMMARY_MAX_TOKENS = 220
 NO_CAPTIONS = "This video has no captions I can read."
 SUMMARY_UNAVAILABLE = "I can't summarise videos right now."
 # PHX-136 (ADR-252): one wide scope per tool, beside the fixed one above.
@@ -830,6 +836,13 @@ def summary_answer(summary: str) -> str | None:
     return text
 
 
+def trim_transcript(text: str) -> str:
+    """PHX-139 (ADR-262): the beginning and end of a long transcript only."""
+    if len(text) <= SUMMARY_INPUT_CHARS:
+        return text
+    return text[:SUMMARY_HEAD_CHARS] + " […] " + text[-SUMMARY_TAIL_CHARS:]
+
+
 @dataclass(frozen=True)
 class VideoSummarizer:
     """PHX-138: the caption tool, the DIRECT (think-off) model and the guard."""
@@ -838,10 +851,20 @@ class VideoSummarizer:
     provider: ModelProvider
     guard: PromptInjectionGuard
     model_id: str = SUMMARY_MODEL_ID
+    partials: PartialAnswers | None = None  # PHX-139: voice reads it early
 
-    async def summarize(self, transcript: str) -> str | None:
+    async def summarize(
+        self, transcript: str, on_delta: DeltaSink | None = None
+    ) -> str | None:
         """One advisory generation over the guarded transcript; None on any
-        failure. The transcript is untrusted data, never instructions."""
+        failure. The transcript is untrusted data, never instructions.
+        PHX-139: with ``on_delta`` the summary streams (display text only)."""
+        provider = (
+            self.provider
+            if on_delta is None
+            else StreamingProvider(self.provider, on_delta)
+        )
+        transcript = trim_transcript(transcript)
         try:
             evidence = _guarded(
                 self.guard,
@@ -857,7 +880,7 @@ class VideoSummarizer:
                     ),
                 ),
             )
-            response = await self.provider.generate(
+            response = await provider.generate(
                 GenerationRequest(
                     model_id=self.model_id,
                     messages=(
@@ -865,7 +888,7 @@ class VideoSummarizer:
                         ModelMessage(role=MessageRole.USER, text=evidence),
                     ),
                     temperature=0.2,
-                    max_output_tokens=400,
+                    max_output_tokens=SUMMARY_MAX_TOKENS,
                 )
             )
         except Exception:
@@ -1099,10 +1122,27 @@ class QuickCommandRunner:
             and result.attempted
             and result.status == ToolResultStatus.SUCCESS
         ):
+            partials = summarizer.partials
+
+            async def delta(text: str) -> None:
+                # PHX-139 (ADR-262): the PHX-132 answer delta; display only.
+                assert partials is not None
+                partials.feed(mission_id, text)
+                await events.emit(
+                    EventType.AGENT_STARTED,
+                    agent_id="phoenix",
+                    mission_id=mission_id,
+                    answer_delta=text,
+                )
+
+            if partials is not None:  # streaming is wired with the partials
+                partials.start(mission_id)
             answer = (
                 NO_CAPTIONS
                 if result.text is None
-                else await summarizer.summarize(result.text)
+                else await summarizer.summarize(
+                    result.text, None if partials is None else delta
+                )
             )
         record = QuickCallRecord(
             call_id=call_id,

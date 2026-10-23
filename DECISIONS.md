@@ -7703,3 +7703,41 @@ set it aside. `phoenix/api/server.py` (tool wiring) and
 `phoenix/agents/mission_events.py` (event allowlist) leave the PHX-135 pin
 for a PHX-138 pin at the implementation commit. `quick_commands.py` and the
 new tool are not on origin/main and need no pin.
+
+## ADR-261 — PHX-139 Ollama auto-start
+
+Status: Accepted (PHX-139)
+Date: 2026-10-24
+Ticket: PHX-139
+
+Decision: at backend startup, when the Ollama provider does not answer, the
+configured base URL is the local default `http://127.0.0.1:11434`, and
+`%LOCALAPPDATA%\Programs\Ollama\ollama app.exe` exists, PHOENIX opens that one
+fixed path once with `os.startfile` (no arguments; never PATH or user input).
+Windows only; failures are ignored; `PHOENIX_AUTOSTART_OLLAMA=0` turns it off.
+The PHX-108 registrar loop registers the models once Ollama is healthy, and
+the PHX-130 warm-up retries for about a minute after a launch.
+
+## ADR-262 — PHX-139 faster video summary
+
+Status: Accepted (PHX-139)
+Date: 2026-10-24
+Ticket: PHX-139
+
+Decision: the transcript sent to the model is capped at 4,000 characters (the
+first 2,500 and the last 1,500, joined by "[…]"); the reply is capped at 220
+tokens; the summary streams through the PHX-132 answer delta (`agent.started`
+with `mission_id` + `answer_delta`) and `PartialAnswers`, display text only,
+when the summarizer is wired with the partials; captions are cached per video
+ID in memory for the session (at most 32 videos).
+
+## ADR-263 — PHX-139 pins
+
+Status: Accepted (PHX-139)
+Date: 2026-10-24
+Ticket: PHX-139
+
+Decision: `phoenix/api/server.py` (auto-start, warm-up retry, streaming
+wiring) leaves the PHX-138 pin for a PHX-139 pin at the implementation
+commit. `quick_commands.py` and `youtube_transcript.py` are not on origin/main
+and need no pin.
