@@ -7856,3 +7856,13 @@ pipeline. runtime.py, triage.py, api/missions.py, api/server.py and
 core/config.py leave their earlier pins for a PHX-140 pin at the
 implementation commit; quick_commands.py and chat_context.py are not on
 origin/main and need no pin.
+
+## ADR-264 amendment — chat history as plain context (owner, 2026-10-23)
+
+Live: with the prompt-injection wrapper around the earlier turns, the 4B model
+refused or hedged on follow-ups ("I do not have access to ..."). Owner chose
+plain context: the last turns (the user's own messages and PHOENIX's own
+answers) and user-written saved memories go in as ordinary text before the
+current message. Web, file, screen and transcript content keep their guarded
+paths. Live after the change: four follow-ups answered in 0.9-1.9 s with the
+conversation kept; facts still come from the small model and can be wrong.

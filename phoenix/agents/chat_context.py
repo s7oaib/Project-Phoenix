@@ -1,8 +1,8 @@
 """PHX-140 (ADR-264, ADR-265): what a DIRECT or KAIDO reply may see.
 
 The last turns of the same conversation (user and PHOENIX message text,
-newest kept) and the user's best saved memories reach the model only as
-untrusted guarded data, never as instructions. With nothing to add the
+newest kept) and the user's best saved memories reach the model as plain
+conversation context (owner decision 2026-10-23). With nothing to add the
 request text is unchanged. Any failure leaves the context out.
 """
 
@@ -11,12 +11,9 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
-from uuid import uuid4
 
-from phoenix.agents.tool_steps import _guarded
 from phoenix.security.prompt_injection import (
     PromptInjectionGuard,
-    UntrustedContentOrigin,
 )
 
 MAX_TURNS = 6
@@ -76,34 +73,28 @@ async def recall_memories(knowledge: MemorySearch, text: str) -> tuple[str, ...]
 async def chat_prompt(
     guard: PromptInjectionGuard, text: str, source: ContextSource | None
 ) -> str:
-    """The request with its context as guarded evidence, or text unchanged."""
+    """The request with its context as plain chat history, or text unchanged.
+
+    Owner decision 2026-10-23 (ADR-264 amended): the earlier turns are the
+    user's own messages and PHOENIX's own answers, and saved memories are
+    written only by the user, so they go in as ordinary conversation context.
+    The prompt-injection wrapper made the small model refuse follow-ups. Web,
+    file and screen content keep their guarded paths elsewhere.
+    """
     if source is None:
         return text
     try:
         context = await source()
-        items = []
+        parts = []
         if context.history:
-            items.append(
-                (
-                    "conversation",
-                    UntrustedContentOrigin.MODEL_OUTPUT,
-                    "conversation",
-                    "recent_turns",
-                    context.history,
-                )
+            parts.append("Earlier in this conversation:\n" + context.history)
+        memories = context.memories[:MAX_MEMORIES]
+        if memories:
+            parts.append(
+                "Notes the user saved:\n" + "\n".join(f"- {m}" for m in memories)
             )
-        items.extend(
-            (
-                f"memory{index}",
-                UntrustedContentOrigin.EXTERNAL_TEXT,
-                "memory",
-                "saved_memory",
-                memory,
-            )
-            for index, memory in enumerate(context.memories[:MAX_MEMORIES], 1)
-        )
-        if not items:
+        if not parts:
             return text
-        return _guarded(guard, str(uuid4()), text, items)
+        return "\n\n".join([*parts, "Current message:\n" + text])
     except Exception:
         return text
