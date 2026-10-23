@@ -7703,3 +7703,30 @@ set it aside. `phoenix/api/server.py` (tool wiring) and
 `phoenix/agents/mission_events.py` (event allowlist) leave the PHX-135 pin
 for a PHX-138 pin at the implementation commit. `quick_commands.py` and the
 new tool are not on origin/main and need no pin.
+
+## ADR-269 — DIRECT answers on llama3.2
+
+Status: Accepted (PHX-141)
+Date: 2026-10-23
+Ticket: PHX-141
+
+Decision: the `phoenix` (DIRECT) role tries `llama3.2:latest` first, then
+`qwen3.5:4b`, then `qwen3.5:2b`. Triage and every other role are unchanged.
+Evidence (RTX 3050 6 GB, one run each, think off, FYP tasks-v1 config (1) and
+routing-v1): qwen3.5:4b 93% / 578 ms median / 38 tok/s, routing 83%;
+llama3.2 93% / 212 ms / 67 tok/s, routing 75%; qwen3:4b-instruct 86% /
+257 ms, routing 75%; phi4-mini 71% / 186 ms, routing 58%; gemma3:4b 43% /
+344 ms, routing 80%. Rule: switch only if accuracy >= baseline and median
+latency <= baseline (or +5 pts at <= 1.3x latency). llama3.2 passes for
+DIRECT; no candidate passes for triage (routing accuracy below 83%), so
+triage stays on qwen3.5:4b. Reverse by dropping `direct` from the
+`phoenix` row in `default_tier_table`.
+
+## ADR-270 — PHX-141 pins
+
+Status: Accepted (PHX-141)
+Date: 2026-10-23
+Ticket: PHX-141
+
+Decision: `phoenix/agents/runtime.py` leaves the review-merge pin for a
+PHX-141 pin at the implementation commit (two-commit pattern).
