@@ -50,10 +50,11 @@ import contextlib
 import os
 import sys
 import time
-from collections.abc import AsyncIterator, Callable, Iterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import partial
 from pathlib import Path
 from typing import IO, Literal
 
@@ -305,6 +306,55 @@ async def warm_chat_model(
             return True
     except Exception:
         return False
+    return False
+
+
+OLLAMA_LOCAL_URL = "http://127.0.0.1:11434"
+AUTOSTART_ENV = "PHOENIX_AUTOSTART_OLLAMA"
+
+
+def launch_ollama_app(base_url: str) -> bool:
+    """PHX-139 (ADR-261): open the installed Ollama app once; never raises.
+
+    Windows only, the local default URL only, one fixed path (never PATH or
+    user input), no arguments. ``PHOENIX_AUTOSTART_OLLAMA=0`` turns it off.
+    """
+    if sys.platform != "win32" or os.environ.get(AUTOSTART_ENV) == "0":
+        return False
+    if base_url.rstrip("/") != OLLAMA_LOCAL_URL:
+        return False
+    local = os.environ.get("LOCALAPPDATA")
+    if not local:
+        return False
+    app = Path(local) / "Programs" / "Ollama" / "ollama app.exe"
+    try:
+        if not app.is_file():
+            return False
+        os.startfile(app)  # type: ignore[attr-defined,unused-ignore]
+    except OSError:
+        return False
+    return True
+
+
+async def autostart_ollama(
+    providers: Sequence[ModelProvider], base_url: str, timeout: float
+) -> bool:
+    """PHX-139: launch Ollama when its provider does not answer; True if launched."""
+    ollama = next((p for p in providers if isinstance(p, OllamaProvider)), None)
+    if ollama is None or os.environ.get(AUTOSTART_ENV) == "0":
+        return False
+    if await probe_provider(ollama, timeout) == ProviderHealthStatus.HEALTHY:
+        return False
+    return await asyncio.to_thread(launch_ollama_app, base_url)
+
+
+async def warm_when_up(warm: Callable[[], Awaitable[bool]], attempts: int) -> bool:
+    """PHX-139: retry the PHX-130 warm-up while a just-launched Ollama starts."""
+    for attempt in range(attempts):
+        if await warm():
+            return True
+        if attempt + 1 < attempts:
+            await asyncio.sleep(3.0)
     return False
 
 
@@ -723,6 +773,12 @@ async def open_services(
         registrar = ModelRegistrar(
             provider_set.providers, table, capabilities, config.probe_timeout_seconds
         )
+        # PHX-139 (ADR-261): the registrar loop and warm-up pick it up later.
+        launched = await autostart_ollama(
+            provider_set.providers,
+            config.ollama_base_url,
+            config.probe_timeout_seconds,
+        )
         try:
             async with asyncio.timeout(config.startup_timeout_seconds):
                 await registrar.refresh()
@@ -864,6 +920,7 @@ async def open_services(
                     YouTubeTranscriptTool(tools, policy),
                     (*provider_set.structured, *provider_set.providers)[0],
                     PromptInjectionGuard(agents),
+                    partials=partials,  # PHX-139 (ADR-262): streams
                 ),
             ),
         )
@@ -930,12 +987,16 @@ async def open_services(
             if uses_ollama:
                 # PHX-130 (ADR-222): non-blocking; failures are ignored.
                 warmer = asyncio.create_task(
-                    warm_chat_model(
-                        provider_set.providers,
-                        provider_set.structured,
-                        table,
-                        capabilities,
-                        config.probe_timeout_seconds,
+                    warm_when_up(
+                        partial(
+                            warm_chat_model,
+                            provider_set.providers,
+                            provider_set.structured,
+                            table,
+                            capabilities,
+                            config.probe_timeout_seconds,
+                        ),
+                        20 if launched else 1,  # PHX-139: about a minute
                     )
                 )
             refresher = asyncio.create_task(
