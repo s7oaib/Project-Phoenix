@@ -1763,6 +1763,7 @@ REQUIREMENTS = [
     "piper-tts>=1.8,<2",
     "sounddevice>=0.5.6,<0.6",
 ]
+YT_DLP = "yt-dlp>=2026.10.21,<2027"
 LOCKED = {
     "av": "18.1.0",
     "cffi": "2.1.1",
@@ -1798,6 +1799,7 @@ def test_exact_voice_dependency_delta() -> None:
     for requirement in REQUIREMENTS:
         assert project["project"]["dependencies"].count(requirement) == 1
         project["project"]["dependencies"].remove(requirement)
+    project["project"]["dependencies"].remove(YT_DLP)  # PHX-138 (ADR-258)
     assert project["tool"].pop("uv") == {
         "constraint-dependencies": ["huggingface-hub<1"]
     }
@@ -1806,6 +1808,7 @@ def test_exact_voice_dependency_delta() -> None:
     new = tomllib.loads((ROOT / "uv.lock").read_text())
     old_records = {p["name"]: p for p in old.pop("package")}
     new_records = {p["name"]: p for p in new.pop("package")}
+    del new_records["yt-dlp"]  # PHX-138: the events_ws dependency gate owns it
     assert new.pop("manifest") == {
         "constraints": [{"name": "huggingface-hub", "specifier": "<1"}]
     }
@@ -1825,7 +1828,7 @@ def test_exact_voice_dependency_delta() -> None:
         except PackageNotFoundError:
             # hub 0.36 marks hf-xet for "amd64", not Windows' "AMD64".
             assert name == "hf-xet"
-    names = {r.split(">")[0] for r in REQUIREMENTS}
+    names = {r.split(">")[0] for r in (*REQUIREMENTS, YT_DLP)}
     for name, record in old_records.items():
         after = copy.deepcopy(new_records[name])
         if name == "phoenix":

@@ -264,11 +264,13 @@ def test_event_vocabulary_mirrors_the_tool() -> None:
         OPEN_LINK_TOOL_ID,
         "desktop.open_app",
         "screen.capture_window",
+        "web.youtube_transcript",
     }
     assert mission_events.QUICK_OPERATIONS == {
         QUICK_ACTION,
         "open_app",
         "capture_window",
+        "read_transcript",
     }
 
 

@@ -81,7 +81,11 @@ from phoenix.agents.kaido import (
     system_ram_sample,
 )
 from phoenix.agents.mission_events import EventPublisher
-from phoenix.agents.quick_commands import QuickCommandRunner, ScreenDescriber
+from phoenix.agents.quick_commands import (
+    QuickCommandRunner,
+    ScreenDescriber,
+    VideoSummarizer,
+)
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.runtime import ModelTierTable, PhoenixRuntime, default_tier_table
 from phoenix.agents.triage import TRIAGE_ROLE
@@ -138,6 +142,7 @@ from phoenix.persistence.missions import MissionStore, PermissionRequestRecord
 from phoenix.persistence.settings import SettingsStore
 from phoenix.security.audit import AuditTrail
 from phoenix.security.permissions import PermissionPolicy
+from phoenix.security.prompt_injection import PromptInjectionGuard
 from phoenix.security.secrets import WindowsCredentialStore
 from phoenix.tools.browser import BrowserTool
 from phoenix.tools.browser_setup import (
@@ -157,6 +162,10 @@ from phoenix.tools.screenshot import ScreenshotCaptureTool
 from phoenix.tools.web_research import WebResearchTool, web_research_tool_definitions
 from phoenix.tools.windows_ui import WindowsUITool
 from phoenix.tools.youtube import YouTubeTool, youtube_tool_definitions
+from phoenix.tools.youtube_transcript import (
+    YouTubeTranscriptTool,
+    youtube_transcript_tool_definitions,
+)
 from phoenix.web.duckduckgo import DuckDuckGoSearchProvider
 from phoenix.web.page_fetch import HttpPageFetcher
 
@@ -736,6 +745,7 @@ async def open_services(
                 # PHX-130 (ADR-220): quick commands' allowlisted link opening.
                 *open_link_tool_definitions(),
                 *open_app_tool_definitions(),  # PHX-133 (ADR-236)
+                *youtube_transcript_tool_definitions(),  # PHX-138 (ADR-258)
             )
         )
         research: WebResearchTool | None = None
@@ -848,6 +858,12 @@ async def open_services(
                     ScreenshotCaptureTool(tools, policy),
                     VisionLoopService(vision),
                     lifecycle,
+                ),
+                # PHX-138 (ADR-259): captions, then the DIRECT model, think off.
+                summarizer=VideoSummarizer(
+                    YouTubeTranscriptTool(tools, policy),
+                    (*provider_set.structured, *provider_set.providers)[0],
+                    PromptInjectionGuard(agents),
                 ),
             ),
         )

@@ -7655,3 +7655,51 @@ Ticket: PHX-137
 
 Decision: `open_app.py` and `quick_commands.py` are not on origin/main and need
 no pin; no pinned file changes.
+
+## ADR-258 — YouTube captions tool and summary commands
+
+Status: Accepted (PHX-138 owner request 2026-10-24)
+Date: 2026-10-24
+Ticket: PHX-138
+
+Decision: "summarize/summarise (this) (youtube) (video) <URL>", "what is <URL>
+about" and "summarize the youtube video about/on X" are quick commands. The URL
+must be https/http on youtube.com, www/m.youtube.com (`/watch?v=`, `/shorts/`)
+or youtu.be, and the video ID must match `[A-Za-z0-9_-]{11}`; a topic X is
+searched with the PHX-136 `find_youtube_video` helper (first result) only
+after ALLOWED. New tool `web.youtube_transcript` (P1, network read of
+youtube.com) under one fixed scope `read_transcript` /
+`youtube:public-video-captions`, so one "Always allow" covers every video;
+ToolRegistry + PermissionEngine decide every call. yt-dlp (library) reads
+subtitle or auto-caption metadata only: `skip_download`, no cookies, no
+login, 15 s socket timeout, English preferred, json3 then vtt; the caption
+URL must be on youtube.com. Timing and tags are stripped; text capped at
+12,000 chars. No English captions: "This video has no captions I can read."
+
+## ADR-259 — Guarded summary on the DIRECT model
+
+Status: Accepted (PHX-138)
+Date: 2026-10-24
+Ticket: PHX-138
+
+Decision: one generation on the DIRECT model (`qwen3.5:4b`, the think-off
+structured provider) summarises the transcript in 4–6 sentences. The
+transcript enters the prompt only through the existing PromptInjectionGuard
+boundary (`_guarded`, origin `web_page`), as for web research. The summary is
+printable, bounded answer text only: it is never planned on or executed and
+cannot trigger a tool. A model failure leaves the call unverified
+(`tool_failed`).
+
+## ADR-260 — PHX-138 dependency and pins
+
+Status: Accepted (PHX-138; owner approved yt-dlp 2026-10-24)
+Date: 2026-10-24
+Ticket: PHX-138
+
+Decision: add `yt-dlp>=2026.10.21,<2027` (Unlicense), locked 2026.10.21, one
+pure-Python wheel with no required dependencies; imported lazily after
+ALLOWED. The dependency gates (`test_events_ws.py`, `test_voice_pipeline.py`)
+set it aside. `phoenix/api/server.py` (tool wiring) and
+`phoenix/agents/mission_events.py` (event allowlist) leave the PHX-135 pin
+for a PHX-138 pin at the implementation commit. `quick_commands.py` and the
+new tool are not on origin/main and need no pin.

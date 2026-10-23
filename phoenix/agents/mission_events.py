@@ -154,11 +154,19 @@ CAPABILITY_OPERATIONS: Final = frozenset(
 )
 # PHX-130 (ADR-220): the quick command's one tool and operation (mirrors
 # quick_commands; tests assert equality).
-# PHX-133 (ADR-236) adds desktop.open_app; PHX-135 (ADR-247) the screen.
+# PHX-133 (ADR-236) adds desktop.open_app; PHX-135 (ADR-247) the screen;
+# PHX-138 (ADR-258) the YouTube captions.
 QUICK_TOOL_IDS: Final = frozenset(
-    {"desktop.open_link", "desktop.open_app", "screen.capture_window"}
+    {
+        "desktop.open_link",
+        "desktop.open_app",
+        "screen.capture_window",
+        "web.youtube_transcript",
+    }
 )
-QUICK_OPERATIONS: Final = frozenset({"open_link", "open_app", "capture_window"})
+QUICK_OPERATIONS: Final = frozenset(
+    {"open_link", "open_app", "capture_window", "read_transcript"}
+)
 AGENT_IDS: Final = frozenset(
     agent.internal_id for agent in build_default_agent_registry().agents
 )
