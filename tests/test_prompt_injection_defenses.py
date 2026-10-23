@@ -2067,7 +2067,10 @@ PHX_135_136_PATHS = ("phoenix/api/missions.py",)
 # both left the PHX-135 pin and stay pinned at the PHX-138 implementation
 # commit.
 PHX_138_COMMIT = "bc87fb14d367e2ede573e65b9d9540394dc78655"
-PHX_138_PATHS = ("phoenix/agents/mission_events.py", "phoenix/api/server.py")
+PHX_138_PATHS = ("phoenix/agents/mission_events.py",)
+# PHX-139 (ADR-261 to ADR-263): Ollama auto-start and summary streaming wiring.
+PHX_139_COMMIT = "875537b36d68c6570350cf7608a75c0a662b791a"
+PHX_139_PATHS = ("phoenix/api/server.py",)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -2124,6 +2127,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_135_PATHS
         and path not in PHX_135_136_PATHS
         and path not in PHX_138_PATHS
+        and path not in PHX_139_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2169,6 +2173,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_135_COMMIT, path) for path in PHX_135_PATHS]
     baselines += [(PHX_135_136_COMMIT, path) for path in PHX_135_136_PATHS]
     baselines += [(PHX_138_COMMIT, path) for path in PHX_138_PATHS]
+    baselines += [(PHX_139_COMMIT, path) for path in PHX_139_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
