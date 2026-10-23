@@ -7866,3 +7866,5 @@ answers) and user-written saved memories go in as ordinary text before the
 current message. Web, file, screen and transcript content keep their guarded
 paths. Live after the change: four follow-ups answered in 0.9-1.9 s with the
 conversation kept; facts still come from the small model and can be wrong.
+
+[OK] Command outcome recorded
