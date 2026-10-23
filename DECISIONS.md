@@ -7768,3 +7768,15 @@ Ticket: PHX-141
 
 Decision: `phoenix/agents/runtime.py` leaves the review-merge pin for a
 PHX-141 pin at the implementation commit (two-commit pattern).
+
+## ADR-271 — DIRECT stays on qwen3.5:4b (PHX-141 switch reverted)
+
+Status: Accepted, 2026-10-23
+Ticket: PHX-141
+
+Live end-to-end check after ADR-270: with triage on qwen3.5:4b and DIRECT on
+llama3.2 the two models do not fit together in 6 GB VRAM; a request that needs
+the triage model swapped models and took 13.1 s (about 4 s when both roles use
+qwen3.5:4b). Rule-triaged questions gained little (0.3-4.9 s vs 0.5-1.6 s).
+Decision: revert ADR-270; DIRECT and triage share qwen3.5:4b so one model stays
+loaded. llama3.2 remains an option only together with a triage switch.
