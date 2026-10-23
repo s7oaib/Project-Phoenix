@@ -34,7 +34,10 @@ from phoenix.tools.registry import (
 YOUTUBE_TRANSCRIPT_TOOL_ID = "web.youtube_transcript"
 TRANSCRIPT_ACTION = "read_transcript"
 TRANSCRIPT_RESOURCE = "youtube:public-video-captions"
-CAPTION_TIMEOUT = 15.0
+CAPTION_TIMEOUT = 15.0  # per network call
+# The whole lookup: a session's first extraction (yt-dlp import + page and
+# player parsing) took over 15 s live on 2026-10-23.
+CAPTION_TOOL_TIMEOUT = 40.0
 MAX_TRANSCRIPT_CHARS = 12000
 MAX_CAPTION_BYTES = 2_000_000
 _VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
@@ -145,7 +148,7 @@ def youtube_transcript_tool_definitions() -> tuple[ToolDefinition, ...]:
             },
             risk_level=ToolRiskLevel.P1,
             permission_requirement="youtube_caption_read",
-            timeout_seconds=CAPTION_TIMEOUT,
+            timeout_seconds=CAPTION_TOOL_TIMEOUT,
             cancellation_supported=False,
             audit_behavior="no mandatory durable audit",
             supported_platforms=("win32", "linux", "darwin"),
