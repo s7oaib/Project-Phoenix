@@ -2190,13 +2190,9 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_135_COMMIT, path) for path in PHX_135_PATHS]
     baselines += [(PHX_135_136_COMMIT, path) for path in PHX_135_136_PATHS]
     baselines += [(PHX_138_COMMIT, path) for path in PHX_138_PATHS]
+    baselines += [(PHX_139_COMMIT, path) for path in PHX_139_PATHS]
     baselines += [(PHX_140_COMMIT, path) for path in PHX_140_PATHS]
-# PHX-139 (ADR-261 to ADR-263): server.py moved to the PHX-139/140 merge pin.
-PHX_139_COMMIT = "875537b36d68c6570350cf7608a75c0a662b791a"
-PHX_139_PATHS: tuple[str, ...] = ()
-# server.py carries PHX-139 and PHX-140; pinned at the local merge resolution.
-PHX_139_140_COMMIT = "0588b6223af086f6aaed24a6be96fc51c326c9fb"
-PHX_139_140_PATHS = ("phoenix/api/server.py",)
+    baselines += [(PHX_139_140_COMMIT, path) for path in PHX_139_140_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
