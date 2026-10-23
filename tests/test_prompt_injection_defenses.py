@@ -2046,7 +2046,7 @@ PHX_131_132_COMMIT = "35c9d287255e692837c78c99f37251d4f26065df"
 PHX_131_132_PATHS = ("apps/desktop/src/adapters/core.ts",)
 # runtime.py carries PHX-131, PHX-132 and PHX-134 (merge 95ac300) and
 # PHX-141 (ADR-270, DIRECT tier); pinned at the PHX-141 implementation commit.
-PHX_REVIEW_COMMIT = "181d324a07100b1d997049c41700bc2dbb51b099"
+PHX_REVIEW_COMMIT = "1551f3cf92243e4b21e98bcf05e2221caa3649ff"
 PHX_REVIEW_PATHS = ("phoenix/agents/runtime.py",)  # two moved to PHX-135
 # PHX-135 (ADR-245 to ADR-249; owner decision 2026-10-23) intentionally changed
 # the event allowlist (screen.capture_window), the mission service (screen
