@@ -2099,7 +2099,7 @@ PHX_EXPO_VOICE_PATHS = ("phoenix/api/launcher.py",)  # voice.py moved to the int
 # 2026-11-05 expo build, integration: the four verification steps also accept
 # Trust-mode grants, and the voice service reads website status; pinned at the
 # integration commit.
-PHX_EXPO_INTEGRATION_COMMIT = "9a90856765d0c3fdd4cf34f444d00bb2de852eee"
+PHX_EXPO_INTEGRATION_COMMIT = "e0b0ab59e89494a55fd030be2cca5cdda42d7b8c"
 PHX_EXPO_INTEGRATION_PATHS = (
     "phoenix/agents/capability_steps.py",
     "phoenix/agents/control_steps.py",
