@@ -1771,7 +1771,7 @@ PHX_106_PATHS = (
 # call; frozen at origin/main until then); it stays pinned, at the PHX-048
 # implementation commit.
 PHX_048_COMMIT = "2e04e22f361f64110742dd8974dece216d567a7f"
-PHX_048_PATHS = ("phoenix/tools/filesystem.py",)
+PHX_048_PATHS: tuple[str, ...] = ()
 # PHX-109 (ADR-093) intentionally changed runtime.py (bounded MAHORAGA
 # recovery, MissionTrace.recoveries) and mission_events.py (recovery.*
 # allowlist); PHX-118 moved runtime.py and PHX-119 mission_events.py to their
@@ -1883,7 +1883,6 @@ PHX_TRAIN_PATHS = (
     "phoenix/api/missions.py",
     "phoenix/api/routes/__init__.py",
     "phoenix/api/routes/missions.py",
-    "phoenix/api/routes/permissions.py",
     "phoenix/api/routes/schemas.py",
     "phoenix/api/server.py",
 )
@@ -1977,6 +1976,18 @@ PHX_128_PATHS = (
     "phoenix/agents/control_steps.py",
     "phoenix/agents/runtime.py",
 )
+# Trust mode (ADR-305 to ADR-309; 2026-11-05) intentionally changed
+# security/permissions.py (trust-grant matching), tools/filesystem.py (Recycle
+# Bin delete under trust; the PHX-048 root checks are unchanged) and
+# routes/permissions.py (/v1/trust and the per-task P4 approval); filesystem.py
+# left the PHX-048 pin and routes/permissions.py the train pin. All three stay
+# pinned, at the Trust implementation commit.
+PHX_TRUST_COMMIT = "9dceae8e11d39fad5ba914ade3aa38b5717c62f5"
+PHX_TRUST_PATHS = (
+    "phoenix/security/permissions.py",
+    "phoenix/tools/filesystem.py",
+    "phoenix/api/routes/permissions.py",
+)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -2020,6 +2031,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_125B_PATHS
         and path not in PHX_126_PATHS
         and path not in PHX_128_PATHS
+        and path not in PHX_TRUST_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2052,6 +2064,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_126_COMMIT, path) for path in PHX_126_PATHS]
     baselines += [(PHX_125B_COMMIT, path) for path in PHX_125B_PATHS]
     baselines += [(PHX_128_COMMIT, path) for path in PHX_128_PATHS]
+    baselines += [(PHX_TRUST_COMMIT, path) for path in PHX_TRUST_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:

@@ -1884,6 +1884,10 @@ def test_no_action_persistence_or_dependency_change() -> None:
             ":(exclude)phoenix/api/routes/common.py",
             ":(exclude)phoenix/api/routes/missions.py",
             ":(exclude)phoenix/api/routes/permissions.py",
+            # Trust mode (ADR-305) changes security/permissions.py (hash-pinned in
+            # test_prompt_injection_defenses.py) and adds security/trust.py.
+            ":(exclude)phoenix/security/permissions.py",
+            ":(exclude)phoenix/security/trust.py",
             ":(exclude)phoenix/api/routes/schemas.py",
             ":(exclude)phoenix/api/routes/system.py",
             ":(exclude)phoenix/persistence/settings.py",
