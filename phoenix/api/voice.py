@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Awaitable, Callable, Sequence
+import importlib
+import logging
+import time
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Protocol
@@ -30,6 +33,7 @@ from phoenix.api.missions import MissionService, NotFoundError
 from phoenix.core.events import EventType
 from phoenix.persistence.missions import MissionRecord, MissionStatus
 from phoenix.tools.registry import ToolRegistry
+from phoenix.voice.ack import AckClips, default_cache_dir
 from phoenix.voice.conversation import (
     VoiceResponder,
     VoiceResponseDraft,
@@ -55,6 +59,7 @@ from phoenix.voice.engines.pipeline import (
 )
 from phoenix.voice.engines.sound import MicrophoneError
 from phoenix.voice.engines.whisper import VoiceModelMissingError
+from phoenix.voice.persona import site_failed_line, site_pending_line, site_ready_line
 from phoenix.voice.startup import (
     StartupCheckResult,
     StartupCheckStatus,
@@ -170,6 +175,96 @@ def models_installed(models_dir: Path | None = None) -> dict[str, bool]:
     }
 
 
+log = logging.getLogger("phoenix.voice.timing")
+SITE_WAIT_SECONDS: Final = 120.0
+
+
+class SiteOutcome(Protocol):
+    kind: str  # "site" | "passthrough"
+    site_id: str | None
+
+
+class SiteCommand(Protocol):
+    """phoenix.sites.command.handle_command (agent A)."""
+
+    async def __call__(self, text: str, active_site_id: str | None) -> SiteOutcome: ...
+
+
+# {"status": "building"|"ready"|"failed", "sections": int | list, ...}
+SiteStatusReader = Callable[[str], Awaitable[Mapping[str, object]]]
+
+
+def default_site_command() -> SiteCommand | None:
+    try:
+        module = importlib.import_module("phoenix.sites.command")
+    except ImportError:  # agent A's module has not landed
+        return None
+    handle: SiteCommand = module.handle_command
+    return handle
+
+
+def _section_count(status: Mapping[str, object]) -> int | None:
+    spec = status.get("spec")
+    for value in (
+        status.get("sections"),
+        spec.get("sections") if isinstance(spec, Mapping) else None,
+    ):
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        if isinstance(value, list):
+            return len(value)
+    return None
+
+
+class TurnTimer:
+    """Per-stage latency logs: turn ids and milliseconds only, never text."""
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._stt_done: dict[str, float] = {}
+
+    def stage(self, name: str, turn_id: str, ms: float, kind: str = "") -> None:
+        log.info(
+            "voice_timing stage=%s%s ms=%d",
+            name,
+            f" kind={kind}" if kind else "",
+            ms,
+            extra={"correlation_id": turn_id},
+        )
+
+    def stt_done(self, turn_id: str, took: float) -> None:
+        self._stt_done[turn_id] = self._clock()
+        if len(self._stt_done) > 16:
+            self._stt_done.pop(next(iter(self._stt_done)))
+        self.stage("stt", turn_id, took * 1000)
+
+    def since_stt(self, name: str, turn_id: str, kind: str = "") -> None:
+        start = self._stt_done.get(turn_id)
+        if start is not None:
+            self.stage(name, turn_id, (self._clock() - start) * 1000, kind)
+
+
+def instrument(components: VoiceComponents, timer: TurnTimer) -> None:
+    """Time STT and the answer's first audio by wrapping the two bound methods."""
+    stt, output = components.stt, components.output
+    transcribe, play = stt.transcribe, output.play
+
+    async def timed_transcribe(request):  # type: ignore[no-untyped-def]
+        start = time.monotonic()
+        try:
+            return await transcribe(request)
+        finally:
+            timer.stt_done(request.operation_id, time.monotonic() - start)
+
+    async def timed_play(request):  # type: ignore[no-untyped-def]
+        timer.since_stt("first_audio", request.playback_id, "answer")
+        return await play(request)
+
+    with contextlib.suppress(AttributeError, TypeError):
+        stt.transcribe = timed_transcribe  # type: ignore[method-assign]
+        output.play = timed_play  # type: ignore[method-assign]
+
+
 class MissionVoiceResponder(VoiceResponder):
     """Submits a spoken request as a chat mission and waits for its answer.
 
@@ -186,13 +281,24 @@ class MissionVoiceResponder(VoiceResponder):
         *,
         on_mission: Callable[[str, str], Awaitable[None]] | None = None,
         wait_seconds: float = MISSION_WAIT_SECONDS,
+        acknowledge: Callable[[str], Awaitable[object]] | None = None,
+        site_command: SiteCommand | None = None,
+        site_status: SiteStatusReader | None = None,
+        site_wait_seconds: float = SITE_WAIT_SECONDS,
+        timer: TurnTimer | None = None,
     ) -> None:
         super().__init__("voice_mission_responder")
         self._missions = missions
         self._on_mission = on_mission
         self._wait = wait_seconds
+        self._acknowledge = acknowledge
+        self._site_command = site_command
+        self._site_status = site_status
+        self._site_wait = site_wait_seconds
+        self._timer = timer or TurnTimer()
         self.conversation_id: str | None = None
         self.mission_id: str | None = None
+        self.active_site_id: str | None = None
 
     async def _submit(self, text: str) -> str:
         if self.conversation_id is not None:
@@ -229,21 +335,71 @@ class MissionVoiceResponder(VoiceResponder):
                 return message.text
         return None
 
+    async def _site_line(self, site_id: str | None) -> str:
+        if self._site_status is None or site_id is None:
+            return site_pending_line()
+        try:
+            async with asyncio.timeout(self._site_wait):
+                while True:
+                    status = await self._site_status(site_id)
+                    if status.get("status") == "ready":
+                        return site_ready_line(_section_count(status))
+                    if status.get("status") == "failed":
+                        return site_failed_line()
+                    await asyncio.sleep(_POLL_SECONDS)
+        except Exception:  # includes the wait timeout
+            return site_pending_line()
+
+    async def _site(self, text: str) -> str | None:
+        """A spoken completion line when handle_command took the request."""
+        if self._site_command is None:
+            return None
+        try:
+            outcome = await self._site_command(text, self.active_site_id)
+        except Exception:
+            return None  # fail soft: the normal mission path still answers
+        if outcome.kind != "site":
+            return None
+        if outcome.site_id is not None:
+            self.active_site_id = outcome.site_id
+        return await self._site_line(outcome.site_id)
+
+    async def _mission(self, text: str, turn_id: str) -> str:
+        mission_id = await self._submit(text[:16000])
+        self.mission_id = mission_id
+        if self._on_mission is not None:
+            with contextlib.suppress(Exception):
+                await self._on_mission(turn_id, mission_id)
+        try:
+            record = await self._settled(mission_id)
+        except asyncio.CancelledError:  # voice stopped or turn cancelled
+            with contextlib.suppress(Exception):
+                await asyncio.shield(self._missions.cancel(mission_id))
+            raise
+        answer = await self._answer(record) if record else None
+        self._timer.since_stt("first_token", turn_id)
+        return _spoken_outcome(record, answer)
+
     async def respond(self, request: VoiceResponseRequest) -> VoiceResponseDraft:
         accepted = VoiceResponseRequest.model_validate(request)
         text = strip_wake_phrase(accepted.transcript_text).strip()
         if not text:
             spoken = "I'm listening."
         else:
-            mission_id = await self._submit(text[:16000])
-            self.mission_id = mission_id
-            if self._on_mission is not None:
+            turn_id = accepted.turn_id
+            ack = None
+            if self._acknowledge is not None:
+                self._timer.since_stt("first_audio", turn_id, "ack")
+                ack = asyncio.ensure_future(self._acknowledge(turn_id))
+            try:
+                spoken = await self._site(text) or await self._mission(text, turn_id)
+            except BaseException:
+                if ack is not None:
+                    ack.cancel()  # flushes the clip via the output's cancel path
+                raise
+            if ack is not None:
                 with contextlib.suppress(Exception):
-                    await self._on_mission(accepted.turn_id, mission_id)
-            record = await self._settled(mission_id)
-            spoken = _spoken_outcome(
-                record, await self._answer(record) if record else None
-            )
+                    await ack  # the output is free before the answer plays
         return VoiceResponseDraft(
             session_id=accepted.session_id,
             turn_id=accepted.turn_id,
@@ -357,8 +513,14 @@ class VoiceService:
         factory: ComponentFactory | None = None,
         config: VoicePipelineConfig | None = None,
         models_dir: Path | None = None,
+        site_command: SiteCommand | None = None,
+        site_status: SiteStatusReader | None = None,
+        cache_dir: Path | None = None,
     ) -> None:
         self._missions = missions
+        self._site_command = site_command or default_site_command()
+        self._site_status = site_status
+        self._cache_dir = cache_dir
         self._publisher = EventPublisher(events)
         self._probes = tuple(probes) if probes is not None else None
         self._factory = factory or local_components(models_dir)
@@ -462,8 +624,21 @@ class VoiceService:
         components = None
         try:
             components = await self._factory()
+            timer = TurnTimer()
+            instrument(components, timer)
+            clips = AckClips(self._cache_dir or default_cache_dir())
+            await clips.prepare(components.tts, components.voice_profile_id)
+
+            async def acknowledge(turn_id: str) -> bool:
+                return await clips.play(components.output, session, turn_id)
+
             responder = MissionVoiceResponder(
-                self._missions, on_mission=self._note_mission
+                self._missions,
+                on_mission=self._note_mission,
+                acknowledge=acknowledge,
+                site_command=self._site_command,
+                site_status=self._site_status,
+                timer=timer,
             )
             self._responder = responder
             pipeline = VoicePipeline(
