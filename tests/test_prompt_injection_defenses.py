@@ -1951,11 +1951,9 @@ PHX_126_PATHS: tuple[str, ...] = ()
 # PHX-125a and PHX-126 (capability_steps.py carries PHX-126 too; the PR must
 # merge with a merge commit so this commit stays reachable).
 PHX_125B_COMMIT = "1071c4fefb15ff1410d972e23c1507ae11de975b"
-PHX_125B_PATHS = (
-    "phoenix/agents/capability_steps.py",
+PHX_125B_PATHS = (  # capability_steps.py and tool_steps.py moved to the expo pin
     "phoenix/agents/prompts.py",
     "phoenix/agents/responders.py",
-    "phoenix/agents/tool_steps.py",
 )
 # PHX-128 (ADR-210; owner-approved 2026-10-22) intentionally changed
 # control_steps.py (the performed-action LEVI check) and runtime.py (offering
@@ -1963,7 +1961,7 @@ PHX_125B_PATHS = (
 # block. Both stay pinned, at the PHX-128 implementation commit (the PR must
 # merge with a merge commit so this commit stays reachable).
 PHX_128_COMMIT = "0bc1df7d5cd1d0c2051d2f27ad83c930aa5e6b62"
-PHX_128_PATHS = ("phoenix/agents/control_steps.py",)
+PHX_128_PATHS: tuple[str, ...] = ()  # control_steps.py moved to the expo pin
 # PHX-130 (ADR-220 to ADR-222; owner-approved 2026-10-23) intentionally
 # changed the event allowlist (desktop.open_link), MissionTrace (quick_calls),
 # the mission service (quick commands before triage, quick grants), the
@@ -2097,7 +2095,18 @@ PHX_139_140_PATHS = ("phoenix/api/server.py",)
 # 2026-11-05 expo build, voice (ADR-315 to ADR-319): launcher.py starts the
 # model pre-warm; pinned at the local merge of that work.
 PHX_EXPO_VOICE_COMMIT = "476815b2965d29aa3520e58292458b117a2babd2"
-PHX_EXPO_VOICE_PATHS = ("phoenix/api/launcher.py", "phoenix/api/voice.py")
+PHX_EXPO_VOICE_PATHS = ("phoenix/api/launcher.py",)  # voice.py moved to the integration pin
+# 2026-11-05 expo build, integration: the four verification steps also accept
+# Trust-mode grants, and the voice service reads website status; pinned at the
+# integration commit.
+PHX_EXPO_INTEGRATION_COMMIT = "9a90856765d0c3fdd4cf34f444d00bb2de852eee"
+PHX_EXPO_INTEGRATION_PATHS = (
+    "phoenix/agents/capability_steps.py",
+    "phoenix/agents/control_steps.py",
+    "phoenix/agents/research_steps.py",
+    "phoenix/agents/tool_steps.py",
+    "phoenix/api/voice.py",
+)
 # Website designer (ADR-300 to ADR-304) registers the sites and command routers
 # in routes/__init__.py; it left the train block and is pinned at that commit.
 PHX_SITES_COMMIT = "74aef06ac357e1c7e0569763ebdb6fbd86814815"
@@ -2170,6 +2179,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_140_PATHS
         and path not in PHX_139_140_PATHS
         and path not in PHX_EXPO_VOICE_PATHS
+        and path not in PHX_EXPO_INTEGRATION_PATHS
         and path not in PHX_SITES_PATHS
         and path not in PHX_UI_PATHS
     ]
@@ -2222,6 +2232,9 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_140_COMMIT, path) for path in PHX_140_PATHS]
     baselines += [(PHX_139_140_COMMIT, path) for path in PHX_139_140_PATHS]
     baselines += [(PHX_EXPO_VOICE_COMMIT, path) for path in PHX_EXPO_VOICE_PATHS]
+    baselines += [
+        (PHX_EXPO_INTEGRATION_COMMIT, path) for path in PHX_EXPO_INTEGRATION_PATHS
+    ]
     baselines += [(PHX_SITES_COMMIT, path) for path in PHX_SITES_PATHS]
     baselines += [(PHX_UI_COMMIT, path) for path in PHX_UI_PATHS]
     pinned = [path for _, path in baselines]
