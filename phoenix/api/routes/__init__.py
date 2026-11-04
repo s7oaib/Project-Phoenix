@@ -11,11 +11,13 @@ ADR-133) KnowledgeService own the behaviour. PHX-110 adds ``/files/upload``,
 from fastapi import FastAPI
 
 from phoenix.api.routes import (
+    command,
     knowledge,
     missions,
     observability,
     permissions,
     setup,
+    sites,
     system,
     voice,
 )
@@ -34,5 +36,8 @@ def install_api_routes(app: FastAPI, *, probe_timeout_seconds: float) -> None:
         knowledge,
         voice,
         observability,
+        sites,  # website designer
+        command,  # command-bar intent router
     ):
         app.include_router(module.router)
+    sites.install(app)
