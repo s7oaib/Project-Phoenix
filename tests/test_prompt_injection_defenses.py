@@ -2006,8 +2006,7 @@ PHX_134_PATHS: tuple[str, ...] = ()  # runtime.py moved to the review merge pin
 # pinned, at the PHX-129 implementation commit (the PR must merge with a merge
 # commit so this commit stays reachable).
 PHX_129_COMMIT = "ba6bc6fc16c45dab498179244508b54dd576fb40"
-PHX_129_PATHS = (
-    "apps/desktop/src-tauri/src/proxy.rs",
+PHX_129_PATHS = (  # proxy.rs moved to the PHX UI pin
     "apps/desktop/src/adapters/SetupViews.tsx",
 )
 # Trust mode (ADR-305 to ADR-309; 2026-11-05) intentionally changed
@@ -2108,7 +2107,7 @@ PHX_SITES_PATHS = ("phoenix/api/routes/__init__.py",)
 # PHX UI (ADR-311) intentionally changed proxy.rs (the sites, command and trust routes and
 # the slug path segment); it left the PHX-123 block and stays pinned at that commit (merge
 # with a merge commit so this commit stays reachable).
-PHX_UI_COMMIT = "00dfeb3ad885f6fafc1dd20560e06df5cdf5457a"
+PHX_UI_COMMIT = "6d427fd20cb01bb664e3b604eb05a11d2bf623e7"
 PHX_UI_PATHS = ("apps/desktop/src-tauri/src/proxy.rs",)
 
 
