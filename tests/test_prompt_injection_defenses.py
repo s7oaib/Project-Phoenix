@@ -1772,7 +1772,7 @@ PHX_106_PATHS = (
 # call; frozen at origin/main until then); it stays pinned, at the PHX-048
 # implementation commit.
 PHX_048_COMMIT = "2e04e22f361f64110742dd8974dece216d567a7f"
-PHX_048_PATHS = ("phoenix/tools/filesystem.py",)
+PHX_048_PATHS: tuple[str, ...] = ()
 # PHX-109 (ADR-093) intentionally changed runtime.py (bounded MAHORAGA
 # recovery, MissionTrace.recoveries) and mission_events.py (recovery.*
 # allowlist); PHX-118 moved runtime.py and PHX-119 mission_events.py to their
@@ -2010,6 +2010,18 @@ PHX_129_PATHS = (
     "apps/desktop/src-tauri/src/proxy.rs",
     "apps/desktop/src/adapters/SetupViews.tsx",
 )
+# Trust mode (ADR-305 to ADR-309; 2026-11-05) intentionally changed
+# security/permissions.py (trust-grant matching), tools/filesystem.py (Recycle
+# Bin delete under trust; the PHX-048 root checks are unchanged) and
+# routes/permissions.py (/v1/trust and the per-task P4 approval); filesystem.py
+# left the PHX-048 pin and routes/permissions.py the train pin. All three stay
+# pinned, at the Trust implementation commit.
+PHX_TRUST_COMMIT = "8d1fb07d49601d1a4c79340c7967af510015061f"
+PHX_TRUST_PATHS = (
+    "phoenix/security/permissions.py",
+    "phoenix/tools/filesystem.py",
+    "phoenix/api/routes/permissions.py",
+)
 # PHX-131 (ADR-225 to ADR-227) intentionally changed triage.py (the pre-triage
 # rule, TriageOutcome.RULE), runtime.py (applying it), persistence/missions.py
 # and schemas.py (the "rule" outcome), the desktop adapter and mission line,
@@ -2053,8 +2065,7 @@ PHX_REVIEW_PATHS: tuple[str, ...] = ()  # runtime.py moved to PHX-140
 # commit.
 PHX_135_COMMIT = "1db015a76d95e2ed40430ce3b7117af5e50fca26"
 PHX_135_PATHS = (  # api/missions.py moved to the PHX-135/136 merge pin
-    "phoenix/api/routes/permissions.py",
-)  # voice.py moved to the expo voice pin; mission_events.py and server.py moved to the PHX-138 pin
+)  # voice.py moved to the expo voice pin, routes/permissions.py to the Trust pin; mission_events.py and server.py moved to the PHX-138 pin
 # api/missions.py carries both PHX-135 and PHX-136; pinned at the merge
 # resolution commit.
 PHX_135_136_COMMIT = "974c91422f1e5a0deefcb5d7ff877e9433eeb6ab"
@@ -2135,6 +2146,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_125B_PATHS
         and path not in PHX_126_PATHS
         and path not in PHX_128_PATHS
+        and path not in PHX_TRUST_PATHS
         and path not in PHX_129_PATHS
         and path not in PHX_130_PATHS
         and path not in PHX_133_PATHS
@@ -2185,6 +2197,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_126_COMMIT, path) for path in PHX_126_PATHS]
     baselines += [(PHX_125B_COMMIT, path) for path in PHX_125B_PATHS]
     baselines += [(PHX_128_COMMIT, path) for path in PHX_128_PATHS]
+    baselines += [(PHX_TRUST_COMMIT, path) for path in PHX_TRUST_PATHS]
     baselines += [(PHX_129_COMMIT, path) for path in PHX_129_PATHS]
     baselines += [(PHX_130_COMMIT, path) for path in PHX_130_PATHS]
     baselines += [(PHX_133_COMMIT, path) for path in PHX_133_PATHS]

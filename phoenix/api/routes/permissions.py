@@ -16,7 +16,10 @@ names no workspace path, so that check does not apply to it; its pending view
 carries a display-only summary (ADR-151) that is never used to authorize.
 """
 
+from uuid import uuid4
+
 from fastapi import APIRouter, Request
+from pydantic import BaseModel
 
 from phoenix.agents.capability_steps import CAPABILITY_TOOLS, MEDIA_ACTOR_ID
 from phoenix.agents.control_steps import CONTROL_ACTOR_ID
@@ -45,6 +48,8 @@ from phoenix.api.routes.schemas import (
 from phoenix.api.workspace import WorkspaceService
 from phoenix.persistence.missions import GrantRecord, PermissionRequestRecord
 from phoenix.security.permissions import GrantDuration
+from phoenix.security.trust import TRUST, never_auto
+from phoenix.tools.registry import ToolRiskLevel
 
 router = APIRouter()
 
@@ -118,7 +123,22 @@ async def approve(
     record = await missions.get_permission_request(request_id)
     if not approvable(record, services.workspace):
         raise ApiError(409, "workspace_changed")
-    rerun = await missions.approve(request_id, _DURATIONS[body.duration])
+    # ADR-306: with trust ON, the user's P4 approval covers the rest of the task.
+    task_id = record.request.task_id
+    covered = False
+    if TRUST.enabled and task_id and not never_auto(
+        record.request.tool_id, record.request.action
+    ):
+        tool = services.tool_registry.get(record.request.tool_id)
+        if tool is not None and tool.risk_level == ToolRiskLevel.P4:
+            TRUST.approve_task(task_id, f"trust-approval-{uuid4()}")
+            covered = True
+    try:
+        rerun = await missions.approve(request_id, _DURATIONS[body.duration])
+    except Exception:
+        if covered and task_id:
+            TRUST.revoke_task(task_id)
+        raise
     return ApproveResult(
         request_id=request_id,
         duration=body.duration,
@@ -155,3 +175,27 @@ async def revoke(grant_id: Uuid, request: Request) -> RevokeResult:
     if not await backend(request).missions.revoke(grant_id):
         raise ApiError(409, "invalid_state")  # already revoked
     return RevokeResult(grant_id=grant_id)
+
+
+class TrustBody(BaseModel):
+    enabled: bool
+
+
+def _trust_view(request: Request) -> dict[str, object]:
+    try:  # the workspace root is part of the trust scope
+        TRUST.workspace_root = backend(request).workspace.state.root
+    except ApiError:
+        pass
+    return TRUST.snapshot()
+
+
+@router.get("/trust")
+async def get_trust(request: Request) -> dict[str, object]:
+    return _trust_view(request)
+
+
+@router.post("/trust")
+async def set_trust(body: TrustBody, request: Request) -> dict[str, object]:
+    """enabled=false is the kill switch: effective on the very next action."""
+    TRUST.set(body.enabled)
+    return _trust_view(request)

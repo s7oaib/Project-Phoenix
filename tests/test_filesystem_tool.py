@@ -1827,6 +1827,7 @@ def test_static_subsystem_separation() -> None:
     assert {name for name in imports if name and name.startswith("phoenix.")} == {
         "phoenix.security.audit",
         "phoenix.security.permissions",
+        "phoenix.security.trust",
         "phoenix.tools.registry",
     }
     plain = {

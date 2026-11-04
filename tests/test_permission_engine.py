@@ -936,6 +936,7 @@ IMPORTS = {
     "enum",
     "typing",
     "pydantic",
+    "phoenix.security.trust",
     "phoenix.tools.registry",
 }
 

@@ -42,6 +42,7 @@ from phoenix.security.permissions import (
     PermissionStatus,
     UserPermissionDecision,
 )
+from phoenix.security.trust import TRUST, recycle
 from phoenix.tools.registry import (
     ToolDefinition,
     ToolRegistry,
@@ -697,7 +698,8 @@ def _attempt(
                     raise _Failure(FilesystemErrorCode.INVALID_UTF8) from None
                 output = {"content": content, "size_bytes": len(raw)}
             elif operation == FilesystemOperation.DELETE_FILE:
-                target.unlink()
+                # ADR-307: trust mode deletes go to the Recycle Bin.
+                recycle(target) if TRUST.enabled else target.unlink()
                 effect = True
                 output = {"deleted": True}
             else:
