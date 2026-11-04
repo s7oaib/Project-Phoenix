@@ -1367,7 +1367,7 @@ export function ViewPanel({ view, chatPort, chat, agentPort, directory, task, pe
   );
 }
 
-export default function App({ chatPort, agentPort, taskPort, permissionPort, memoryPort, filePort, modelPort, voicePort, observabilityPort, panels, statusLine }: { chatPort?: ChatPort; agentPort?: AgentPort; taskPort?: TaskGraphPort; permissionPort?: PermissionPort; memoryPort?: MemoryPort; filePort?: FilePort; modelPort?: ModelPort; voicePort?: VoicePort; observabilityPort?: ObservabilityPort; panels?: ConnectedPanels; statusLine?: string } = {}) {
+export function LegacyApp({ chatPort, agentPort, taskPort, permissionPort, memoryPort, filePort, modelPort, voicePort, observabilityPort, panels, statusLine }: { chatPort?: ChatPort; agentPort?: AgentPort; taskPort?: TaskGraphPort; permissionPort?: PermissionPort; memoryPort?: MemoryPort; filePort?: FilePort; modelPort?: ModelPort; voicePort?: VoicePort; observabilityPort?: ObservabilityPort; panels?: ConnectedPanels; statusLine?: string } = {}) {
   const [selectedView, setSelectedView] = useState<ViewId>('home');
   const mainRef = useRef<HTMLElement>(null);
   const focusRequested = useRef(false);
@@ -1444,3 +1444,6 @@ export default function App({ chatPort, agentPort, taskPort, permissionPort, mem
     </div>
   );
 }
+
+// PHX UI (ADR-310): the HUD is the application; the former workspace above is its SYSTEM tab.
+export { default } from './Hud';
