@@ -1883,12 +1883,6 @@ PHX_TRAIN_COMMIT = "65b3d935d51b241fa9c7d1e6eefaf321184b3460"
 PHX_TRAIN_PATHS = (
     "phoenix/api/capabilities.py",
     "phoenix/api/routes/__init__.py",
-<<<<<<< HEAD
-    "phoenix/api/routes/missions.py",
-    "phoenix/api/routes/schemas.py",
-    "phoenix/api/server.py",
-=======
->>>>>>> feature/expo-phoenix-2026-11-05
 )
 # PHX-121 (ADR-166) intentionally changed prompts.py (phoenix-prompts-v6 adds
 # the combined planner; every v5 constant unchanged) and runtime.py (planner
@@ -2017,7 +2011,6 @@ PHX_129_PATHS = (
     "apps/desktop/src-tauri/src/proxy.rs",
     "apps/desktop/src/adapters/SetupViews.tsx",
 )
-<<<<<<< HEAD
 # Trust mode (ADR-305 to ADR-309; 2026-11-05) intentionally changed
 # security/permissions.py (trust-grant matching), tools/filesystem.py (Recycle
 # Bin delete under trust; the PHX-048 root checks are unchanged) and
@@ -2030,7 +2023,6 @@ PHX_TRUST_PATHS = (
     "phoenix/tools/filesystem.py",
     "phoenix/api/routes/permissions.py",
 )
-=======
 # PHX-131 (ADR-225 to ADR-227) intentionally changed triage.py (the pre-triage
 # rule, TriageOutcome.RULE), runtime.py (applying it), persistence/missions.py
 # and schemas.py (the "rule" outcome), the desktop adapter and mission line,
@@ -2074,9 +2066,8 @@ PHX_REVIEW_PATHS: tuple[str, ...] = ()  # runtime.py moved to PHX-140
 # commit.
 PHX_135_COMMIT = "1db015a76d95e2ed40430ce3b7117af5e50fca26"
 PHX_135_PATHS = (  # api/missions.py moved to the PHX-135/136 merge pin
-    "phoenix/api/routes/permissions.py",
     "phoenix/api/voice.py",
-)  # mission_events.py and server.py moved to the PHX-138 pin
+)  # routes/permissions.py moved to the Trust pin  # mission_events.py and server.py moved to the PHX-138 pin
 # api/missions.py carries both PHX-135 and PHX-136; pinned at the merge
 # resolution commit.
 PHX_135_136_COMMIT = "974c91422f1e5a0deefcb5d7ff877e9433eeb6ab"
@@ -2106,7 +2097,6 @@ PHX_139_PATHS: tuple[str, ...] = ()
 # server.py carries PHX-139 and PHX-140; pinned at the local merge resolution.
 PHX_139_140_COMMIT = "0588b6223af086f6aaed24a6be96fc51c326c9fb"
 PHX_139_140_PATHS = ("phoenix/api/server.py",)
->>>>>>> feature/expo-phoenix-2026-11-05
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -2150,9 +2140,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_125B_PATHS
         and path not in PHX_126_PATHS
         and path not in PHX_128_PATHS
-<<<<<<< HEAD
         and path not in PHX_TRUST_PATHS
-=======
         and path not in PHX_129_PATHS
         and path not in PHX_130_PATHS
         and path not in PHX_133_PATHS
@@ -2169,7 +2157,6 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_139_PATHS
         and path not in PHX_140_PATHS
         and path not in PHX_139_140_PATHS
->>>>>>> feature/expo-phoenix-2026-11-05
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2202,9 +2189,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_126_COMMIT, path) for path in PHX_126_PATHS]
     baselines += [(PHX_125B_COMMIT, path) for path in PHX_125B_PATHS]
     baselines += [(PHX_128_COMMIT, path) for path in PHX_128_PATHS]
-<<<<<<< HEAD
     baselines += [(PHX_TRUST_COMMIT, path) for path in PHX_TRUST_PATHS]
-=======
     baselines += [(PHX_129_COMMIT, path) for path in PHX_129_PATHS]
     baselines += [(PHX_130_COMMIT, path) for path in PHX_130_PATHS]
     baselines += [(PHX_133_COMMIT, path) for path in PHX_133_PATHS]
@@ -2221,7 +2206,6 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_139_COMMIT, path) for path in PHX_139_PATHS]
     baselines += [(PHX_140_COMMIT, path) for path in PHX_140_PATHS]
     baselines += [(PHX_139_140_COMMIT, path) for path in PHX_139_140_PATHS]
->>>>>>> feature/expo-phoenix-2026-11-05
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
