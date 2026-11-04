@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
+from phoenix.security.trust import TRUST
 from phoenix.sites.editor import COLORS
 from phoenix.sites.service import SiteBusy, SitesService, get_default
 from phoenix.sites.spec import SiteError
@@ -56,11 +57,25 @@ def _pass() -> CommandOutcome:
     return CommandOutcome("passthrough", None, "")
 
 
+# Voice-first: the user switches Trust mode by speaking, never by clicking.
+TRUST_CMD = re.compile(
+    r"(?:please )?(?:(?:turn|switch|set) )?(?:(?:on|off) )?(?:enable |disable |activate |deactivate )?"
+    r"(?:the )?trust mode(?: (?:on|off))?",
+    re.I,
+)
+
+
 async def handle_command(
     text: str, active_site_id: str | None = None, service: SitesService | None = None
 ) -> CommandOutcome:
     service = service or get_default()
     text = " ".join(text.split())
+    if TRUST_CMD.fullmatch(text.strip(" .!?,")):
+        on = not re.search(r"\b(?:off|disable|deactivate)\b", text, re.I)
+        TRUST.set(on)
+        return CommandOutcome(
+            "site", None, "Trust mode on. I won't ask again, boss." if on else "Trust mode off."
+        )
     if service is None or not text:
         return _pass()
     try:

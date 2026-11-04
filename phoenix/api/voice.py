@@ -247,6 +247,7 @@ SITE_WAIT_SECONDS: Final = 120.0
 class SiteOutcome(Protocol):
     kind: str  # "site" | "passthrough"
     site_id: str | None
+    message: str
 
 
 class SiteCommand(Protocol):
@@ -266,6 +267,9 @@ def default_site_command() -> SiteCommand | None:
         return None
     handle: SiteCommand = module.handle_command
     return handle
+
+
+ACK_DELAY_SECONDS = 1.5  # a quick answer needs no "On it, boss"
 
 
 def default_site_status() -> SiteStatusReader | None:
@@ -477,6 +481,8 @@ class MissionVoiceResponder(VoiceResponder):
             return None  # fail soft: the normal mission path still answers
         if outcome.kind != "site":
             return None
+        if outcome.site_id is None and outcome.message:
+            return outcome.message  # e.g. "Trust mode on."
         if outcome.site_id is not None:
             self.active_site_id = outcome.site_id
         return await self._site_line(outcome.site_id)
@@ -519,9 +525,20 @@ class MissionVoiceResponder(VoiceResponder):
         else:
             turn_id = accepted.turn_id
             ack = None
-            if self._acknowledge is not None:
+            acknowledge = self._acknowledge
+            started = False
+
+            async def late_ack() -> None:
+                # Only a slow request earns "On it, boss"; quick answers speak at once.
+                nonlocal started
+                assert acknowledge is not None
+                await asyncio.sleep(ACK_DELAY_SECONDS)
+                started = True
                 self._timer.since_stt("first_audio", turn_id, "ack")
-                ack = asyncio.ensure_future(self._acknowledge(turn_id))
+                await acknowledge(turn_id)
+
+            if acknowledge is not None:
+                ack = asyncio.ensure_future(late_ack())
             try:
                 spoken = await self._site(text) or await self._mission(
                     text, turn_id, preview
@@ -531,8 +548,11 @@ class MissionVoiceResponder(VoiceResponder):
                     ack.cancel()  # flushes the clip via the output's cancel path
                 raise
             if ack is not None:
-                with contextlib.suppress(Exception):
-                    await ack  # the output is free before the answer plays
+                if started:
+                    with contextlib.suppress(Exception):
+                        await ack  # the output is free before the answer plays
+                else:
+                    ack.cancel()  # the answer was quick: no acknowledgement needed
         return VoiceResponseDraft(
             session_id=accepted.session_id,
             turn_id=accepted.turn_id,

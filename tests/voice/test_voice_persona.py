@@ -344,3 +344,11 @@ def test_prewarm_pins_model_30m_and_fails_soft(
     monkeypatch.setattr(prewarm.httpx, "post", down)
     assert prewarm.prewarm_ollama("http://x") is False
     assert prewarm.start_prewarm() == []  # no threads under pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_ack_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The acknowledgement waits 1.5 s in real use; the fake missions finish at once."""
+    import phoenix.api.voice as voice_module
+
+    monkeypatch.setattr(voice_module, "ACK_DELAY_SECONDS", 0.0)

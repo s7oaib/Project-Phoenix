@@ -161,6 +161,9 @@ export default function Hud(props: ComponentProps<typeof LegacyApp> = {}) {
           <main className="stage" id="main-content">
             {spec ? (
               <Frame className="preview-frame" label={`${spec.name} · ${building ? 'rebuilding' : 'live preview'}`} state={site ? `v${site.head}/${site.max}` : undefined} tone={building ? 'live' : 'done'}>
+                <div className="preview-actions">
+                  <button type="button" aria-label="Close preview" onClick={() => { setSiteId(undefined); setSite(undefined); setSpec(undefined); setSelected(undefined); }}>Close preview ×</button>
+                </div>
                 <Preview spec={spec} selected={selected} onSelect={setSelected} />
                 {building && site && <div className="scrim"><Progress phase={site.phase} failed={site.error} /></div>}
               </Frame>
