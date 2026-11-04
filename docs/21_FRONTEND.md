@@ -604,9 +604,10 @@ reaches JavaScript.
 
 Webview access is exactly:
 
-- `invoke('api_request', { method, path, body })` — 31 allowlisted REST v1 routes (18 from
+- `invoke('api_request', { method, path, body })` — 32 allowlisted REST v1 routes (18 from
   PHX-106, PHX-108's read-only `GET /onboarding` and `GET /capabilities`, PHX-115's
-  `GET /metrics` and PHX-122's ten voice and knowledge routes, below)
+  `GET /metrics`, PHX-122's ten voice and knowledge routes, below, and PHX-129's
+  `POST /grants/{id}/revoke`)
   (docs/13), canonical UUID segments, listed query keys, JSON bodies up to 64 KiB (the
   upload: up to 8 MiB decoded); anything else is `route_not_allowed`;
 - `invoke('backend_status')` — `starting`, `ready` or `degraded` with a closed code;
@@ -761,3 +762,20 @@ the store's backend state; every action is a store method over an allowlisted ro
 App.tsx again changes only after `export const diagnosticMetricNames`: `ConnectedPanels`
 adds `memory`, `files` and `voice`, and `above.home` / `above.permissions`, rendered above
 App's own Chat and Permissions views (never in place of them).
+
+## PHX-129 Always allow for read-only requests (ADR-215 to ADR-217)
+
+- **Permissions.** Above App's cards, each pending P1 (read-only) request offers
+  "Allow this session" and "Always allow" (`{"duration": "session" | "always"}`). P2 and
+  P3 requests keep the card's session approval; P4 keeps its one-time approval. App.tsx's
+  Permission Center is unchanged (byte-frozen); the choice lives in `ConnectedApp`'s
+  `ReadOnlyApprovals`. The store refuses "always" unless the pending request is P1, and the
+  backend independently refuses "always" for P2 document/research/media requests (422) and
+  P3 control requests.
+- **Settings → Remembered permissions.** Lists active "always" grants from
+  `GET /grants?limit=200` (tool, action, resource, granted at). "Remove" calls
+  `POST /grants/{id}/revoke`, which sets `revoked_at`; the audit row is never deleted.
+  Session grants are not listed (they end with the launch).
+- **Proxy.** `api_request` admits 32 routes: the 31 above plus `POST /grants/{id}/revoke`
+  (canonical UUID, no query, no body). `DELETE /grants/{id}` and every other shape stay
+  `route_not_allowed`.

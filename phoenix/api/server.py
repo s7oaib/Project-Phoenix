@@ -50,10 +50,11 @@ import contextlib
 import os
 import sys
 import time
-from collections.abc import AsyncIterator, Callable, Iterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import partial
 from pathlib import Path
 from typing import IO, Literal
 
@@ -67,7 +68,9 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from alembic import command
+from phoenix.agents.answer_stream import PartialAnswers
 from phoenix.agents.capability_steps import CapabilityTools
+from phoenix.agents.chat_context import recall_memories
 from phoenix.agents.control_steps import (
     ControlStepRunner,
     control_permission_policy,
@@ -79,8 +82,15 @@ from phoenix.agents.kaido import (
     KaidoStatus,
     system_ram_sample,
 )
+from phoenix.agents.mission_events import EventPublisher
+from phoenix.agents.quick_commands import (
+    QuickCommandRunner,
+    ScreenDescriber,
+    VideoSummarizer,
+)
 from phoenix.agents.registry import AgentRegistry, build_default_agent_registry
 from phoenix.agents.runtime import ModelTierTable, PhoenixRuntime, default_tier_table
+from phoenix.agents.triage import TRIAGE_ROLE
 from phoenix.api.app import create_app
 from phoenix.api.body_limit import BodyLimitMiddleware
 from phoenix.api.event_stream import (
@@ -113,22 +123,28 @@ from phoenix.models.embeddings import EmbeddingProvider
 from phoenix.models.lifecycle import ModelLifecycleManager
 from phoenix.models.ollama import OllamaProvider
 from phoenix.models.ollama_embeddings import OllamaEmbeddingProvider
+from phoenix.models.ollama_vision import OllamaVisionInterpreter
 from phoenix.models.provider import (
+    GenerationRequest,
+    MessageRole,
+    ModelMessage,
     ModelProvider,
     ModelProviderError,
     ProviderHealthStatus,
 )
 from phoenix.models.registry import ModelCapabilityRegistry
+from phoenix.models.vision import VisionLoopService
 from phoenix.persistence.database import (
     create_engine_for_settings,
     create_session_factory,
     database_url,
     prepare_data_directory,
 )
-from phoenix.persistence.missions import MissionStore
+from phoenix.persistence.missions import MissionStore, PermissionRequestRecord
 from phoenix.persistence.settings import SettingsStore
 from phoenix.security.audit import AuditTrail
 from phoenix.security.permissions import PermissionPolicy
+from phoenix.security.prompt_injection import PromptInjectionGuard
 from phoenix.security.secrets import WindowsCredentialStore
 from phoenix.tools.browser import BrowserTool
 from phoenix.tools.browser_setup import (
@@ -141,10 +157,17 @@ from phoenix.tools.document_files import (
     document_file_tool_definitions,
 )
 from phoenix.tools.filesystem import FilesystemTool, filesystem_tool_definitions
+from phoenix.tools.open_app import OpenAppTool, open_app_tool_definitions
+from phoenix.tools.open_link import OpenLinkTool, open_link_tool_definitions
 from phoenix.tools.registry import ToolRegistry
+from phoenix.tools.screenshot import ScreenshotCaptureTool
 from phoenix.tools.web_research import WebResearchTool, web_research_tool_definitions
 from phoenix.tools.windows_ui import WindowsUITool
 from phoenix.tools.youtube import YouTubeTool, youtube_tool_definitions
+from phoenix.tools.youtube_transcript import (
+    YouTubeTranscriptTool,
+    youtube_transcript_tool_definitions,
+)
 from phoenix.web.duckduckgo import DuckDuckGoSearchProvider
 from phoenix.web.page_fetch import HttpPageFetcher
 
@@ -173,6 +196,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = ROOT / "alembic.ini"
 STATE_KEY = "phoenix"
 MIGRATION_LOCK_NAME = "phoenix.migrate.lock"
+KEEP_ALIVE = "30m"  # PHX-130 (ADR-222)
 _LOCK_POLL_SECONDS = 0.05
 
 
@@ -237,11 +261,102 @@ ProviderFactory = Callable[[ServerConfig], ProviderSet]
 
 def ollama_providers(config: ServerConfig) -> ProviderSet:
     """Local Ollama, default and think=False; construction performs no I/O."""
+    # PHX-130 (ADR-222): keep the chat models loaded between missions.
     return ProviderSet(
-        providers=(OllamaProvider(config.ollama_base_url),),
-        structured=(OllamaProvider(config.ollama_base_url, think=False),),
+        providers=(OllamaProvider(config.ollama_base_url, keep_alive=KEEP_ALIVE),),
+        structured=(
+            OllamaProvider(config.ollama_base_url, think=False, keep_alive=KEEP_ALIVE),
+        ),
         embedding=OllamaEmbeddingProvider(config.ollama_base_url),
     )
+
+
+async def warm_chat_model(
+    providers: Sequence[ModelProvider],
+    structured: Sequence[ModelProvider],
+    table: ModelTierTable,
+    registry: ModelCapabilityRegistry,
+    timeout: float,
+) -> bool:
+    """PHX-130 (ADR-222): load the triage/DIRECT model with one tiny generation.
+
+    Runs in the background at startup, only when the provider is healthy; any
+    failure is ignored (the first mission then loads the model as before).
+    """
+    try:
+        twins = {provider.provider_id: provider for provider in structured}
+        for ref in table.candidates(TRIAGE_ROLE):
+            if registry.get(ref.provider_id, ref.model_id) is None:
+                continue
+            provider = twins.get(ref.provider_id) or next(
+                (p for p in providers if p.provider_id == ref.provider_id), None
+            )
+            if provider is None:
+                return False
+            async with asyncio.timeout(timeout):
+                health = await provider.health()
+            if health.status != ProviderHealthStatus.HEALTHY:
+                return False
+            await provider.generate(
+                GenerationRequest(
+                    model_id=ref.model_id,
+                    messages=(ModelMessage(role=MessageRole.USER, text="Hi"),),
+                    max_output_tokens=1,
+                )
+            )
+            return True
+    except Exception:
+        return False
+    return False
+
+
+OLLAMA_LOCAL_URL = "http://127.0.0.1:11434"
+AUTOSTART_ENV = "PHOENIX_AUTOSTART_OLLAMA"
+
+
+def launch_ollama_app(base_url: str) -> bool:
+    """PHX-139 (ADR-261): open the installed Ollama app once; never raises.
+
+    Windows only, the local default URL only, one fixed path (never PATH or
+    user input), no arguments. ``PHOENIX_AUTOSTART_OLLAMA=0`` turns it off.
+    """
+    if sys.platform != "win32" or os.environ.get(AUTOSTART_ENV) == "0":
+        return False
+    if base_url.rstrip("/") != OLLAMA_LOCAL_URL:
+        return False
+    local = os.environ.get("LOCALAPPDATA")
+    if not local:
+        return False
+    app = Path(local) / "Programs" / "Ollama" / "ollama app.exe"
+    try:
+        if not app.is_file():
+            return False
+        os.startfile(app)  # type: ignore[attr-defined,unused-ignore]
+    except OSError:
+        return False
+    return True
+
+
+async def autostart_ollama(
+    providers: Sequence[ModelProvider], base_url: str, timeout: float
+) -> bool:
+    """PHX-139: launch Ollama when its provider does not answer; True if launched."""
+    ollama = next((p for p in providers if isinstance(p, OllamaProvider)), None)
+    if ollama is None or os.environ.get(AUTOSTART_ENV) == "0":
+        return False
+    if await probe_provider(ollama, timeout) == ProviderHealthStatus.HEALTHY:
+        return False
+    return await asyncio.to_thread(launch_ollama_app, base_url)
+
+
+async def warm_when_up(warm: Callable[[], Awaitable[bool]], attempts: int) -> bool:
+    """PHX-139: retry the PHX-130 warm-up while a just-launched Ollama starts."""
+    for attempt in range(attempts):
+        if await warm():
+            return True
+        if attempt + 1 < attempts:
+            await asyncio.sleep(3.0)
+    return False
 
 
 def _consume(task: "asyncio.Task[bool]") -> None:
@@ -659,6 +774,12 @@ async def open_services(
         registrar = ModelRegistrar(
             provider_set.providers, table, capabilities, config.probe_timeout_seconds
         )
+        # PHX-139 (ADR-261): the registrar loop and warm-up pick it up later.
+        launched = await autostart_ollama(
+            provider_set.providers,
+            config.ollama_base_url,
+            config.probe_timeout_seconds,
+        )
         try:
             async with asyncio.timeout(config.startup_timeout_seconds):
                 await registrar.refresh()
@@ -678,6 +799,10 @@ async def open_services(
                 *document_file_tool_definitions(),
                 *youtube_tool_definitions(),
                 *control_tool_definitions(),
+                # PHX-130 (ADR-220): quick commands' allowlisted link opening.
+                *open_link_tool_definitions(),
+                *open_app_tool_definitions(),  # PHX-133 (ADR-236)
+                *youtube_transcript_tool_definitions(),  # PHX-138 (ADR-258)
             )
         )
         research: WebResearchTool | None = None
@@ -741,6 +866,8 @@ async def open_services(
             windows=WindowsUITool(tools, policy, audit),
         )
         stack.callback(control.close)
+        # PHX-132 (ADR-231): DIRECT answers stream to Chat and to voice.
+        partials = PartialAnswers()
 
         def build_runtime(workspace_root: str | None = None) -> PhoenixRuntime:
             """PHX-104: one runtime per workspace root; None has no documents."""
@@ -767,18 +894,47 @@ async def open_services(
                     youtube=youtube,
                 ),
                 control=control,
+                partial_answers=partials,
             )
 
         runtime = build_runtime()
+        # PHX-135 (ADR-247): "what's on my screen" — one window, local vision.
+        vision = OllamaVisionInterpreter(config.ollama_base_url)
+        stack.push_async_callback(vision.aclose)
         missions = MissionService(
             runtime=runtime,
             store=MissionStore(session_factory),
             tool_registry=tools,
             events=observer,
             before_run=registrar.refresh_required,
+            quick=QuickCommandRunner(
+                OpenLinkTool(tools, policy),
+                OpenAppTool(tools, policy),  # PHX-133: paths resolved here
+                EventPublisher(observer),
+                screen=ScreenDescriber(
+                    ScreenshotCaptureTool(tools, policy),
+                    VisionLoopService(vision),
+                    lifecycle,
+                ),
+                # PHX-138 (ADR-259): captions, then the DIRECT model, think off.
+                summarizer=VideoSummarizer(
+                    YouTubeTranscriptTool(tools, policy),
+                    (*provider_set.structured, *provider_set.providers)[0],
+                    PromptInjectionGuard(agents),
+                    partials=partials,  # PHX-139 (ADR-262): streams
+                ),
+            ),
+            # PHX-140 (ADR-265): saved memories for DIRECT replies (P0, internal).
+            recall=partial(recall_memories, knowledge),
         )
         observer.bind_traces(missions.get_trace)
         settings_store = SettingsStore(session_factory)
+        workspace = WorkspaceService(
+            store=settings_store,
+            missions=missions,
+            build_runtime=build_runtime,
+            data_dir=settings.data_dir,
+        )
         database_probe = DatabaseProbe(engine, heads)
         voice = VoiceService(
             missions,
@@ -794,6 +950,9 @@ async def open_services(
             ),
             factory=voice_factory,
             models_dir=config.voice_models_dir,
+            partial_answers=partials,
+            # PHX-135 (ADR-245/246): the route's workspace rule, for voice too.
+            may_approve=lambda record: _approvable(record, workspace),
         )
         services = BackendServices(
             settings=settings,
@@ -815,12 +974,7 @@ async def open_services(
             runtime=runtime,
             missions=missions,
             settings_store=settings_store,
-            workspace=WorkspaceService(
-                store=settings_store,
-                missions=missions,
-                build_runtime=build_runtime,
-                data_dir=settings.data_dir,
-            ),
+            workspace=workspace,
             kaido=kaido,
             model_registrar=registrar,
             voice=voice,
@@ -829,9 +983,25 @@ async def open_services(
             control_steps=control,
         )
         refresher: asyncio.Task[None] | None = None
+        warmer: asyncio.Task[bool] | None = None
         try:
             await services.workspace.load()  # before the first mission runs
             await services.missions.start()
+            if uses_ollama:
+                # PHX-130 (ADR-222): non-blocking; failures are ignored.
+                warmer = asyncio.create_task(
+                    warm_when_up(
+                        partial(
+                            warm_chat_model,
+                            provider_set.providers,
+                            provider_set.structured,
+                            table,
+                            capabilities,
+                            config.probe_timeout_seconds,
+                        ),
+                        20 if launched else 1,  # PHX-139: about a minute
+                    )
+                )
             refresher = asyncio.create_task(
                 registrar.run(
                     config.model_refresh_seconds, config.model_refresh_idle_seconds
@@ -843,10 +1013,11 @@ async def open_services(
         finally:
             try:
                 await services.voice.aclose()  # voice first: no new missions
-                if refresher is not None:
-                    refresher.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await refresher
+                for task in (refresher, warmer):
+                    if task is not None:
+                        task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await task
                 await cancel_active_missions(services)
             finally:
                 await stream.close()  # 1001 to every remaining client
@@ -915,6 +1086,14 @@ async def readiness(
         kaido=kaido,
         prerequisites=prerequisites(services, statuses),
     )
+
+
+def _approvable(record: PermissionRequestRecord, workspace: WorkspaceService) -> bool:
+    """PHX-135: the approve route's workspace rule (imported late: the routes
+    import this module)."""
+    from phoenix.api.routes.permissions import approvable
+
+    return approvable(record, workspace)
 
 
 def _remove_interactive_docs(app: FastAPI) -> None:

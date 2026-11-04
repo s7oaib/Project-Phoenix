@@ -43,6 +43,12 @@ decided) is recorded when it settles. A re-run, from ``run_again`` or an
 approval, reuses the original's decision; one that never got a decision (it
 was interrupted before triage finished) is triaged again.
 
+Quick commands (PHX-130, ADR-220): with a QuickCommandRunner, a mission whose
+text is a quick command (see quick_commands) runs it instead of the runtime:
+one ``desktop.open_link`` call under the stored quick-command grant, no
+triage and no model. It completes with a fixed answer, waits for permission,
+or fails ``tool_failed``; its trace holds the call (``quick_calls``).
+
 This module is application logic for the backend process, not transport: it
 imports no FastAPI; the PHX-104 routes call it.
 """
@@ -53,11 +59,13 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from functools import partial
 from typing import Literal, ParamSpec, TypeVar
 from uuid import uuid4
 
 from pydantic import JsonValue, ValidationError
 
+from phoenix.agents.chat_context import ChatContext, history_text
 from phoenix.agents.control_steps import (
     CONTROL_ACTOR_ID,
     CONTROL_TOOL_RISKS,
@@ -66,8 +74,20 @@ from phoenix.agents.control_steps import (
 )
 from phoenix.agents.mission_events import EventPublisher, EventSink
 from phoenix.agents.orchestrator import OrchestrationPath, PhoenixRequest
+from phoenix.agents.prompts import PROMPT_SET_VERSION
+from phoenix.agents.quick_commands import (
+    QUICK_TOOL_IDS,
+    YOUTUBE_WATCH,
+    QuickAnswerRecord,
+    QuickCallRecord,
+    QuickCommand,
+    QuickCommandRunner,
+    QuickKind,
+    quick_grants,
+)
 from phoenix.agents.research_steps import mission_grants
 from phoenix.agents.runtime import (
+    MissionFailureCode,
     MissionKind,
     MissionResult,
     MissionTrace,
@@ -110,6 +130,9 @@ _T = TypeVar("_T")
 _Reason = Literal["user", "shutdown", "deleted"]
 # PHX-104: None to run the mission, or a failure code to fail it instead.
 Preflight = Callable[[], Awaitable[str | None]]
+
+
+MAX_REMEMBERED_VIDEOS = 256  # PHX-140: last played video per conversation
 
 
 class MissionServiceError(Exception):
@@ -167,6 +190,8 @@ class MissionService:
         clock: Callable[[], datetime] = _utcnow,
         events: EventSink | None = None,
         before_run: Callable[[], Awaitable[None]] | None = None,
+        quick: QuickCommandRunner | None = None,
+        recall: Callable[[str], Awaitable[tuple[str, ...]]] | None = None,
     ) -> None:
         if retention <= timedelta(0):
             raise ValueError("Retention must be positive")
@@ -201,6 +226,14 @@ class MissionService:
         # PHX-112 (ADR-151): one-time P4 approvals, by the re-run they belong to.
         # Memory only: a restart interrupts that re-run and the approval is gone.
         self._approvals: dict[str, ControlApproval] = {}
+        # PHX-130 (ADR-220): quick commands run before the runtime (no triage).
+        if quick is not None and type(quick) is not QuickCommandRunner:
+            raise TypeError("Expected a QuickCommandRunner")
+        self._quick = quick
+        # PHX-140 (ADR-264, ADR-265, ADR-268): saved-memory recall for DIRECT
+        # replies, and each conversation's last played video (memory only).
+        self._recall = recall
+        self._videos: dict[str, str] = {}
 
     @property
     def session_id(self) -> str:
@@ -408,6 +441,8 @@ class MissionService:
                 if current.preflight is not None:
                     refused = await current.preflight()
                 found = await self._io(self._store.active_grants, self._session_id)
+                mission = await self._io(self._store.get_mission, mission_id)
+                conversation = None if mission is None else mission.conversation_id
                 self._skipped_grants += found.skipped
                 control = current.runtime.control_enabled
                 grants = self._usable(found.grants, control=control)
@@ -419,6 +454,17 @@ class MissionService:
                 elif refused is not None:
                     outcome = Settlement(
                         status=MissionStatus.FAILED, failure_code=refused
+                    )
+                elif (
+                    command := self._last_video(
+                        None
+                        if self._quick is None
+                        else self._quick.match(claimed.text),  # PHX-136
+                        conversation,
+                    )
+                ) is not None:
+                    outcome = await self._run_quick(
+                        mission_id, command, found.grants, conversation
                     )
                 else:
                     # No await between this check and run() registering the
@@ -435,6 +481,9 @@ class MissionService:
                         session_id=self._session_id,
                         decided_by=TriageOutcome(claimed.triage_outcome or "client"),
                         approvals=approvals,
+                        context=None
+                        if mission is None
+                        else partial(self._chat_context, mission, claimed.text),
                     )
                     outcome = self._settlement(current, result)
             except Exception:
@@ -457,6 +506,74 @@ class MissionService:
                 await self._record(self._settle_failed, mission_id)
         finally:
             self._current = None
+
+    def _last_video(
+        self, command: QuickCommand | None, conversation: str | None
+    ) -> QuickCommand | None:
+        """PHX-140 (ADR-268): "summarise that video" gets the conversation's
+        last played video, or goes to the normal pipeline without one."""
+        if (
+            command is None
+            or command.kind != QuickKind.SUMMARIZE_YOUTUBE
+            or command.url is not None
+            or command.query is not None
+        ):
+            return command
+        video = None if conversation is None else self._videos.get(conversation)
+        return None if video is None else replace(command, url=YOUTUBE_WATCH + video)
+
+    async def _chat_context(self, mission: MissionRecord, text: str) -> ChatContext:
+        """PHX-140 (ADR-264, ADR-265): the turns before this request in its
+        conversation, and the user's best saved memories."""
+        messages = await self._io(self._store.list_messages, mission.conversation_id)
+        earlier: list[tuple[str, str]] = []
+        for message in messages or ():
+            if message.message_id == mission.message_id:
+                break
+            earlier.append((message.role.value, message.text))
+        memories = () if self._recall is None else await self._recall(text)
+        return ChatContext(history_text(earlier), memories)
+
+    async def _run_quick(
+        self,
+        mission_id: str,
+        command: QuickCommand,
+        stored: tuple[PermissionGrant, ...],
+        conversation: str | None = None,
+    ) -> Settlement:
+        """PHX-130 (ADR-220/221): one link opening, verified deterministically.
+        PHX-133: or one app launch, or a local-clock answer (no tool)."""
+        assert self._quick is not None
+        result = await self._quick.run(
+            mission_id, command, stored, session_id=self._session_id
+        )
+        record = result.record
+        if result.video_id is not None and conversation is not None:
+            self._videos.pop(conversation, None)
+            self._videos[conversation] = result.video_id
+            if len(self._videos) > MAX_REMEMBERED_VIDEOS:
+                del self._videos[next(iter(self._videos))]
+        trace = MissionTrace(
+            prompt_set_version=PROMPT_SET_VERSION,
+            path=None,
+            quick_calls=(record,) if isinstance(record, QuickCallRecord) else (),
+            quick_answers=(record,) if isinstance(record, QuickAnswerRecord) else (),
+        ).model_dump(mode="json")
+        if result.answer is not None:
+            return Settlement(
+                status=MissionStatus.COMPLETED, trace=trace, answer_text=result.answer
+            )
+        if result.pending is not None:
+            return Settlement(
+                status=MissionStatus.WAITING_PERMISSION,
+                trace=trace,
+                pending=result.pending,
+            )
+        return Settlement(
+            status=MissionStatus.FAILED,
+            trace=trace,
+            failure_code=MissionFailureCode.TOOL_FAILED.value,
+        )
 
     def _settle_failed(self, mission_id: str, failure_code: str, now: datetime) -> bool:
         return self._store.settle(mission_id, _INTERNAL_ERROR, now)
@@ -706,6 +823,10 @@ class MissionService:
             )
             if control:
                 control_grants([grant])
+            elif request.tool_id in QUICK_TOOL_IDS:
+                # PHX-130 links, PHX-133 apps: P1 "session" or "always";
+                # PHX-135 one exact window: P1 "session"
+                quick_grants([grant])
             else:
                 # document, (PHX-111) research or (PHX-113, PHX-120) capability
                 mission_grants([grant], capabilities=True)
@@ -829,10 +950,12 @@ class MissionService:
         deleted = await self._io(self._store.delete_conversation, conversation_id)
         if deleted is None:
             raise NotFoundError("Unknown conversation")
+        self._videos.pop(conversation_id, None)
         await self._cancel_deleted(deleted)
 
     async def clear_all(self) -> None:
         """Delete every conversation, message, mission and trace; keep grants."""
+        self._videos.clear()
         await self._cancel_deleted(await self._io(self._store.clear_all))
 
     async def _cancel_deleted(self, deleted: tuple[str, ...]) -> None:

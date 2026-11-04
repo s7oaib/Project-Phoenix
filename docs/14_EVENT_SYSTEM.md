@@ -89,3 +89,9 @@ The correlation ID is the voice session, and `agent_id` is `voice` (UTA).
 for example `thinking` with the request's `mission_id`, or `sleeping`. No
 transcript, answer or audio is ever published. The vocabulary stays at 32
 types.
+
+
+## Answer deltas (PHX-132, ADR-232)
+
+PHOENIX's DIRECT reply streams as `agent.started` events from agent`nphoenix` with exactly `mission_id` (the correlation ID) and `answer_delta`n(1-2048 characters of answer text). It is the only text an event may carry;`nobservers never log it. The vocabulary stays at 32 types.
+

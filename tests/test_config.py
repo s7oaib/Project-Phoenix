@@ -34,6 +34,12 @@ def test_portable_defaults() -> None:
         "data_dir",
         "web_research_enabled",  # PHX-111
     }
+    assert settings.web_research_enabled is True  # PHX-140 (ADR-267)
+
+
+def test_web_research_opt_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PHOENIX_WEB_RESEARCH_ENABLED", "0")
+    settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
     assert settings.web_research_enabled is False
 
 
@@ -65,7 +71,7 @@ def test_dotenv_and_precedence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
         "api_host": "localhost",
         "api_port": 9001,
         "data_dir": Path("dotenv-data"),
-        "web_research_enabled": False,
+        "web_research_enabled": True,
     }
     monkeypatch.setenv("PHOENIX_API_PORT", "9002")
     assert AppSettings().api_port == 9002

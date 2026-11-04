@@ -1422,7 +1422,7 @@ def test_static_security_and_scope() -> None:
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0009_default_mission_path"]
+    ).get_heads() == ["0010_triage_rule"]
     assert tuple(x for x in vars(TerminalTool) if not x.startswith("_")) == (
         "describe",
         "execute",

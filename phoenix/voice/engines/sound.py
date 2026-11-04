@@ -20,6 +20,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from datetime import UTC, datetime
 from hashlib import sha256
+from time import monotonic
 from typing import Any, Final
 from uuid import uuid4
 
@@ -51,6 +52,7 @@ FRAME_SAMPLES: Final = 480  # 30 ms, a PHX-061 VAD frame
 FRAME_BYTES: Final = FRAME_SAMPLES * 2
 _QUEUE_FRAMES: Final = 200  # 6 s
 _PLAY_BLOCK_SECONDS: Final = 0.05
+_STALL_SECONDS: Final = 2.0  # no device callback for this long = microphone gone
 
 
 class MicrophoneError(RuntimeError):
@@ -117,12 +119,16 @@ class SoundDeviceMicrophone(MicrophoneSource):
         self._dropped = 0
         self._failed = False
         self._loop: asyncio.AbstractEventLoop | None = None
+        # Monotonic time of the device's last callback, written on the audio
+        # thread, so a busy event loop is never mistaken for a dead microphone.
+        self._last_audio = 0.0
 
     @property
     def dropped_frames(self) -> int:
         return self._dropped
 
     def _callback(self, indata: Any, frames: int, time: Any, status: Any) -> None:
+        self._last_audio = monotonic()
         loop = self._loop
         if loop is not None and not loop.is_closed():
             loop.call_soon_threadsafe(self._push, bytes(indata))
@@ -178,10 +184,15 @@ class SoundDeviceMicrophone(MicrophoneSource):
                 raise MicrophoneError("microphone closed")
             self._ready.clear()
             try:
-                async with asyncio.timeout(2.0):
+                async with asyncio.timeout(_STALL_SECONDS):
                     await self._ready.wait()
             except TimeoutError:
-                # A live input stream delivers a block every 30 ms.
+                # A live input stream delivers a block every 30 ms. The loop
+                # may have been busy (model loading, synthesis) while the
+                # device kept delivering: only the audio thread's own clock
+                # decides that the microphone stopped.
+                if self._queue or monotonic() - self._last_audio < _STALL_SECONDS:
+                    continue
                 self._failed = True
                 raise MicrophoneError("microphone stopped delivering audio") from None
         return self._queue.popleft()

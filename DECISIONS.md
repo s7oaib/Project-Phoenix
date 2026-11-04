@@ -7094,3 +7094,777 @@ rule; left for a follow-up.
 Rejected: trusting the model's choice of actions (it is what failed), a
 planner-declared action field (model-visible change, out of scope), and
 counting PHOENIX's teardown `browser.session_close` as closing a window.
+
+## ADR-215 — "Always allow" is offered for read-only (P1) requests only
+
+Status: Accepted (PHX-129 owner approval 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-129
+
+Context: every launch re-asks for the same read-only permissions. The backend has
+accepted PERSISTENT ("always") grants for P1 since PHX-102/104; the desktop only sent
+`{"duration": "session"}`.
+
+Decision: for a pending request whose backend-reported risk level is P1, the desktop
+offers "Allow this session" and "Always allow". P2 and P3 keep session approval and P4
+keeps one-time approval. The store refuses "always" for anything but a pending P1
+request; the backend stays authoritative and unchanged (P2 document, research and media
+"always" is 422; P3 control "always" is refused). No P-level, PermissionEngine decision,
+LEVI rule or prompt changes.
+
+The choice is rendered by `ConnectedApp`'s `ReadOnlyApprovals` above App's Permission
+Center, because App.tsx's Permission Center and its intent path are byte-frozen by the
+PHX-085/086/087 tests; the card's own "Approve this request" remains the session path.
+
+Known gap (not changed here): `control_grants` (ADR-151) still admits PERSISTENT P2
+control grants if a client sends them; the desktop never offers it.
+
+Consequences: fewer prompts for read-only work; a remembered grant matches only its exact
+tool, action and resource and lasts until removed (ADR-216).
+
+## ADR-216 — Remembered permissions are listed and removable in Settings
+
+Status: Accepted (PHX-129)
+Date: 2026-10-23
+Ticket: PHX-129
+
+Decision: Settings shows "Remembered permissions": active "always" grants from the
+existing `GET /grants` (tool, action, resource, granted at), each with "Remove". The
+existing backend routes suffice; no new backend route was added. Session grants are not
+listed.
+
+## ADR-217 — The native proxy admits grant revoke
+
+Status: Accepted (PHX-129)
+Date: 2026-10-23
+Ticket: PHX-129
+
+Decision: the proxy allowlist gains `POST /grants/{id}/revoke` (canonical UUID, no
+query, no body), 32 routes in total. Revoke sets `revoked_at` and never deletes the
+grant row, so the audit trail is kept. `DELETE /grants/{id}`, other methods, non-UUID
+segments and queries stay `route_not_allowed`. This supersedes the proxy comment that
+grant revoke was deliberately absent (no adapter used it until now).
+
+## ADR-220 — Quick commands open allowlisted links before triage, as P1
+
+Status: Accepted (PHX-130 owner decisions 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-130
+
+Context: the owner wants "open browser", "open youtube", "open google",
+"search youtube for X" and "search google for X", typed or spoken, to act in
+about a second. The full pipeline (triage, then a DIRECT or COMPLEX plan) costs
+model generations and, for media, a permissioned YouTube API flow.
+
+Decision: `MissionService` checks each claimed mission's text with a strict,
+deterministic router (`phoenix.agents.quick_commands`) before the runtime runs;
+chat (`POST /chat`) and voice (`MissionVoiceResponder`) both submit through
+`MissionService.submit`, so this is the one shared entry. A match makes one
+`desktop.open_link` call and no model call; anything else runs unchanged.
+Patterns are anchored full matches after polite prefixes ("please", "can you",
+"Phoenix,", "rise, phoenix") are stripped. URLs come only from fixed templates
+(`https://www.google.com/`, `https://www.youtube.com/`, their search pages);
+the query is capped at 200 characters, refused if it holds a URL scheme,
+"www." or shell/markup punctuation (then it is not a quick command), and
+URL-encoded with `quote_plus`, so no text can choose the host.
+
+`desktop.open_link` is registered in ToolRegistry and decided by
+PermissionEngine (INV-004). It is **P1**: it only hands an https URL on an
+exact two-host allowlist (`www.google.com`, `www.youtube.com`; no user info,
+port or fragment, re-checked by the tool) to the OS default browser, via
+`os.startfile` on Windows (no shell, no arguments) and `webbrowser.open`
+elsewhere. PHOENIX does not drive, read or close the page (owner decision), so
+the effect is the same as the user clicking a bookmark: no data leaves except
+the search text the user asked to search, and nothing on the machine changes.
+P2+ would overstate it; P0 would skip the user's first consent.
+
+Permission scope is fixed (actor `phoenix`, action `open_link`, resource
+`allowlist:www.google.com,www.youtube.com`, a fixed reason), so one grant
+covers every quick command. The first use waits for permission; the existing
+approve route accepts "session" or "always" for it (owner decision: "Always
+allow" — a PERSISTENT P1 grant, revocable under grants), and then it never
+asks again. The route's workspace check does not apply (an allowlist, not a
+path). Quick grants are kept out of the runtime's grants (`_usable` drops
+them), and the runtime never sees this tool.
+
+The mission completes with a fixed answer ("Opened YouTube search for X."),
+which voice speaks through the existing path; its trace has no path or triage
+(`quick_calls` holds the call: IDs, closed values, a query hash), the detail
+API labels it `mission_label: "quick"`, and tool/permission events use the
+PHX-103 allowlist (tool `desktop.open_link`, operation `open_link`). P1 writes
+no durable audit row (INV-007 covers P3/P4), like the other P1 tools.
+Rejected: a new `quick` path value (needs a migration and changes the triage
+contract), arbitrary URL opening, and driving the page with Playwright.
+
+## ADR-221 — LEVI verifies a quick command deterministically
+
+Status: Accepted (PHX-130)
+Date: 2026-10-23
+Ticket: PHX-130
+
+Decision: a quick command's answer is reported only when its one call was
+ALLOWED, attempted and returned `success` (`QuickCallRecord.verified`). No
+LEVI model is consulted: there is no generated text to check, and the answer
+is a fixed template naming the user's own query. A launch error fails the
+mission `tool_failed` (INV-008, INV-021); no retry.
+
+## ADR-222 — Warm the chat model at startup and keep it loaded
+
+Status: Accepted (PHX-130 owner goal: fast chat answers)
+Date: 2026-10-23
+Ticket: PHX-130
+
+Decision: when the providers include Ollama, the backend starts a background
+task after the mission service starts: if Ollama is healthy, it runs one
+1-token generation on the first registered triage model (`qwen3.5:4b`, which
+also serves PHOENIX's DIRECT answer) on the thinking-off provider. It never
+blocks startup or a mission, and any failure is ignored (the first mission
+loads the model as before). Both Ollama providers send `keep_alive: "30m"`
+(new optional `OllamaProvider(keep_alive=...)`; unset sends nothing, as
+before), so the model stays loaded between missions instead of Ollama's 5
+minute default. INV-023: the warm-up is one tiny generation, and Ollama runs
+requests for one loaded model in order.
+
+## ADR-225 — A deterministic pre-triage rule sends clearly simple chat DIRECT
+
+Ticket: PHX-131
+
+Decision: before the triage model, `rule_decides_direct` (phoenix/agents/
+triage.py) decides DIRECT with no generation for a clearly simple request;
+everything else goes to the unchanged model triage. It only ever chooses
+DIRECT, grants nothing (INV-003) and DIRECT runs with all its checks
+(INV-001). Saves one 4B generation (~2 s) per simple chat. No prompt text
+changes.
+
+## ADR-226 — The rule is conservative by construction
+
+Ticket: PHX-131
+
+Decision: DIRECT only if all hold: at most 25 words and 200 characters;
+plain prose characters only (no `/ \ { } < > @ # _` or newline); no dotted
+name (`.` followed by a non-space: files, URLs, versions); no numbered item
+or "after that"; at most one `?`; and no blocked word (files, workspace,
+upload, memory, web/research/search, browser/window/desktop, documents,
+create/save/read/open/write/edit, click/type/run/command, plan/compare/
+summarize/steps, time-bound words, my/our, then/next/finally, ...). On
+routing-v1 it decides 19 of 60 cases, all labelled `direct`; a unit test
+asserts it never decides a `complex` case.
+
+## ADR-227 — `triage_outcome` gains `rule`
+
+Ticket: PHX-131
+
+Decision: `TriageOutcome.RULE = "rule"` in the trace, agent events, mission
+summary/detail and desktop ("simple request"). Migration `0010_triage_rule`
+widens `ck_missions_triage_outcome` and adds `ck_missions_triage_rule`
+(`rule` implies `direct`); MissionTrace validates the same. Downgrade maps
+`rule` to `decided`. Run-again reuses `rule` like any other decision.
+
+
+## ADR-230 — DIRECT answers stream through the provider's own stream
+
+Status: Accepted (PHX-132 owner goal: answers appear word by word)
+Date: 2026-10-24
+Ticket: PHX-132
+
+Decision: `phoenix/agents/answer_stream.py` adds `StreamingProvider`, a
+`ModelProvider` wrapper whose `generate` consumes the wrapped provider's
+`stream` (Ollama `stream: true`, which already existed), hands each text delta
+to a callback (split at 2048 characters) and returns the assembled
+`GenerationResponse` (text joined; finish reason, usage and metrics from the
+final chunk). The unchanged responder (`_generate`) then applies its identity,
+record, truncation, encoding and size checks, so the final answer and the
+mission result equal the non-streaming ones. `responders.py` and `ollama.py`
+are unchanged; every other provider use stays non-streaming.
+
+## ADR-231 — Only PHOENIX's DIRECT reply streams, only its first attempt
+
+Status: Accepted
+Date: 2026-10-24
+Ticket: PHX-132
+
+Decision: `PhoenixRuntime(partial_answers=...)` (optional; the backend passes
+one `PartialAnswers`) streams the DIRECT reply. Planned/COMPLEX missions,
+tool output, LEVI and KAIDO's reply are untouched (KAIDO deferred: it has its
+own generation helper). A MAHORAGA retry of the DIRECT reply does not stream,
+so deltas never mix attempts; the stored answer always comes from the final
+result. `PartialAnswers` keeps the text so far of at most 8 missions in memory
+for the voice responder; it is never persisted.
+
+## ADR-232 — Answer deltas reuse `agent.started`; the one text field
+
+Status: Accepted (owner: answer text is shown to the user anyway)
+Date: 2026-10-24
+Ticket: PHX-132
+
+Decision: no new event type (the vocabulary stays 32). A delta is
+`agent.started` from agent `phoenix`, correlation = the mission ID, no task
+ID, with exactly `mission_id` (that same UUID) and `answer_delta` (1-2048
+characters of UTF-8 text). This narrows ADR-087: it is the only text an event
+may carry, and only PHOENIX's DIRECT answer; prompts, tool output, paths and
+secrets still cannot pass. `check_event` refuses any other shape;
+`MetricsCollector` counts but never logs a delta (`is_answer_delta`), so no
+answer text reaches `/metrics` logs or the Python log. Events flow over the
+existing `WS /events` bridge and the Rust proxy unchanged (no new route).
+
+## ADR-233 — Voice speaks the first sentence early
+
+Status: Accepted
+Date: 2026-10-24
+Ticket: PHX-132
+
+Decision: `VoiceResponder.respond_with_preview(request, preview)` (default:
+`respond`) lets the voice responder call `preview(first_sentence)` once.
+`MissionVoiceResponder` polls `PartialAnswers` while the mission runs and
+passes `first_spoken_sentence` (the start of `speakable_text`, none in code
+or links). The manager synthesizes and plays it as an ordinary playback
+(`voice.speaking`, barge-in and sleep work as before), returns to THINKING,
+and after the draft speaks only the rest (the full text if the start does not
+match, e.g. after a retry). A barge-in during the preview ends the turn as
+INTERRUPTED at once; a preview synthesis or playback failure only skips the
+preview.
+
+## ADR-234 — Desktop shows the live answer until the stored one arrives
+
+Status: Accepted
+Date: 2026-10-24
+Ticket: PHX-132
+
+Decision: `core.ts` appends deltas of the active mission to an in-memory
+live answer shown as an assistant message `[Answering…]`; deltas are never
+traces, metrics or logs. The stored answer (REST) replaces it; a settled
+mission, a new send or any stream reconnect drops it.
+
+## ADR-240 — Planner tier flag; 9B stays the default
+
+Status: Accepted (PHX-134)
+Date: 2026-10-23
+Ticket: PHX-134
+
+Decision: `PHOENIX_PLANNER_TIER` (`9b` default, or `4b`) sets the first
+candidate of the `strategist` (AIZEN's plan) and `assignment` roles in
+`default_tier_table`: `9b` keeps T2→T1→T0, `4b` uses T1→T0. LEVI's verifier,
+PHOENIX, triage, the coder and KAIDO are unchanged. Live evidence (2026-10-23,
+`phoenix_mission_smoke.py` ×3 each way, alternated, GPU confirmed): 9B 3/3
+completed, median 162.1 s; 4B 2/3 completed (one `verification_failed`),
+median 91.8 s. Rule: 4B becomes the default only if success is not lower and
+median latency improves ≥25%; success was lower, so 9B stays the default and
+the flag stays for opt-in. Rejected: switching LEVI to 4B (not measured).
+
+## ADR-241 — An unknown planner tier is refused
+
+Status: Accepted (PHX-134)
+Date: 2026-10-23
+Ticket: PHX-134
+
+Decision: unset or blank means the default; any value other than `9b`/`4b`
+(case and whitespace ignored) raises `ValueError` when the table is built,
+instead of guessing a model.
+
+## ADR-235 — More quick-command links: four more exact hosts
+
+Status: Accepted (PHX-133 owner request 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-133
+
+Decision: `desktop.open_link`'s allowlist becomes exactly the quick-command
+template hosts: `www.google.com`, `www.youtube.com`, plus `en.wikipedia.org`,
+`github.com`, `mail.google.com` and `news.google.com`. New commands: "open
+wikipedia", "search wikipedia for X" (`/wiki/Special:Search?search=`), "open
+github", "open gmail", "open (google) maps" (`www.google.com/maps/`), "search
+maps for X" and "directions to X" (`www.google.com/maps/search/X`), "open
+google news". Same strict full-match router, query cap, unsafe-query refusal
+and `quote_plus` encoding as ADR-220; the tool still re-checks every URL. The
+link scope's resource names the allowlist, so it changes: a PHX-130 "Always
+allow" (two hosts) no longer matches and the user is asked once more. A grant
+never silently widens to hosts the user did not approve.
+
+## ADR-236 — `desktop.open_app` launches a fixed app list, as P1
+
+Status: Accepted (PHX-133)
+Date: 2026-10-23
+Ticket: PHX-133
+
+Decision: new ToolRegistry tool `desktop.open_app` (P1, PermissionEngine-
+decided). Its input is a closed `AppName` (notepad, calculator, explorer),
+never a path or argument. Each name maps to one fixed file under the Windows
+directory, read from `GetSystemWindowsDirectoryW` (not PATH or
+`%SystemRoot%`) once when the tool is built, kept only if the file exists:
+`System32\notepad.exe`, `System32\calc.exe`, `explorer.exe`. Launch is
+`os.startfile(path)` (ShellExecute "open", no shell, no arguments). Commands:
+"open notepad", "open calculator", "open file explorer" / "open files".
+Paint is left out: on Windows 11 it is a Store app with no fixed system path.
+
+P1, not P2: the effect equals the P1 link launch (a window appears; PHOENIX
+does not drive, read or close it); nothing is read, written or sent, and with
+no arguments the app cannot be pointed at a file or command; a fixed absolute
+path cannot be hijacked by PATH. P2 would also lose the desktop's "Always
+allow", which PHX-129 offers for P1 only, and the owner wants one approval.
+Its own single fixed scope (actor `phoenix`, action `open_app`, resource
+`allowlist:calculator,explorer,notepad`, fixed reason): one "Always allow"
+covers the app list and only it; the link grant does not cover apps and vice
+versa. The approve route treats it as unbound (no workspace path), like links.
+An app missing on the machine fails `tool_failed` after the permission check,
+with nothing launched.
+
+## ADR-237 — Time and date answered from the local clock, with no tool
+
+Status: Accepted (PHX-133)
+Date: 2026-10-23
+Ticket: PHX-133
+
+Decision: "what time is it", "what's the (current) time", "what's the date",
+"what's today's date", "what day is it" are answered by the router from the
+local clock with fixed English wording ("It's 3:07 PM.", "Today is Saturday,
+24 October 2026."). No tool, no permission, no model; the mission completes at
+once. The trace records `quick_answers` (the kind only; new optional
+`MissionTrace` field) and the detail API labels it "quick". Anything longer
+("what time is it in London") takes the normal pipeline.
+
+## ADR-238 — LEVI verification of the new quick commands
+
+Status: Accepted (PHX-133)
+Date: 2026-10-23
+Ticket: PHX-133
+
+Decision: ADR-221 applies to `desktop.open_app` unchanged: the answer is
+reported only when the call was ALLOWED, attempted and succeeded. A clock
+answer has no action to verify and no generated text; it is computed, not
+claimed.
+
+## ADR-239 — Quick-command event vocabulary and pins
+
+Status: Accepted (PHX-133)
+Date: 2026-10-23
+Ticket: PHX-133
+
+Decision: the PHX-103 event allowlist gains tool `desktop.open_app` and
+operation `open_app`. The intentionally changed protected sources (event
+allowlist, MissionTrace, mission service, missions and permissions routes,
+backend wiring; listed in the ticket) move from the PHX-130 pin to a PHX-133 pin at the
+implementation commit; `ollama.py` stays at PHX-130. New modules
+(`open_app.py`) are not on origin/main and need no guard exclusion.
+
+## ADR-245 — Spoken approval of one pending request (owner override of ADR-108)
+
+Status: Accepted (PHX-135; owner decision 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-135
+
+Decision: ADR-108's "voice never approves" is overridden by the owner. When a
+voice-started mission settles `waiting_permission` with exactly one pending
+request, PHOENIX says "I need permission to <action>. Say granted or denied."
+and binds that request (request ID and mission ID). The 15 s window opens when
+the question has finished playing (the pipeline's next `listening` state);
+PHOENIX plays nothing while it waits. The whole reply, lower-cased with
+punctuation and a leading wake phrase removed, must be exactly "granted",
+"approve" or "yes granted" (approve) or "denied", "deny" or "no" (deny). The
+first non-empty reply ends the binding either way; a late reply, a reply
+before the window opens, or a request no longer pending (decided in the
+desktop meanwhile) decides nothing. The decision goes through
+`MissionService.approve(request_id, SESSION)` / `deny`, the desktop's path:
+PermissionEngine, grant storage, the stored request scope, P4 one-time
+approval (ADR-151) and the linked re-run are unchanged. All levels P1–P4
+apply (P1/P2/P3 "session", P4 one-time); P5 never reaches
+`waiting_permission`.
+
+Risk accepted by the owner: speech is not authenticated, so anyone within
+microphone range during the 15 s window can approve the one request asked
+about, and a mis-transcription could match a short word ("no"). Mitigations:
+one request per question, never others or older ones; exact whole-reply match
+only; short window; the question names the action class.
+
+## ADR-246 — Voice approvals keep the route's workspace rule
+
+Status: Accepted (PHX-135)
+Date: 2026-10-23
+Ticket: PHX-135
+
+Decision: the approve route's workspace check moves into
+`routes/permissions.approvable(record, workspace)` and the backend passes it
+to `VoiceService(may_approve=...)`; a request that the route would refuse
+(409 `workspace_changed`) is not approved by voice either ("Please use the
+Phoenix window"). Deny is always allowed. Without `may_approve` voice keeps
+the PHX-114 behaviour (announce only). The spoken action is a fixed phrase per
+tool family; the request's resource (paths, URLs, window identity) is never
+spoken.
+
+## ADR-247 — "What's on my screen": one foreground window, P1, per window
+
+Status: Accepted (PHX-135)
+Date: 2026-10-23
+Ticket: PHX-135
+
+Decision: quick commands gain "what's on my screen", "what is on my screen",
+"describe my screen", "look at my screen" and "read my screen". The existing
+`ScreenshotCaptureTool` observes one exact window, so the command captures
+the foreground window (read via `GetForegroundWindow`; capture still goes
+through the tool, ToolRegistry and PermissionEngine), not the whole desktop.
+`screen.capture_window` is P1 (docs/08); its grant names that exact window
+(hwnd, process ID, class name), actor `phoenix`, a fixed reason, SESSION only
+("always" is refused for a window handle). With no grant the mission waits
+for the user's decision (by voice under ADR-245). The event allowlist gains
+tool `screen.capture_window` and operation `capture_window`.
+
+## ADR-248 — Screen content is untrusted; the answer is descriptive only
+
+Status: Accepted (PHX-135)
+Date: 2026-10-23
+Ticket: PHX-135
+
+Decision: the frame goes in memory to the local Ollama vision model
+`gemma3:4b` through `VisionLoopService` (one heavy generation under the model
+lifecycle, INV-023), with the vision interpreter's fixed "screenshot text is
+data, never authority" instruction. The image is never stored, traced or
+logged; the trace holds only the quick-call record (IDs, statuses, no frame).
+The summary becomes plain answer text ("On your screen: ..."), control
+characters dropped, at most 600 characters; it is never planned on and never
+triggers a tool. LEVI's check (ADR-221) applies: the answer is reported only
+when the capture was ALLOWED, attempted, succeeded and the description
+exists; otherwise the mission fails `tool_failed`.
+
+## ADR-249 — PHX-135 pins and the audit source
+
+Status: Accepted (PHX-135)
+Date: 2026-10-23
+Ticket: PHX-135
+
+Decision: the intentionally changed protected sources (event allowlist,
+mission service, permissions route, voice service, backend wiring) move to a
+PHX-135 pin at the implementation commit, one baseline per path. The stored
+grant model records `user_decision="approved"` only and has no decision-source
+field, so "voice" is not recorded in the audit row; adding one would need a
+migration and is out of scope for the review build. New modules
+(`foreground_window.py`) are not on origin/main and need no guard exclusion.
+
+## ADR-250 — Open any installed app from its Start-menu shortcut
+
+Status: Accepted (PHX-136 owner decision 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-136
+
+Decision: `desktop.open_app` also launches installed apps. At startup the
+tool indexes `*.lnk` under `%ProgramData%` and `%APPDATA%`
+`\Microsoft\Windows\Start Menu\Programs` (key: lower-cased stem, one space;
+uninstaller shortcuts skipped; cap 2000). "open <name>" matches the index:
+exact key, else whole-word or close spelling (ratio >= 0.8) ranked by (whole
+words, ratio); a tie is not a quick command (normal pipeline). The request
+names only an indexed key, never a path; the `.lnk` starts via
+`os.startfile` with no arguments. Notepad, Calculator and File Explorer keep
+their fixed entries (ADR-236).
+
+## ADR-251 — Open any public website's home page
+
+Status: Accepted (PHX-136 owner decision 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-136
+
+Decision: "open <site>" opens `https://<domain>/` only, for a bare domain
+("reddit.com", "amazon.in") or a fixed known name (amazon, reddit, netflix,
+chatgpt, instagram, facebook, twitter/x, linkedin, "spotify web").
+`site_root_url` refuses non-https, any path, query, fragment, user info or
+port, upper case, IP literals, `localhost` and private/reserved suffixes
+(local, internal, lan, corp, test, ...). The router accepts a TLD only from a
+fixed generic set or two letters that are not common file extensions, so
+"open notes.md" is not a site. Order: a text with a TLD is a site; otherwise
+an installed shortcut beats a known name.
+
+## ADR-252 — Owner-approved wide quick-command scopes
+
+Status: Accepted (PHX-136 owner decision 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-136
+
+Decision: each quick tool gets one more P1 scope, beside its fixed one:
+`desktop.open_link` / `open_link` / `sites:public-https-home-pages` and
+`desktop.open_app` / `open_app` / `start-menu:installed-app-shortcuts`. One
+"Always allow" per scope covers every website or every indexed app. The tools
+bind scope to validation: a website opens only under the site resource (and
+is never resolved), a shortcut only under the shortcut resource, a fixed app
+never under it; allowlisted links still need the fixed link scope. Earlier
+PHX-130/133 grants stay valid for exactly their items.
+Why widened: the owner asked for "open anything" (2026-10-23) and accepted
+one approval per kind. Risk: an "always" site grant opens any public home
+page a command names (a phishing domain typed or misheard); an "always"
+shortcut grant starts any indexed app, including shells or admin tools that
+have Start-menu shortcuts. Mitigations: home pages only, no arguments, no
+paths from text, names from the local index only, P1 approval first, grants
+revocable in Settings.
+
+## ADR-253 — Play on YouTube without an API key
+
+Status: Accepted (PHX-136 owner request 2026-10-23)
+Date: 2026-10-23
+Ticket: PHX-136
+
+Decision: "play X on youtube", "play X" (X mentions song, music, video or
+youtube) and "play (some/random) music" fetch
+`https://www.youtube.com/results?search_query=<X>` with httpx (5 s, desktop
+User-Agent, no redirects) only after PermissionEngine allows the link scope,
+take the first `"videoId":"<11 chars>"` (validated `[A-Za-z0-9_-]{11}`; music
+uses a random fixed query and a random pick of the top 5) and open
+`https://www.youtube.com/watch?v=<id>`, re-checked against the link
+allowlist. Any fetch, parse or check failure opens the results page instead.
+The host is fixed, so no general page-fetch helper is needed. "search youtube
+for X" still opens results.
+
+## ADR-254 — PHX-136 pins
+
+Status: Accepted (PHX-136)
+Date: 2026-10-23
+Ticket: PHX-136
+
+Decision: `phoenix/api/missions.py` (matches through the runner's shortcut
+index) leaves the PHX-133 pin for a PHX-136 pin at the implementation commit.
+`quick_commands.py`, `open_link.py` and `open_app.py` are not on origin/main
+and need no pin.
+
+## ADR-255 — Store apps in the app index
+
+Status: Accepted (PHX-137)
+Date: 2026-10-23
+Ticket: PHX-137
+
+Decision: `desktop.open_app`'s shortcut index also holds apps listed by
+`Get-StartApps`, read once at startup by one fixed command (System32
+`powershell.exe -NoProfile -NonInteractive -Command "Get-StartApps |
+ConvertTo-Json -Compress"`, no user text, 10 s timeout, any failure = no Store
+apps). Only AppIDs matching the strict package-family pattern
+(`<name>_<13 chars>!<app>`) are kept, launched as
+`os.startfile("shell:AppsFolder\<AppID>")` with no arguments. A `.lnk` keeps a
+name it already holds (Win32 apps stay on their shortcut). Same P1 shortcut
+scope; no new permission.
+
+## ADR-256 — App first, then known website
+
+Status: Accepted (PHX-137)
+Date: 2026-10-23
+Ticket: PHX-137
+
+Decision: "open spotify / whatsapp / youtube music / discord" opens the
+installed app when one matches, else the known site's home page under the
+existing website scope (open.spotify.com, web.whatsapp.com, music.youtube.com,
+discord.com). Discord opens `https://discord.com/`, not `/app`: the website
+scope allows home pages only, and widening it would be a new permission.
+
+## ADR-257 — PHX-137 pins
+
+Status: Accepted (PHX-137)
+Date: 2026-10-23
+Ticket: PHX-137
+
+Decision: `open_app.py` and `quick_commands.py` are not on origin/main and need
+no pin; no pinned file changes.
+
+## ADR-258 — YouTube captions tool and summary commands
+
+Status: Accepted (PHX-138 owner request 2026-10-24)
+Date: 2026-10-24
+Ticket: PHX-138
+
+Decision: "summarize/summarise (this) (youtube) (video) <URL>", "what is <URL>
+about" and "summarize the youtube video about/on X" are quick commands. The URL
+must be https/http on youtube.com, www/m.youtube.com (`/watch?v=`, `/shorts/`)
+or youtu.be, and the video ID must match `[A-Za-z0-9_-]{11}`; a topic X is
+searched with the PHX-136 `find_youtube_video` helper (first result) only
+after ALLOWED. New tool `web.youtube_transcript` (P1, network read of
+youtube.com) under one fixed scope `read_transcript` /
+`youtube:public-video-captions`, so one "Always allow" covers every video;
+ToolRegistry + PermissionEngine decide every call. yt-dlp (library) reads
+subtitle or auto-caption metadata only: `skip_download`, no cookies, no
+login, 15 s socket timeout, English preferred, json3 then vtt; the caption
+URL must be on youtube.com. Timing and tags are stripped; text capped at
+12,000 chars. No English captions: "This video has no captions I can read."
+
+## ADR-259 — Guarded summary on the DIRECT model
+
+Status: Accepted (PHX-138)
+Date: 2026-10-24
+Ticket: PHX-138
+
+Decision: one generation on the DIRECT model (`qwen3.5:4b`, the think-off
+structured provider) summarises the transcript in 4–6 sentences. The
+transcript enters the prompt only through the existing PromptInjectionGuard
+boundary (`_guarded`, origin `web_page`), as for web research. The summary is
+printable, bounded answer text only: it is never planned on or executed and
+cannot trigger a tool. A model failure leaves the call unverified
+(`tool_failed`).
+
+## ADR-260 — PHX-138 dependency and pins
+
+Status: Accepted (PHX-138; owner approved yt-dlp 2026-10-24)
+Date: 2026-10-24
+Ticket: PHX-138
+
+Decision: add `yt-dlp>=2026.10.21,<2027` (Unlicense), locked 2026.10.21, one
+pure-Python wheel with no required dependencies; imported lazily after
+ALLOWED. The dependency gates (`test_events_ws.py`, `test_voice_pipeline.py`)
+set it aside. `phoenix/api/server.py` (tool wiring) and
+`phoenix/agents/mission_events.py` (event allowlist) leave the PHX-135 pin
+for a PHX-138 pin at the implementation commit. `quick_commands.py` and the
+new tool are not on origin/main and need no pin.
+
+## ADR-261 — PHX-139 Ollama auto-start
+
+Status: Accepted (PHX-139)
+Date: 2026-10-24
+Ticket: PHX-139
+
+Decision: at backend startup, when the Ollama provider does not answer, the
+configured base URL is the local default `http://127.0.0.1:11434`, and
+`%LOCALAPPDATA%\Programs\Ollama\ollama app.exe` exists, PHOENIX opens that one
+fixed path once with `os.startfile` (no arguments; never PATH or user input).
+Windows only; failures are ignored; `PHOENIX_AUTOSTART_OLLAMA=0` turns it off.
+The PHX-108 registrar loop registers the models once Ollama is healthy, and
+the PHX-130 warm-up retries for about a minute after a launch.
+
+## ADR-262 — PHX-139 faster video summary
+
+Status: Accepted (PHX-139)
+Date: 2026-10-24
+Ticket: PHX-139
+
+Decision: the transcript sent to the model is capped at 4,000 characters (the
+first 2,500 and the last 1,500, joined by "[…]"); the reply is capped at 220
+tokens; the summary streams through the PHX-132 answer delta (`agent.started`
+with `mission_id` + `answer_delta`) and `PartialAnswers`, display text only,
+when the summarizer is wired with the partials; captions are cached per video
+ID in memory for the session (at most 32 videos).
+
+## ADR-263 — PHX-139 pins
+
+Status: Accepted (PHX-139)
+Date: 2026-10-24
+Ticket: PHX-139
+
+Decision: `phoenix/api/server.py` (auto-start, warm-up retry, streaming
+wiring) leaves the PHX-138 pin for a PHX-139 pin at the implementation
+commit. `quick_commands.py` and `youtube_transcript.py` are not on origin/main
+and need no pin.
+
+## ADR-269 — DIRECT answers on llama3.2
+
+Status: Accepted (PHX-141)
+Date: 2026-10-23
+Ticket: PHX-141
+
+Decision: the `phoenix` (DIRECT) role tries `llama3.2:latest` first, then
+`qwen3.5:4b`, then `qwen3.5:2b`. Triage and every other role are unchanged.
+Evidence (RTX 3050 6 GB, one run each, think off, FYP tasks-v1 config (1) and
+routing-v1): qwen3.5:4b 93% / 578 ms median / 38 tok/s, routing 83%;
+llama3.2 93% / 212 ms / 67 tok/s, routing 75%; qwen3:4b-instruct 86% /
+257 ms, routing 75%; phi4-mini 71% / 186 ms, routing 58%; gemma3:4b 43% /
+344 ms, routing 80%. Rule: switch only if accuracy >= baseline and median
+latency <= baseline (or +5 pts at <= 1.3x latency). llama3.2 passes for
+DIRECT; no candidate passes for triage (routing accuracy below 83%), so
+triage stays on qwen3.5:4b. Reverse by dropping `direct` from the
+`phoenix` row in `default_tier_table`.
+
+## ADR-270 — PHX-141 pins
+
+Status: Accepted (PHX-141)
+Date: 2026-10-23
+Ticket: PHX-141
+
+Decision: `phoenix/agents/runtime.py` leaves the review-merge pin for a
+PHX-141 pin at the implementation commit (two-commit pattern).
+
+## ADR-271 — DIRECT stays on qwen3.5:4b (PHX-141 switch reverted)
+
+Status: Accepted, 2026-10-23
+Ticket: PHX-141
+
+Live end-to-end check after ADR-270: with triage on qwen3.5:4b and DIRECT on
+llama3.2 the two models do not fit together in 6 GB VRAM; a request that needs
+the triage model swapped models and took 13.1 s (about 4 s when both roles use
+qwen3.5:4b). Rule-triaged questions gained little (0.3-4.9 s vs 0.5-1.6 s).
+Decision: revert ADR-270; DIRECT and triage share qwen3.5:4b so one model stays
+loaded. llama3.2 remains an option only together with a triage switch.
+
+## ADR-271 — DIRECT stays on qwen3.5:4b (PHX-141 switch reverted)
+
+Status: Accepted, 2026-10-23
+Ticket: PHX-141
+
+Live end-to-end check after ADR-270: with triage on qwen3.5:4b and DIRECT on
+llama3.2 the two models do not fit together in 6 GB VRAM; a request that needs
+the triage model swapped models and took 13.1 s (about 4 s when both roles use
+qwen3.5:4b). Rule-triaged questions gained little (0.3-4.9 s vs 0.5-1.6 s).
+Decision: revert ADR-270; DIRECT and triage share qwen3.5:4b so one model stays
+loaded. llama3.2 remains an option only together with a triage switch.
+
+## ADR-264 — Conversation context for DIRECT and KAIDO replies
+
+Status: Accepted (PHX-140; owner approved feature 2026-10-23)
+Date: 2026-10-24
+Ticket: PHX-140
+
+Decision: a DIRECT or KAIDO reply sees the last 6 turns of its own
+conversation (user and PHOENIX message text before the current request,
+capped at 3,000 chars, newest kept) so follow-ups work. The history enters the
+prompt only as one guarded item (`_guarded`, origin `model_output`, field
+`recent_turns`, lines labelled `User:`/`PHOENIX:`); no new prompt sentence.
+Triage, planning and the trace keep the user's own text. KAIDO uses it only
+when it fits its budget. Any failure leaves it out. Voice already reuses one
+conversation per voice run.
+
+## ADR-265 — Saved memories in chat
+
+Status: Accepted (PHX-140; owner approved feature 2026-10-23)
+Date: 2026-10-24
+Ticket: PHX-140
+
+Decision: for DIRECT/KAIDO replies only, the top 3 user memories from the
+PHX-110 KnowledgeService search (P0 internal retrieval, the store's similarity
+floor, nothing when nothing is indexed) are added as guarded items (origin
+`external_text`, field `saved_memory`), retrieved only when the reply runs.
+
+## ADR-266 — Research rule for current/online questions
+
+Status: Accepted (PHX-140; owner approved feature 2026-10-23)
+Date: 2026-10-24
+Ticket: PHX-140
+
+Decision: `rule_wants_research` (deterministic, conservative: a short request
+with news, headlines, latest, weather, forecast, price, score, today, tonight,
+"who won" or a year from the current one on, and no local word such as my,
+file, open, play, time, date) sends the request COMPLEX, where the research
+planner can search, only while web research is enabled. Every search still
+needs the user's P1 permission. Limitation: recorded as triage `decided`,
+because migration 0010 keeps `rule` DIRECT-only.
+
+## ADR-267 — Web research on by default
+
+Status: Accepted (PHX-140; owner approved feature 2026-10-23)
+Date: 2026-10-24
+Ticket: PHX-140
+
+Decision: `web_research_enabled` defaults to true;
+`PHOENIX_WEB_RESEARCH_ENABLED=0` opts out for a launch. `tests/conftest.py`
+opts tests out unless they set it themselves.
+
+## ADR-268 — Follow-up quick commands and PHX-140 pins
+
+Status: Accepted (PHX-140; owner approved feature 2026-10-23)
+Date: 2026-10-24
+Ticket: PHX-140
+
+Decision: "play another one"/"next song" run play_music again; "summarise
+that/this video" summarises the last video a play opened in the same
+conversation (memory only, at most 256 conversations), else the normal
+pipeline. runtime.py, triage.py, api/missions.py, api/server.py and
+core/config.py leave their earlier pins for a PHX-140 pin at the
+implementation commit; quick_commands.py and chat_context.py are not on
+origin/main and need no pin.
+
+## ADR-264 amendment — chat history as plain context (owner, 2026-10-23)
+
+Live: with the prompt-injection wrapper around the earlier turns, the 4B model
+refused or hedged on follow-ups ("I do not have access to ..."). Owner chose
+plain context: the last turns (the user's own messages and PHOENIX's own
+answers) and user-written saved memories go in as ordinary text before the
+current message. Web, file, screen and transcript content keep their guarded
+paths. Live after the change: four follow-ups answered in 0.9-1.9 s with the
+conversation kept; facts still come from the small model and can be wrong.
+
+[OK] Command outcome recorded

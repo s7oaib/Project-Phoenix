@@ -969,6 +969,50 @@ def test_microphone_falls_back_to_the_device_rate_and_resamples(
     run(scenario())
 
 
+def test_busy_event_loop_is_not_mistaken_for_a_dead_microphone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Live 2026-10-23: the loop was busy for over two seconds while the
+    # device kept calling back; the read timed out and voice went
+    # microphone_unavailable although audio was flowing.
+    device = FakeSoundDevice()
+    monkeypatch.setitem(sys.modules, "sounddevice", device)
+    monkeypatch.setattr(sound, "_STALL_SECONDS", 0.2)
+
+    async def scenario() -> None:
+        mic = sound.SoundDeviceMicrophone()
+        await mic.start()
+        callback = device.inputs[0]["callback"]
+        reader = asyncio.ensure_future(mic.read())
+        await asyncio.sleep(0)
+        # The audio thread delivers while the loop is blocked past the stall
+        # time; the timer and the delivery then land in the same loop turn.
+        threading.Thread(target=callback, args=(tone(1), 480, None, None)).start()
+        time.sleep(0.35)
+        frame = await asyncio.wait_for(reader, 2)
+        assert len(frame.pcm_bytes_for_provider()) == 960
+        await mic.aclose()
+
+    run(scenario())
+
+
+def test_microphone_that_stops_calling_back_still_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    device = FakeSoundDevice()
+    monkeypatch.setitem(sys.modules, "sounddevice", device)
+    monkeypatch.setattr(sound, "_STALL_SECONDS", 0.05)
+
+    async def scenario() -> None:
+        mic = sound.SoundDeviceMicrophone()
+        await mic.start()
+        with pytest.raises(MicrophoneError):
+            await mic.read()
+        await mic.aclose()
+
+    run(scenario())
+
+
 def test_microphone_that_cannot_open_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1719,6 +1763,7 @@ REQUIREMENTS = [
     "piper-tts>=1.8,<2",
     "sounddevice>=0.5.6,<0.6",
 ]
+YT_DLP = "yt-dlp>=2026.10.21,<2027"
 LOCKED = {
     "av": "18.1.0",
     "cffi": "2.1.1",
@@ -1754,6 +1799,7 @@ def test_exact_voice_dependency_delta() -> None:
     for requirement in REQUIREMENTS:
         assert project["project"]["dependencies"].count(requirement) == 1
         project["project"]["dependencies"].remove(requirement)
+    project["project"]["dependencies"].remove(YT_DLP)  # PHX-138 (ADR-258)
     assert project["tool"].pop("uv") == {
         "constraint-dependencies": ["huggingface-hub<1"]
     }
@@ -1762,6 +1808,7 @@ def test_exact_voice_dependency_delta() -> None:
     new = tomllib.loads((ROOT / "uv.lock").read_text())
     old_records = {p["name"]: p for p in old.pop("package")}
     new_records = {p["name"]: p for p in new.pop("package")}
+    del new_records["yt-dlp"]  # PHX-138: the events_ws dependency gate owns it
     assert new.pop("manifest") == {
         "constraints": [{"name": "huggingface-hub", "specifier": "<1"}]
     }
@@ -1781,7 +1828,7 @@ def test_exact_voice_dependency_delta() -> None:
         except PackageNotFoundError:
             # hub 0.36 marks hf-xet for "amd64", not Windows' "AMD64".
             assert name == "hf-xet"
-    names = {r.split(">")[0] for r in REQUIREMENTS}
+    names = {r.split(">")[0] for r in (*REQUIREMENTS, YT_DLP)}
     for name, record in old_records.items():
         after = copy.deepcopy(new_records[name])
         if name == "phoenix":
