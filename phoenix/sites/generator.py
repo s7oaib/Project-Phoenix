@@ -209,6 +209,14 @@ async def edit_spec(
 ) -> tuple[SiteSpec | None, str]:
     """(new spec, message). New spec is None when nothing changed (message says why)."""
     problem = ""
+    try:  # deterministic rules first: exact and instant (the 4B model misplaces moves)
+        ops = rule_edit(spec, instruction, section_id)
+        if ops:
+            return apply_ops(spec, ops, copy_image), "Done."
+        if ops == []:
+            return None, "Nothing to change."
+    except SiteError as exc:
+        problem = str(exc)  # a rule matched but cannot apply: let the model try
     if model is not None:
         user = json.dumps(
             {
@@ -223,14 +231,6 @@ async def edit_spec(
                 return apply_ops(spec, ops, copy_image), "Done."
         except SiteError as exc:
             problem = str(exc)
-        except Exception:  # model down, timeout or bad JSON: rules take over
-            problem = ""
-    try:
-        ops = rule_edit(spec, instruction, section_id)
-        if ops is None:
-            return None, problem or "I could not turn that into an edit."
-        if not ops:
-            return None, "Nothing to change."
-        return apply_ops(spec, ops, copy_image), "Done."
-    except SiteError as exc:
-        return None, str(exc)
+        except Exception:  # model down, timeout or bad JSON
+            pass
+    return None, problem or "I could not turn that into an edit."
