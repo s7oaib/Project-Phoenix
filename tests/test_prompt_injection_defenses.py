@@ -2054,8 +2054,7 @@ PHX_REVIEW_PATHS: tuple[str, ...] = ()  # runtime.py moved to PHX-140
 PHX_135_COMMIT = "1db015a76d95e2ed40430ce3b7117af5e50fca26"
 PHX_135_PATHS = (  # api/missions.py moved to the PHX-135/136 merge pin
     "phoenix/api/routes/permissions.py",
-    "phoenix/api/voice.py",
-)  # mission_events.py and server.py moved to the PHX-138 pin
+)  # voice.py moved to the expo voice pin; mission_events.py and server.py moved to the PHX-138 pin
 # api/missions.py carries both PHX-135 and PHX-136; pinned at the merge
 # resolution commit.
 PHX_135_136_COMMIT = "974c91422f1e5a0deefcb5d7ff877e9433eeb6ab"
@@ -2085,17 +2084,14 @@ PHX_139_PATHS: tuple[str, ...] = ()
 # server.py carries PHX-139 and PHX-140; pinned at the local merge resolution.
 PHX_139_140_COMMIT = "0588b6223af086f6aaed24a6be96fc51c326c9fb"
 PHX_139_140_PATHS = ("phoenix/api/server.py",)
-<<<<<<< HEAD
 # 2026-11-05 expo build, voice (ADR-315 to ADR-319): launcher.py starts the
 # model pre-warm; pinned at the local merge of that work.
 PHX_EXPO_VOICE_COMMIT = "476815b2965d29aa3520e58292458b117a2babd2"
-PHX_EXPO_VOICE_PATHS = ("phoenix/api/launcher.py",)
-=======
+PHX_EXPO_VOICE_PATHS = ("phoenix/api/launcher.py", "phoenix/api/voice.py")
 # Website designer (ADR-300 to ADR-304) registers the sites and command routers
 # in routes/__init__.py; it left the train block and is pinned at that commit.
 PHX_SITES_COMMIT = "74aef06ac357e1c7e0569763ebdb6fbd86814815"
 PHX_SITES_PATHS = ("phoenix/api/routes/__init__.py",)
->>>>>>> worktree-agent-a3c75c05d203d69a3
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -2155,11 +2151,8 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_139_PATHS
         and path not in PHX_140_PATHS
         and path not in PHX_139_140_PATHS
-<<<<<<< HEAD
         and path not in PHX_EXPO_VOICE_PATHS
-=======
         and path not in PHX_SITES_PATHS
->>>>>>> worktree-agent-a3c75c05d203d69a3
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2208,11 +2201,8 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_139_COMMIT, path) for path in PHX_139_PATHS]
     baselines += [(PHX_140_COMMIT, path) for path in PHX_140_PATHS]
     baselines += [(PHX_139_140_COMMIT, path) for path in PHX_139_140_PATHS]
-<<<<<<< HEAD
     baselines += [(PHX_EXPO_VOICE_COMMIT, path) for path in PHX_EXPO_VOICE_PATHS]
-=======
     baselines += [(PHX_SITES_COMMIT, path) for path in PHX_SITES_PATHS]
->>>>>>> worktree-agent-a3c75c05d203d69a3
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
