@@ -89,6 +89,16 @@ pub const ROUTES: &[(Method, &str, &[&str])] = &[
     (Method::Post, "/memory", &[]),
     (Method::Get, "/memory/search", &["q", "limit"]),
     (Method::Delete, "/memory/{id}", &[]),
+    // PHX UI (ADR-311): the site builder, the command bar and trust mode. A site id is a slug.
+    (Method::Get, "/sites", &[]),
+    (Method::Post, "/sites", &[]),
+    (Method::Get, "/sites/{slug}", &[]),
+    (Method::Post, "/sites/{slug}/edit", &[]),
+    (Method::Post, "/sites/{slug}/undo", &[]),
+    (Method::Post, "/sites/{slug}/redo", &[]),
+    (Method::Post, "/command", &[]),
+    (Method::Get, "/trust", &[]),
+    (Method::Post, "/trust", &[]),
 ];
 
 /// Closed failure codes returned to the webview.
@@ -127,6 +137,16 @@ fn is_uuid(segment: &str) -> bool {
         })
 }
 
+/// A site slug: 1..=64 lowercase ASCII letters, digits or `-`, not starting with `-`.
+fn is_slug(segment: &str) -> bool {
+    let bytes = segment.as_bytes();
+    (1..=64).contains(&bytes.len())
+        && bytes[0] != b'-'
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_digit() || b.is_ascii_lowercase() || *b == b'-')
+}
+
 fn route_matches(template: &str, path: &str) -> bool {
     let mut expected = template.split('/');
     let mut actual = path.split('/');
@@ -134,7 +154,8 @@ fn route_matches(template: &str, path: &str) -> bool {
         match (expected.next(), actual.next()) {
             (None, None) => return true,
             (Some("{id}"), Some(segment)) if is_uuid(segment) => {}
-            (Some(want), Some(got)) if want != "{id}" && want == got => {}
+            (Some("{slug}"), Some(segment)) if is_slug(segment) => {}
+            (Some(want), Some(got)) if want != "{id}" && want != "{slug}" && want == got => {}
             _ => return false,
         }
     }
@@ -474,7 +495,26 @@ mod tests {
             Some(json!({"content": "I prefer short answers"}))
         )
         .is_ok());
-        assert_eq!(ROUTES.len(), 31);
+        // PHX UI (ADR-311): sites, command and trust.
+        for (method, path) in [
+            ("GET", "/sites"),
+            ("GET", "/sites/my-bakery-2"),
+            ("POST", "/sites/my-bakery-2/edit"),
+            ("POST", "/sites/my-bakery-2/undo"),
+            ("POST", "/sites/my-bakery-2/redo"),
+            ("GET", "/trust"),
+        ] {
+            assert!(admit(method, path, None).is_ok(), "{method} {path}");
+        }
+        for (path, body) in [
+            ("/sites", json!({"prompt": "a bakery site"})),
+            ("/sites/my-bakery/edit", json!({"instruction": "x", "section_id": "s2"})),
+            ("/command", json!({"text": "hi", "active_site_id": "my-bakery"})),
+            ("/trust", json!({"enabled": false})),
+        ] {
+            assert!(admit("POST", path, Some(body)).is_ok(), "POST {path}");
+        }
+        assert_eq!(ROUTES.len(), 40);
     }
 
     #[test]
@@ -551,6 +591,20 @@ mod tests {
             ("GET", "/memory/search?q=".to_owned()),
             ("GET", "/memory/search?limit=a%20b".to_owned()),
             ("GET", "/memory?q=a".to_owned()),
+            // PHX UI: slugs are lowercase, bounded, and no other site route exists.
+            ("GET", "/sites/My-Site".to_owned()),
+            ("GET", "/sites/-x".to_owned()),
+            ("GET", "/sites/a_b".to_owned()),
+            ("GET", "/sites/..".to_owned()),
+            ("GET", "/sites/%2e%2e".to_owned()),
+            ("GET", "/sites/a/preview".to_owned()),
+            ("DELETE", "/sites/a".to_owned()),
+            ("PATCH", "/trust".to_owned()),
+            ("GET", "/command".to_owned()),
+            ("GET", "/trust?enabled=true".to_owned()),
+            ("GET", "/sites/a/edit".to_owned()),
+            ("POST", "/sites/a/undo/x".to_owned()),
+            ("GET", format!("/sites/{}", "a".repeat(65))),
             ("GET", "/health\r\nX: y".to_owned()),
             ("GET", "/héalth".to_owned()),
             ("GET", format!("/missions?offset={}", "1".repeat(MAX_PATH))),
