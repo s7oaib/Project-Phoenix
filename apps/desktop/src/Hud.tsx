@@ -93,8 +93,10 @@ export default function Hud(props: ComponentProps<typeof LegacyApp> = {}) {
   const simulated = api.kind === 'mock' && building ? { strategist: 'planning', build_engineer: 'building', verifier: 'checking' }[simId] : undefined;
   const roster = agentRoster.map((a) => {
     const live = agents.agents.find((s) => s.internalId === a.internalId);
-    const state = live?.state ?? (simulated && a.internalId === simId ? 'working' : 'idle');
-    return { ...a, state, task: live?.currentTask ?? (state === 'working' ? simulated : undefined) };
+    // A site build reports who is doing what (AIZEN plans, ROBIN polishes, LEVI checks, FRANKY builds).
+    const step = site?.agents?.find((s) => s.name.toLowerCase() === a.alias.toLowerCase());
+    const state = live?.state ?? step?.state ?? (simulated && !site?.agents && a.internalId === simId ? 'working' : 'idle');
+    return { ...a, state, task: live?.currentTask ?? step?.note ?? (state === 'working' ? simulated : undefined) };
   }).sort((a, b) => Number(b.state !== 'idle') - Number(a.state !== 'idle'));
   const logs = readObservabilityPort(props.observabilityPort).logs.slice(0, 30);
   const sectionOf = spec?.sections.find((s) => s.id === selected);
@@ -126,7 +128,7 @@ export default function Hud(props: ComponentProps<typeof LegacyApp> = {}) {
         <div className="hud-body">
           <aside className="rail" aria-label={tab}>
             {tab === 'agents' && <div className="agent-grid">{roster.map((a) => (
-              <Frame key={a.internalId} label={a.alias} state={a.state.replace('_', ' ')} tone={a.state === 'working' ? 'live' : a.state === 'idle' ? undefined : 'warn'}>
+              <Frame key={a.internalId} label={a.alias} state={a.state.replace('_', ' ')} tone={a.state === 'working' ? 'live' : a.state === 'done' ? 'done' : a.state === 'idle' ? undefined : 'warn'}>
                 <p>{a.task ?? a.professionalRole}</p>
               </Frame>
             ))}</div>}

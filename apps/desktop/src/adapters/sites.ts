@@ -12,7 +12,8 @@ export type SiteSpec = { id: string; name: string; type: SiteKind; theme: { prim
 export type Phase = 'planning' | 'spec' | 'render' | 'ready';
 export const PHASES: readonly Phase[] = ['planning', 'spec', 'render', 'ready'];
 export type SiteSummary = { id: string; name: string; type: SiteKind; head: number; max: number; updated_at: string };
-export type SiteState = { id: string; name: string; type: SiteKind; status: 'building' | 'ready' | 'failed'; phase: Phase; head: number; max: number; spec?: SiteSpec; error?: string; message?: string };
+export type AgentStep = { id: string; name: string; state: 'idle' | 'working' | 'done'; note: string };
+export type SiteState = { id: string; name: string; type: SiteKind; status: 'building' | 'ready' | 'failed'; phase: Phase; head: number; max: number; spec?: SiteSpec; error?: string; message?: string; agents?: AgentStep[] };
 export type CommandOutcome = { kind: 'site' | 'mission'; site_id?: string; mission_id?: string; message: string };
 export type TrustState = { enabled: boolean; since: string | null; allow: string[]; deny: string[] };
 

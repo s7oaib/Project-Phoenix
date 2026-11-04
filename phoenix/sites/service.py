@@ -6,11 +6,12 @@ the stored site untouched. Job state is in memory only.
 import asyncio
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from phoenix.sites.generator import ModelFn, build_spec, edit_spec
+from phoenix.sites.review import polish_copy, verify
 from phoenix.sites.spec import SiteError
 from phoenix.sites.store import SiteStore
 
@@ -52,6 +53,15 @@ class Job:
     phase: str = "planning"  # planning | spec | render | ready
     error: str | None = None
     message: str = ""
+    agents: list[dict[str, str]] = field(default_factory=list)  # the roster at work
+
+    def start(self, name: str, note: str) -> None:
+        self.agents.append(
+            {"id": name.lower(), "name": name, "state": "working", "note": note}
+        )
+
+    def done(self, note: str) -> None:
+        self.agents[-1]["state"], self.agents[-1]["note"] = "done", note
 
 
 class SitesService:
@@ -108,9 +118,19 @@ class SitesService:
         async def work(job: Job) -> None:
             await asyncio.sleep(0)
             job.phase = "spec"
+            job.start("AIZEN", "Planning the site")
             spec = await build_spec(prompt, slug, self._model_fn())
+            job.done(f"{spec.type} site, {len(spec.sections)} sections")
+            job.start("ROBIN", "Polishing the copy")
+            spec, note = polish_copy(spec)
+            job.done(note)
+            job.start("LEVI", "Checking readability and structure")
+            spec, note = verify(spec)
+            job.done(note)
+            job.start("FRANKY", "Building the page")
             job.phase = "render"
             self.store.create(spec)
+            job.done(f"{len(spec.sections)} sections rendered")
             job.status, job.phase = "ready", "ready"
             job.message = f"Site ready. {len(spec.sections)} sections."
 
@@ -132,6 +152,7 @@ class SitesService:
         async def work(job: Job) -> None:
             await asyncio.sleep(0)
             job.phase = "spec"
+            job.start("AIZEN", "Reading your instruction")
             spec = store.load(slug)
             new, message = await edit_spec(
                 spec,
@@ -141,10 +162,18 @@ class SitesService:
                 lambda path: store.copy_image(slug, path, self._roots_fn()),
             )
             if new is None:
+                job.done("Could not turn that into a change")
                 job.status, job.phase, job.error = "failed", "ready", message
                 return
+            job.done("Change understood")
+            job.start("LEVI", "Checking readability and structure")
+            # The owner's own colours are only repaired when unreadable.
+            new, note = verify(new, floor=3.0)
+            job.done(note)
+            job.start("FRANKY", "Building the page")
             job.phase = "render"
             store.add_version(slug, new)
+            job.done("Page re-rendered")
             job.status, job.phase, job.message = "ready", "ready", message
 
         return self._start(slug, work)
@@ -173,6 +202,7 @@ class SitesService:
             "phase": job.phase,
             "error": job.error,
             "message": job.message or None,
+            "agents": [dict(a) for a in job.agents] or None,
         }
 
     def list(self) -> list[dict[str, Any]]:

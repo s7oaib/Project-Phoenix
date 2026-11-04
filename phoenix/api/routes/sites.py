@@ -32,6 +32,13 @@ class SiteSummary(Contract):
     updated_at: str
 
 
+class AgentStep(Contract):
+    id: str
+    name: str
+    state: Literal["idle", "working", "done"]
+    note: str
+
+
 class SiteView(Contract):
     id: str
     name: str | None = None
@@ -43,6 +50,7 @@ class SiteView(Contract):
     spec: dict[str, Any] | None = None
     error: str | None = None
     message: str | None = None
+    agents: list[AgentStep] | None = None  # which agent is doing what, in order
 
 
 class BuildRequest(Contract):
