@@ -53,6 +53,8 @@ from phoenix.api.structured_logging import (
     register_secret,
 )
 from phoenix.core.config import AppSettings
+from phoenix.models.prewarm import start_prewarm
+from phoenix.voice.ack import CACHE_DIR_ENV
 
 DEFAULT_PORT = 0
 READY_EVENT = "phoenix.backend.ready"
@@ -259,6 +261,8 @@ def main(
     settings = load_settings(options)
     register_secret(token)
     logs = configure_logging(settings.data_dir, err, level=logging.INFO)
+    os.environ.setdefault(CACHE_DIR_ENV, str(settings.data_dir / "voice_cache"))
+    start_prewarm()  # daemon threads, fail soft, never delays readiness
     try:
         server, sock = create_server(
             options, settings=settings, token=token, stdout=out
