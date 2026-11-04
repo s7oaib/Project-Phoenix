@@ -2017,7 +2017,7 @@ PHX_129_PATHS = (
 # routes/permissions.py (/v1/trust and the per-task P4 approval); filesystem.py
 # left the PHX-048 pin and routes/permissions.py the train pin. All three stay
 # pinned, at the Trust implementation commit.
-PHX_TRUST_COMMIT = "9dceae8e11d39fad5ba914ade3aa38b5717c62f5"
+PHX_TRUST_COMMIT = "8d1fb07d49601d1a4c79340c7967af510015061f"
 PHX_TRUST_PATHS = (
     "phoenix/security/permissions.py",
     "phoenix/tools/filesystem.py",
