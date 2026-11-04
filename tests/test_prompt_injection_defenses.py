@@ -1882,7 +1882,6 @@ PHX_120_PATHS = ("phoenix/api/routes/setup.py",)
 PHX_TRAIN_COMMIT = "65b3d935d51b241fa9c7d1e6eefaf321184b3460"
 PHX_TRAIN_PATHS = (
     "phoenix/api/capabilities.py",
-    "phoenix/api/routes/__init__.py",
 )
 # PHX-121 (ADR-166) intentionally changed prompts.py (phoenix-prompts-v6 adds
 # the combined planner; every v5 constant unchanged) and runtime.py (planner
@@ -2086,6 +2085,10 @@ PHX_139_PATHS: tuple[str, ...] = ()
 # server.py carries PHX-139 and PHX-140; pinned at the local merge resolution.
 PHX_139_140_COMMIT = "0588b6223af086f6aaed24a6be96fc51c326c9fb"
 PHX_139_140_PATHS = ("phoenix/api/server.py",)
+# Website designer (ADR-300 to ADR-304) registers the sites and command routers
+# in routes/__init__.py; it left the train block and is pinned at that commit.
+PHX_SITES_COMMIT = "74aef06ac357e1c7e0569763ebdb6fbd86814815"
+PHX_SITES_PATHS = ("phoenix/api/routes/__init__.py",)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -2145,6 +2148,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_139_PATHS
         and path not in PHX_140_PATHS
         and path not in PHX_139_140_PATHS
+        and path not in PHX_SITES_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2193,6 +2197,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_139_COMMIT, path) for path in PHX_139_PATHS]
     baselines += [(PHX_140_COMMIT, path) for path in PHX_140_PATHS]
     baselines += [(PHX_139_140_COMMIT, path) for path in PHX_139_140_PATHS]
+    baselines += [(PHX_SITES_COMMIT, path) for path in PHX_SITES_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
