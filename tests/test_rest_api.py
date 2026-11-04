@@ -336,6 +336,8 @@ def waiting_mission(client: TestClient, backend: Backend) -> tuple[str, str]:
 
 
 API_ROUTES = {
+    ("GET", "/trust"),  # 2026-11-05 expo build (ADR-305 to ADR-309)
+    ("POST", "/trust"),
     ("POST", "/chat"),
     ("GET", "/missions"),
     ("GET", "/missions/{mission_id}"),
@@ -405,6 +407,15 @@ def test_route_table_is_exact_and_deferred_routes_do_not_exist(
         ("POST", "/voice/start"),
         ("POST", "/voice/stop"),
         ("GET", "/metrics"),  # PHX-115 (ADR-146), tests/test_observability.py
+        # 2026-11-05 expo build (ADR-300 to ADR-304): website designer + command.
+        ("GET", "/sites"),
+        ("POST", "/sites"),
+        ("GET", "/sites/{site_id}"),
+        ("POST", "/sites/{site_id}/edit"),
+        ("POST", "/sites/{site_id}/undo"),
+        ("POST", "/sites/{site_id}/redo"),
+        ("GET", "/sites/{site_id}/preview"),
+        ("POST", "/command"),
     }
     # PHX-110 added /files/upload and /memory/search; /tasks is not even a stub.
     response = client.request("GET", "/tasks")

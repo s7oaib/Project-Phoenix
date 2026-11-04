@@ -72,6 +72,7 @@ from phoenix.security.prompt_injection import (
     PromptInjectionGuard,
     UntrustedContentOrigin,
 )
+from phoenix.security.trust import TRUST
 from phoenix.tools.registry import ToolResultStatus, ToolRiskLevel
 from phoenix.tools.web_research import (
     RESEARCH_ACTION,
@@ -556,7 +557,10 @@ class ResearchVerificationResponder:
             and decision.risk_level == ToolRiskLevel.P1
             and decision.status == PermissionStatus.ALLOWED
             and decision.reason_code == DecisionReason.MATCHING_GRANT
-            and decision.matched_grant_id in self._grant_ids
+            and (
+                decision.matched_grant_id in self._grant_ids
+                or TRUST.is_trust_grant(decision.matched_grant_id or "")
+            )
             and result.attempted is True
             and result.status == ToolResultStatus.SUCCESS
             and bool(result.sources)

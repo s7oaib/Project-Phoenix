@@ -45,7 +45,8 @@ function loadApp(reactRuntime = React) {
   });
   const exports = {};
   const require = createRequire(import.meta.url);
-  runInNewContext(outputText, { exports, Promise, require: (name) => name === 'react' ? reactRuntime : require(name) });
+  // The default export is now the HUD (./Hud); these tests cover the retained LegacyApp.
+  runInNewContext(outputText, { exports, Promise, URLSearchParams, require: (name) => name === 'react' ? reactRuntime : name === './Hud' ? { default: () => null } : require(name) });
   return exports;
 }
 const app = loadApp();
@@ -122,7 +123,7 @@ test('home chat stays honest without fake operations or microphone prerequisites
 
 test('selection wiring updates state, title, page content and current-page evidence', () => {
   // SSR is not a GUI click test: inspect the actual handler/state expressions instead.
-  const appFunction = nodes(ts.isFunctionDeclaration).find((node) => node.name?.text === 'App');
+  const appFunction = nodes(ts.isFunctionDeclaration).find((node) => node.name?.text === 'LegacyApp');
   const state = nodes(ts.isCallExpression, appFunction).find((node) => node.expression.getText(appTree) === 'useState<ViewId>' || node.expression.getText(appTree) === 'useState');
   assert.ok(state);
   assert.equal(state.arguments[0].getText(appTree), "'home'");
@@ -141,7 +142,7 @@ test('selection wiring updates state, title, page content and current-page evide
 });
 
 test('focus follows a committed navigation change without stealing initial focus', () => {
-  const appFunction = nodes(ts.isFunctionDeclaration).find((node) => node.name?.text === 'App');
+  const appFunction = nodes(ts.isFunctionDeclaration).find((node) => node.name?.text === 'LegacyApp');
   const effect = nodes(ts.isCallExpression, appFunction).find((node) => node.expression.getText(appTree) === 'useEffect');
   assert.ok(effect);
   assert.equal(effect.arguments[1].getText(appTree), '[selectedView]');

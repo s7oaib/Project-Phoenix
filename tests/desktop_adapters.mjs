@@ -20,7 +20,7 @@ const nodeRequire = createRequire(import.meta.url);
 const plain = (value) => JSON.parse(JSON.stringify(value));
 function loader(externals = {}) {
   const cache = new Map();
-  const realm = createContext({ console, setImmediate });
+  const realm = createContext({ console, setImmediate, URLSearchParams });
   function load(path) {
     if (cache.has(path)) return cache.get(path).exports;
     const module = { exports: {} };

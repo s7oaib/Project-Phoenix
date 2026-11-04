@@ -66,7 +66,7 @@ def provider_model_fn(providers: Sequence[ModelProvider]) -> ModelFn | None:
                 ModelMessage(role=MessageRole.SYSTEM, text=system),
                 ModelMessage(role=MessageRole.USER, text=user),
             ),
-            temperature=0.4,
+            temperature=0.2,
             max_output_tokens=2000,
         )
         return (
@@ -74,6 +74,38 @@ def provider_model_fn(providers: Sequence[ModelProvider]) -> ModelFn | None:
         ).text
 
     return call
+
+
+def _close_brackets(text: str) -> str:
+    """Fix the bracket slips qwen3.5:4b makes: a dropped final }, or a } where ]}
+    belongs. A closer that does not match first closes whatever is still open."""
+    out: list[str] = []
+    stack: list[str] = []
+    in_str = escaped = False
+    for ch in text:
+        if in_str:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+            out.append(ch)
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+            out.append(ch)
+        elif ch in "}]":
+            while stack and stack[-1] != ch:
+                out.append(stack.pop())
+            if stack:
+                stack.pop()
+                out.append(ch)  # a stray closer with nothing open is dropped
+        else:
+            out.append(ch)
+    return "".join(out) + ('"' if in_str else "") + "".join(reversed(stack))
 
 
 def parse_json(text: str) -> Any:
@@ -85,9 +117,12 @@ def parse_json(text: str) -> Any:
         if not starts:
             raise
         start = min(starts)
-        return json.loads(
-            text[start : text.rfind("}" if text[start] == "{" else "]") + 1]
-        )
+        try:
+            return json.loads(_close_brackets(text[start:]))
+        except ValueError:
+            return json.loads(
+                text[start : text.rfind("}" if text[start] == "{" else "]") + 1]
+            )
 
 
 def fallback_spec(prompt: str, slug: str) -> SiteSpec:

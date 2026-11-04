@@ -1854,6 +1854,30 @@ def test_no_action_persistence_or_dependency_change() -> None:
             # browser.py is hash-pinned (PHX_123_PATHS in
             # test_prompt_injection_defenses.py).
             ":(exclude)phoenix/tools/browser.py",
+            # 2026-11-05 expo build (ADR-300 to ADR-319): website designer, Trust
+            # mode, HUD desktop UI and voice persona. Changed existing files are
+            # hash-pinned in test_prompt_injection_defenses.py; the rest are new.
+            ":(exclude)apps/desktop/src-tauri/src/proxy.rs",
+            ":(exclude)apps/desktop/src/Hud.tsx",
+            ":(exclude)apps/desktop/src/adapters/sites.ts",
+            ":(exclude)apps/desktop/src/hud",
+            ":(exclude)phoenix/agents/capability_steps.py",
+            ":(exclude)phoenix/agents/control_steps.py",
+            ":(exclude)phoenix/agents/research_steps.py",
+            ":(exclude)phoenix/agents/tool_steps.py",
+            ":(exclude)phoenix/api/launcher.py",
+            ":(exclude)phoenix/api/routes/__init__.py",
+            ":(exclude)phoenix/api/routes/command.py",
+            ":(exclude)phoenix/api/routes/permissions.py",
+            ":(exclude)phoenix/api/routes/sites.py",
+            ":(exclude)phoenix/api/voice.py",
+            ":(exclude)phoenix/models/prewarm.py",
+            ":(exclude)phoenix/security/permissions.py",
+            ":(exclude)phoenix/security/trust.py",
+            ":(exclude)phoenix/sites",
+            ":(exclude)phoenix/tools/filesystem.py",
+            ":(exclude)phoenix/voice/ack.py",
+            ":(exclude)phoenix/voice/persona.py",
             ":(exclude)apps/desktop/src/App.tsx",
             ":(exclude)apps/desktop/src/styles.css",
             # PHX-111 (ADR-135) adds web_research_enabled; config.py is

@@ -111,6 +111,7 @@ from phoenix.security.prompt_injection import (
     PromptInjectionGuard,
     UntrustedContentOrigin,
 )
+from phoenix.security.trust import TRUST
 from phoenix.tools.browser import (
     BrowserAuditError,
     BrowserCall,
@@ -1706,7 +1707,10 @@ class ControlEvidenceVerificationResponder:
         authorized = (
             (
                 reason == DecisionReason.MATCHING_GRANT
-                and decision.matched_grant_id in self._grant_ids
+                and (
+                    decision.matched_grant_id in self._grant_ids
+                    or TRUST.is_trust_grant(decision.matched_grant_id or "")
+                )
             )
             or (
                 reason == DecisionReason.MATCHING_POLICY

@@ -96,6 +96,7 @@ from phoenix.security.prompt_injection import (
     PromptInjectionGuard,
     UntrustedContentOrigin,
 )
+from phoenix.security.trust import TRUST
 from phoenix.tools.document_files import (
     READ_EXTENSIONS,
     DocumentFileCall,
@@ -1028,7 +1029,10 @@ def _correlates(evidence: CapabilityEvidence, grant_ids: frozenset[str]) -> bool
         and decision.risk_level == risk
         and decision.status == PermissionStatus.ALLOWED
         and decision.reason_code == DecisionReason.MATCHING_GRANT
-        and decision.matched_grant_id in grant_ids
+        and (
+            decision.matched_grant_id in grant_ids
+            or TRUST.is_trust_grant(decision.matched_grant_id or "")
+        )
         and result.attempted is True
         and result.status == ToolResultStatus.SUCCESS
     )

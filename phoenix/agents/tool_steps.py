@@ -76,6 +76,7 @@ from phoenix.security.prompt_injection import (
     UntrustedContentItem,
     UntrustedContentOrigin,
 )
+from phoenix.security.trust import TRUST
 from phoenix.tools.filesystem import (
     FilesystemCall,
     FilesystemInputError,
@@ -785,7 +786,10 @@ class ToolEvidenceVerificationResponder:
             and decision.risk_level == ToolRiskLevel.P1
             and decision.status == PermissionStatus.ALLOWED
             and decision.reason_code == DecisionReason.MATCHING_GRANT
-            and decision.matched_grant_id in self._grant_ids
+            and (
+                decision.matched_grant_id in self._grant_ids
+                or TRUST.is_trust_grant(decision.matched_grant_id or "")
+            )
             and result.attempted is True
             and result.effect_applied is False
             and result.status == ToolResultStatus.SUCCESS

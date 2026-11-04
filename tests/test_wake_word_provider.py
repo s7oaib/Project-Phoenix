@@ -1262,7 +1262,8 @@ def test_static_separation_no_device_runtime_logging_or_execution(path: str) -> 
         elif isinstance(node, ast.ClassDef):
             assert not node.name.startswith(("Fake", "Mock"))
     paths = {p.name for p in (ROOT / "phoenix/voice").glob("*.py")}
-    assert paths == {"__init__.py", "audio.py", "wake.py"}
+    # 2026-11-05 expo build (ADR-315 to ADR-319): cached acknowledgement clips and persona.
+    assert paths == {"__init__.py", "ack.py", "audio.py", "persona.py", "wake.py"}
 
 
 def test_prior_production_manifests_migrations_frontend_events_unchanged() -> None:

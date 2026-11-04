@@ -268,6 +268,18 @@ def default_site_command() -> SiteCommand | None:
     return handle
 
 
+def default_site_status() -> SiteStatusReader | None:
+    try:
+        module = importlib.import_module("phoenix.sites.service")
+    except ImportError:
+        return None
+
+    async def read(site_id: str) -> Mapping[str, object]:
+        return module.site_status(site_id) or {}
+
+    return read
+
+
 def _section_count(status: Mapping[str, object]) -> int | None:
     spec = status.get("spec")
     for value in (
@@ -716,7 +728,7 @@ class VoiceService:
         self._partials = partial_answers
         self._may_approve = may_approve  # PHX-135: None = voice never decides
         self._site_command = site_command or default_site_command()
-        self._site_status = site_status
+        self._site_status = site_status or default_site_status()
         self._cache_dir = cache_dir
         self._publisher = EventPublisher(events)
         self._probes = tuple(probes) if probes is not None else None
