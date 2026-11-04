@@ -1834,7 +1834,7 @@ PHX_114_PATHS: tuple[str, ...] = ()
 # both tickets). The PR must merge with a merge commit so this commit stays
 # reachable. PHX-122 moved proxy.rs and core.ts to its own pin (below).
 PHX_115_COMMIT = "253829afc1a97402519bc279ddce416daabddb95"
-PHX_115_PATHS = ("phoenix/api/launcher.py",)
+PHX_115_PATHS: tuple[str, ...] = ()  # launcher.py moved to PHX_EXPO_VOICE
 # PHX-092 (ADR-125, ADR-127) intentionally changed server.py (/ready
 # prerequisites) and the desktop backend sidecar (installed-mode resolution,
 # isolated bundled interpreter); both stay pinned, at the PHX-092 merge
@@ -2086,6 +2086,10 @@ PHX_139_PATHS: tuple[str, ...] = ()
 # server.py carries PHX-139 and PHX-140; pinned at the local merge resolution.
 PHX_139_140_COMMIT = "0588b6223af086f6aaed24a6be96fc51c326c9fb"
 PHX_139_140_PATHS = ("phoenix/api/server.py",)
+# 2026-11-05 expo build, voice (ADR-315 to ADR-319): launcher.py starts the
+# model pre-warm; pinned at the local merge of that work.
+PHX_EXPO_VOICE_COMMIT = "476815b2965d29aa3520e58292458b117a2babd2"
+PHX_EXPO_VOICE_PATHS = ("phoenix/api/launcher.py",)
 
 
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
@@ -2145,6 +2149,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_139_PATHS
         and path not in PHX_140_PATHS
         and path not in PHX_139_140_PATHS
+        and path not in PHX_EXPO_VOICE_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2193,6 +2198,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_139_COMMIT, path) for path in PHX_139_PATHS]
     baselines += [(PHX_140_COMMIT, path) for path in PHX_140_PATHS]
     baselines += [(PHX_139_140_COMMIT, path) for path in PHX_139_140_PATHS]
+    baselines += [(PHX_EXPO_VOICE_COMMIT, path) for path in PHX_EXPO_VOICE_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
