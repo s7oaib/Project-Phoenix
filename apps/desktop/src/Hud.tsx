@@ -42,7 +42,11 @@ export default function Hud(props: ComponentProps<typeof LegacyApp> = {}) {
   useEffect(() => { if (site?.status === 'ready') note(`${site.name} ready (v${site.head}/${site.max}).`); }, [site?.id, site?.status, note]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void api.list().then(setSites, () => undefined); }, [api, tab, site?.head, site?.max, site?.status]);
   useEffect(() => {
-    const load = () => { void api.trust().then(setTrust, () => undefined); void api.voice().then(setVoice); };
+    // Voice-first: whenever the listener is off, start it. "Rise, Phoenix" then wakes it.
+    const load = () => {
+      void api.trust().then(setTrust, () => undefined);
+      void api.voice().then((state) => { setVoice(state); if (state === 'off') void api.startVoice(); });
+    };
     load();
     const timer = window.setInterval(load, 4000);
     return () => window.clearInterval(timer);
