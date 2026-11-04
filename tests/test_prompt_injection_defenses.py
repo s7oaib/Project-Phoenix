@@ -2105,6 +2105,13 @@ PHX_SITES_COMMIT = "74aef06ac357e1c7e0569763ebdb6fbd86814815"
 PHX_SITES_PATHS = ("phoenix/api/routes/__init__.py",)
 
 
+# PHX UI (ADR-311) intentionally changed proxy.rs (the sites, command and trust routes and
+# the slug path segment); it left the PHX-123 block and stays pinned at that commit (merge
+# with a merge commit so this commit stays reachable).
+PHX_UI_COMMIT = "00dfeb3ad885f6fafc1dd20560e06df5cdf5457a"
+PHX_UI_PATHS = ("apps/desktop/src-tauri/src/proxy.rs",)
+
+
 def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -> None:
     # PHX-103's dependency gate (test_events_ws.py) owns manifest/lock exactness.
     protected = [
@@ -2165,6 +2172,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_139_140_PATHS
         and path not in PHX_EXPO_VOICE_PATHS
         and path not in PHX_SITES_PATHS
+        and path not in PHX_UI_PATHS
     ]
     baselines = [("origin/main", path) for path in protected]
     baselines += [(PHX_017_COMMIT, path) for path in PHX_017_PATHS]
@@ -2216,6 +2224,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_139_140_COMMIT, path) for path in PHX_139_140_PATHS]
     baselines += [(PHX_EXPO_VOICE_COMMIT, path) for path in PHX_EXPO_VOICE_PATHS]
     baselines += [(PHX_SITES_COMMIT, path) for path in PHX_SITES_PATHS]
+    baselines += [(PHX_UI_COMMIT, path) for path in PHX_UI_PATHS]
     pinned = [path for _, path in baselines]
     assert len(pinned) == len(set(pinned))  # exactly one baseline per path
     for commit, path in baselines:
