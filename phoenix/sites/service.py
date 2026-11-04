@@ -221,4 +221,17 @@ def get_default() -> SitesService | None:
     return _default
 
 
-__all__ = ["SiteBusy", "SiteNotFound", "SitesService", "get_default", "set_default"]
+def site_status(site_id: str) -> dict[str, Any] | None:
+    """{status, sections} for a site id (voice speaks the "ready" line), or None."""
+    service = _default
+    if service is None:
+        return None
+    try:
+        view = service.get(site_id)
+    except SiteError:
+        return None
+    spec = view["spec"]
+    return {"status": view["status"], "sections": len(spec["sections"]) if spec else 0}
+
+
+__all__ = ["SiteBusy", "SiteNotFound", "SitesService", "get_default", "set_default", "site_status"]
