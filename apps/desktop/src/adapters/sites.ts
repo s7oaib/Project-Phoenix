@@ -1,6 +1,6 @@
 // PHX UI (ADR-310): the site-builder contract (CONTRACTS_2026-11-05) as one typed API with two
 // implementations. `createSitesApi()` is the single switch: the native shell gets the real one
-// (allowlisted proxy routes), a plain browser or VITE_PHOENIX_MOCK=1 gets the in-memory mock.
+// (allowlisted proxy routes), a plain browser or any page opened with ?mock gets the in-memory mock.
 
 import { createTauriTransport, nativeShellAvailable } from './tauri';
 import type { Transport } from './core';
@@ -148,14 +148,14 @@ export function createMockSitesApi(): SitesApi {
 
 // ---- real (proxy routes; ids are slugs) ----
 function real(transport: Transport): SitesApi {
-  const call = async <T>(method: 'GET' | 'POST', path: string, body?: Record<string, unknown>): Promise<T> => {
+  async function call<T>(method: 'GET' | 'POST', path: string, body?: Record<string, unknown>): Promise<T> {
     const result = await transport.request(method, path, body);
     if (result.status >= 400 || result.body === null || typeof result.body !== 'object') {
       const detail = (result.body as { detail?: unknown } | null)?.detail;
       throw new Error(typeof detail === 'string' ? detail : `request failed (${result.status})`);
     }
     return result.body as T;
-  };
+  }
   const id = (value: string) => encodeURIComponent(value);
   return {
     kind: 'real',
@@ -171,8 +171,8 @@ function real(transport: Transport): SitesApi {
   };
 }
 
-/** The one switch: mock in a plain browser (or VITE_PHOENIX_MOCK=1), real inside the native shell. */
+/** The one switch: mock in a plain browser (or with ?mock), real inside the native shell. */
 export function createSitesApi(): SitesApi {
-  const forceMock = import.meta.env.VITE_PHOENIX_MOCK === '1';
+  const forceMock = new URLSearchParams(window.location.search).has('mock');
   return nativeShellAvailable() && !forceMock ? real(createTauriTransport()) : createMockSitesApi();
 }
