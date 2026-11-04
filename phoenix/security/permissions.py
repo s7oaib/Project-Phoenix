@@ -20,6 +20,7 @@ from pydantic import (
     model_validator,
 )
 
+from phoenix.security.trust import TRUST, TRUST_REASON, never_auto
 from phoenix.tools.registry import ToolRegistry, ToolRiskLevel
 
 _Id = Annotated[
@@ -358,7 +359,11 @@ def _grants(value: object) -> tuple[PermissionGrant, ...]:
 def _matches(
     grant: PermissionGrant, request: PermissionRequest, risk: ToolRiskLevel
 ) -> bool:
-    if grant.risk_level != risk or _scope(grant) != _scope(request):
+    # Trust-mode grants (ADR-305) ignore the request wording, but only while
+    # trust is ON and only for ids this process minted.
+    trust = grant.reason == TRUST_REASON and TRUST.is_trust_grant(grant.grant_id)
+    cut = slice(0, 4) if trust else slice(None)
+    if grant.risk_level != risk or _scope(grant)[cut] != _scope(request)[cut]:
         return False
     if grant.issued_at > request.requested_at or (
         grant.expires_at is not None and grant.expires_at <= request.requested_at
@@ -375,6 +380,33 @@ def _matches(
         GrantDuration.SESSION: grant.session_id == request.session_id,
         GrantDuration.PERSISTENT: True,
     }[grant.duration]
+
+
+def _trust_grant(request: PermissionRequest, risk: ToolRiskLevel) -> PermissionGrant | None:
+    """The user-created trust-mode grant for this request (P3 needs task/session)."""
+    if request.task_id is not None:
+        duration, ids = GrantDuration.TASK, {"task_id": request.task_id}
+    elif request.session_id is not None:
+        duration, ids = GrantDuration.SESSION, {"session_id": request.session_id}
+    elif risk != ToolRiskLevel.P3:
+        duration, ids = GrantDuration.ONCE, {"request_id": request.request_id}
+    else:
+        return None
+    grant = PermissionGrant(
+        grant_id=f"trust-{request.request_id}",
+        actor_id=request.actor_id,
+        tool_id=request.tool_id,
+        action=request.action,
+        resource=request.resource,
+        reason=TRUST_REASON,
+        duration=duration,
+        risk_level=risk,
+        issued_at=request.requested_at,
+        user_decision="approved",
+        **ids,
+    )
+    TRUST.register_grant(grant.grant_id)
+    return grant
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -486,6 +518,24 @@ class PermissionEngine:
                         DecisionReason.MATCHING_POLICY,
                         rule_id=rule.rule_id,
                     )
+        trusted = (
+            TRUST.enabled
+            and not never_auto(request.tool_id, request.action)
+            and TRUST.resource_allowed(request.resource)
+        )
+        if trusted and risk == ToolRiskLevel.P4:
+            # ADR-306: one explicit approval per task covers its later P4s.
+            approval = TRUST.task_approval(request.task_id)
+            if approval is not None:
+                return result(
+                    PermissionStatus.ALLOWED,
+                    DecisionReason.EXPLICIT_USER_APPROVAL,
+                    user_id=approval,
+                )
+        if trusted and risk in (ToolRiskLevel.P1, ToolRiskLevel.P2, ToolRiskLevel.P3):
+            minted = _trust_grant(request, risk)
+            if minted is not None:
+                evidence = (*evidence, minted)
         if risk in (ToolRiskLevel.P1, ToolRiskLevel.P2, ToolRiskLevel.P3):
             for grant in evidence:
                 if _matches(grant, request, risk):

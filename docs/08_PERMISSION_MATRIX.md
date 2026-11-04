@@ -53,3 +53,32 @@ Risk levels are the tools' canonical declarations; PermissionEngine decides.
 
 P3/P4 actions write durable permission and outcome audit rows. A mission runs
 at most one P4 action; a P4 decision is used once, for the one linked re-run.
+
+## Trust mode (ADR-305 to ADR-309)
+
+In-memory only, default OFF at every backend launch, reset by closing the app.
+`GET /v1/trust` returns `{enabled, since, allow, deny}`; `POST /v1/trust {enabled}`
+sets it, and `enabled:false` is the kill switch: the very next permission
+evaluation (including an in-flight mission's next action) sees it, and every
+trust grant and per-task approval is dropped.
+
+| Level | While trust is ON |
+|---|---|
+| P0 | unchanged |
+| P1-P3 | auto-approved as a user-created grant, reason `trust_mode`, inside the file scope; the permission and outcome audit rows are still written |
+| P4 | one approval per task: the user's first P4 approval of a task (the existing approve flow) covers the task's later P4s; deletes go to the Recycle Bin |
+| P4 payments and sending messages | never auto-approved; every action asks |
+| P5 | blocked |
+
+LLM output can still never create a grant. A trust grant exists only for ids
+minted by the running process while trust is ON.
+
+File scope while ON: Desktop, Documents, Downloads, project folders under the
+user profile (Projects, source, repos, dev, code) and the active workspace.
+Always denied: Windows, Program Files, ProgramData, the profile's AppData, other
+users' folders, `.ssh`/`.gnupg`/`.aws`, `.env*`, `*.pem`/`*.key`/`*.pfx`/`*.p12`,
+browser-profile and password-store folders (`*.kdbx`, KeePass, 1Password,
+Bitwarden, LastPass). Checks are case-insensitive and resolve `..`, symlinks and
+junctions, 8.3 short names and trailing dots/spaces; UNC paths and NTFS
+alternate data streams are refused. A relative path means the workspace.
+Non-path resources (URLs, ids) are not subject to the file scope.
