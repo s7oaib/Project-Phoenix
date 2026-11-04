@@ -39,7 +39,8 @@ pub enum Method {
 }
 
 /// Exact (method, route) pairs; `{id}` is one canonical lowercase UUID segment. Destructive
-/// routes no adapter uses (grant revoke, conversation deletes) are deliberately absent.
+/// routes no adapter uses (conversation deletes) are deliberately absent. PHX-129 (ADR-217)
+/// adds grant revoke for Settings' "Remove" (it sets revoked_at; nothing is hard-deleted).
 /// PHX-108 (ADR-110, ADR-112) adds the two read-only setup routes, `GET /onboarding` and
 /// `GET /capabilities` (no query, no body).
 pub const ROUTES: &[(Method, &str, &[&str])] = &[
@@ -63,6 +64,7 @@ pub const ROUTES: &[(Method, &str, &[&str])] = &[
         "/grants",
         &["include_inactive", "limit", "offset"],
     ),
+    (Method::Post, "/grants/{id}/revoke", &[]),
     (Method::Get, "/conversations", &["limit", "offset"]),
     (
         Method::Get,
@@ -412,6 +414,7 @@ mod tests {
             ("GET", format!("/permissions/{ID}")),
             ("POST", format!("/permissions/{ID}/deny")),
             ("GET", "/grants?include_inactive=true".to_owned()),
+            ("POST", format!("/grants/{ID}/revoke")),
             ("GET", "/conversations?limit=1&offset=3".to_owned()),
             (
                 "GET",
@@ -474,7 +477,7 @@ mod tests {
             Some(json!({"content": "I prefer short answers"}))
         )
         .is_ok());
-        assert_eq!(ROUTES.len(), 31);
+        assert_eq!(ROUTES.len(), 32);
     }
 
     #[test]
@@ -482,7 +485,11 @@ mod tests {
         let refused = [
             ("DELETE", "/conversations".to_owned()),
             ("DELETE", format!("/conversations/{ID}")),
-            ("POST", format!("/grants/{ID}/revoke")),
+            // PHX-129: only the exact revoke route; no delete, no other method or shape.
+            ("DELETE", format!("/grants/{ID}")),
+            ("GET", format!("/grants/{ID}/revoke")),
+            ("POST", "/grants/not-a-uuid/revoke".to_owned()),
+            ("POST", format!("/grants/{ID}/revoke?all=true")),
             ("PUT", "/settings".to_owned()),
             ("get", "/health".to_owned()),
             ("GET", "/".to_owned()),

@@ -12,23 +12,42 @@ Voice failures are isolated (INV-015, INV-016): ``start``/``stop``/``status``
 never raise, a crashed run becomes state ``unavailable`` with a closed code,
 and text chat is untouched. State changes are published as allowlisted
 ``voice.*`` events (IDs and closed values only) and never block or fail.
+
+PHX-135 (ADR-245, owner override of ADR-108's "voice never approves"): when a
+spoken request's mission waits for permission, PHOENIX asks aloud ("I need
+permission to <action>. Say granted or denied.") and binds that ONE request.
+For 15 s after the question has been spoken, the exact replies "granted",
+"approve" or "yes, granted" approve it and "denied", "deny" or "no" deny it,
+through the same ``MissionService.approve``/``deny`` path as the desktop
+(PermissionEngine, grants, audit and re-run unchanged; P1/P2 "session", P3
+"session", P4 one-time; P5 never waits). Any other reply, a late one, or a
+request no longer pending decides nothing.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Protocol
 from uuid import uuid4
 
+from phoenix.agents.answer_stream import PartialAnswers
 from phoenix.agents.mission_events import EventPublisher, EventSink
 from phoenix.agents.registry import AgentRegistry
 from phoenix.api.missions import MissionService, NotFoundError
 from phoenix.core.events import EventType
-from phoenix.persistence.missions import MissionRecord, MissionStatus
+from phoenix.persistence.missions import (
+    MissionRecord,
+    MissionStatus,
+    PermissionRequestRecord,
+    RequestStatus,
+)
+from phoenix.security.permissions import GrantDuration, PermissionRequest
 from phoenix.tools.registry import ToolRegistry
 from phoenix.voice.conversation import (
     VoiceResponder,
@@ -50,6 +69,7 @@ from phoenix.voice.engines.pipeline import (
     VoicePipelineConfig,
     VoicePipelineState,
     VoiceStateChange,
+    first_spoken_sentence,
     speakable_text,
     strip_wake_phrase,
 )
@@ -97,6 +117,52 @@ _SETTLED: Final = frozenset(
 )
 
 ComponentStatus = str  # "available" | "degraded" | "unavailable"
+Preview = Callable[[str], Awaitable[bool]]
+# PHX-135 (ADR-245, ADR-246): spoken approval of one pending request.
+VoiceApprovalCheck = Callable[[PermissionRequestRecord], bool]
+VOICE_APPROVAL_SECONDS: Final = 15.0
+GRANT_REPLIES: Final = frozenset({"granted", "approve", "yes granted"})
+DENY_REPLIES: Final = frozenset({"denied", "deny", "no"})
+# What the user is asked to allow, by tool family; never the resource text.
+_ACTION_SUMMARIES: Final = {
+    "desktop.open_link": "open a link in your browser",
+    "desktop.open_app": "open an app",
+    "screen.capture_window": "look at the window on your screen",
+    "web.research": "search the web",
+    "document.read": "read a document in your workspace",
+    "document.create": "create a document in your workspace",
+}
+_FAMILY_SUMMARIES: Final = {
+    "filesystem": "read files in your workspace",
+    "spotify": "control Spotify",
+    "youtube": "use YouTube",
+    "browser": "control your browser",
+    "windows": "control a window on your computer",
+    "terminal": "run a terminal command",
+}
+
+
+def spoken_reply(text: str) -> str:
+    """A transcript reduced to lower-case words: "Yes, granted." -> "yes granted"."""
+    words = re.sub(r"[^\w\s]", " ", strip_wake_phrase(text).lower()).split()
+    return " ".join(words)
+
+
+def action_summary(request: PermissionRequest) -> str:
+    """A short, fixed description of what a request would do (ADR-246)."""
+    family = request.tool_id.split(".", 1)[0]
+    return _ACTION_SUMMARIES.get(request.tool_id) or _FAMILY_SUMMARIES.get(
+        family, "use " + family.replace("_", " ")
+    )
+
+
+@dataclass
+class _SpokenApproval:
+    """PHX-135: the one request a spoken reply may decide."""
+
+    request_id: str
+    mission_id: str
+    deadline: float | None = None  # set once the question has been spoken
 
 
 @dataclass(frozen=True)
@@ -175,9 +241,11 @@ class MissionVoiceResponder(VoiceResponder):
 
     The same MissionService calls as ``POST /chat``: one conversation per voice
     run (created like a chat without ``conversation_id``), ``submit`` with no
-    path so PHOENIX triages it. The responder only reads the settled mission;
-    it never approves permissions (INV-003, INV-005): a mission waiting for
-    approval is announced and left for the user in the desktop app.
+    path so PHOENIX triages it. Without ``may_approve`` it never decides a
+    permission: a mission waiting for approval is announced and left for the
+    user in the desktop app. PHX-135 (ADR-245): with it, the user's exact
+    spoken reply decides that one request, as the user's own decision, through
+    MissionService (INV-003, INV-005 keep holding: the user decides).
     """
 
     def __init__(
@@ -186,13 +254,38 @@ class MissionVoiceResponder(VoiceResponder):
         *,
         on_mission: Callable[[str, str], Awaitable[None]] | None = None,
         wait_seconds: float = MISSION_WAIT_SECONDS,
+        partial_answers: PartialAnswers | None = None,
+        may_approve: VoiceApprovalCheck | None = None,
+        approval_seconds: float = VOICE_APPROVAL_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         super().__init__("voice_mission_responder")
         self._missions = missions
+        self._partials = partial_answers
         self._on_mission = on_mission
         self._wait = wait_seconds
+        self._may_approve = may_approve
+        self._approval_seconds = approval_seconds
+        self._clock = clock
+        self._approval: _SpokenApproval | None = None
         self.conversation_id: str | None = None
         self.mission_id: str | None = None
+
+    @property
+    def awaiting_approval(self) -> str | None:
+        """The request ID a spoken reply may still decide, if any."""
+        approval = self._approval
+        if approval is None or (
+            approval.deadline is not None and self._clock() > approval.deadline
+        ):
+            return None
+        return approval.request_id
+
+    def open_approval_window(self) -> None:
+        """The question has been spoken: the 15 s reply window starts now."""
+        approval = self._approval
+        if approval is not None and approval.deadline is None:
+            approval.deadline = self._clock() + self._approval_seconds
 
     async def _submit(self, text: str) -> str:
         if self.conversation_id is not None:
@@ -210,13 +303,26 @@ class MissionVoiceResponder(VoiceResponder):
         self.conversation_id = conversation_id
         return mission_id
 
-    async def _settled(self, mission_id: str) -> MissionRecord | None:
+    async def _settled(
+        self, mission_id: str, preview: Preview | None = None
+    ) -> MissionRecord | str | None:
+        """The settled record, None on timeout, or the previewed sentence when
+        the user barged in during it (PHX-132: the turn ends at once)."""
         try:
             async with asyncio.timeout(self._wait):
                 while True:
                     record = await self._missions.get_mission(mission_id)
                     if record.status in _SETTLED:
                         return record
+                    if preview is not None and self._partials is not None:
+                        sentence = first_spoken_sentence(
+                            self._partials.text(mission_id)
+                        )
+                        if sentence is not None:
+                            go_on, preview = await preview(sentence), None
+                            if not go_on:
+                                return sentence
+                            continue
                     await asyncio.sleep(_POLL_SECONDS)
         except TimeoutError:
             return None
@@ -230,25 +336,110 @@ class MissionVoiceResponder(VoiceResponder):
         return None
 
     async def respond(self, request: VoiceResponseRequest) -> VoiceResponseDraft:
+        return await self._respond(request, None)
+
+    async def respond_with_preview(
+        self, request: VoiceResponseRequest, preview: Preview
+    ) -> VoiceResponseDraft:
+        """PHX-132 (ADR-233): a DIRECT answer's first sentence is spoken while
+        the rest is still being generated."""
+        return await self._respond(request, preview)
+
+    async def _respond(
+        self, request: VoiceResponseRequest, preview: Preview | None
+    ) -> VoiceResponseDraft:
         accepted = VoiceResponseRequest.model_validate(request)
         text = strip_wake_phrase(accepted.transcript_text).strip()
         if not text:
             spoken = "I'm listening."
         else:
-            mission_id = await self._submit(text[:16000])
-            self.mission_id = mission_id
-            if self._on_mission is not None:
-                with contextlib.suppress(Exception):
-                    await self._on_mission(accepted.turn_id, mission_id)
-            record = await self._settled(mission_id)
-            spoken = _spoken_outcome(
-                record, await self._answer(record) if record else None
-            )
+            # PHX-135: any non-empty reply ends the binding (one shot).
+            approval, self._approval = self._approval, None
+            reply = spoken_reply(text)
+            if approval is not None and reply in GRANT_REPLIES | DENY_REPLIES:
+                spoken = await self._decide(
+                    approval, reply in GRANT_REPLIES, accepted.turn_id
+                )
+            else:
+                mission_id = await self._submit(text[:16000])
+                spoken = await self._follow(mission_id, accepted.turn_id, preview)
         return VoiceResponseDraft(
             session_id=accepted.session_id,
             turn_id=accepted.turn_id,
             response_text=spoken,
         )
+
+    async def _follow(
+        self, mission_id: str, turn_id: str, preview: Preview | None = None
+    ) -> str:
+        """What to say about this mission once it settles."""
+        self.mission_id = mission_id
+        if self._on_mission is not None:
+            with contextlib.suppress(Exception):
+                await self._on_mission(turn_id, mission_id)
+        try:
+            settled = await self._settled(mission_id, preview)
+        finally:
+            if self._partials is not None:
+                self._partials.discard(mission_id)
+        if isinstance(settled, str):
+            return settled
+        if (
+            settled is not None
+            and settled.status is MissionStatus.WAITING_PERMISSION
+            and self._may_approve is not None
+        ):
+            question = await self._ask(settled)
+            if question is not None:
+                return question
+        return _spoken_outcome(
+            settled, await self._answer(settled) if settled else None
+        )
+
+    async def _ask(self, record: MissionRecord) -> str | None:
+        """PHX-135 (ADR-245): bind the mission's one pending request and ask."""
+        try:
+            pending = [
+                item
+                for item in await self._missions.list_pending_permissions()
+                if item.mission_id == record.mission_id
+            ]
+        except Exception:
+            return None
+        if len(pending) != 1:
+            return None  # none, or ambiguous: the desktop decides
+        request = pending[0].request
+        self._approval = _SpokenApproval(request.request_id, record.mission_id)
+        return f"I need permission to {action_summary(request)}. Say granted or denied."
+
+    async def _decide(
+        self, approval: _SpokenApproval, approve: bool, turn_id: str
+    ) -> str:
+        """The user's spoken decision on the one bound request (ADR-245/246)."""
+        if approval.deadline is None or self._clock() > approval.deadline:
+            return "That approval window has closed. Please use the Phoenix window."
+        try:
+            record = await self._missions.get_permission_request(approval.request_id)
+            if (
+                record.mission_id != approval.mission_id
+                or record.status is not RequestStatus.PENDING
+            ):
+                return "That request is no longer waiting."
+            if not approve:
+                await self._missions.deny(approval.request_id)
+                return "Denied. I won't do that."
+            assert self._may_approve is not None
+            if not self._may_approve(record):
+                return (
+                    "I can't approve that one by voice. Please use the Phoenix window."
+                )
+            # Session for P1/P2/P3; MissionService makes P4 one-time (ADR-151).
+            rerun = await self._missions.approve(
+                approval.request_id, GrantDuration.SESSION
+            )
+        except Exception:
+            return "I couldn't record that. Please use the Phoenix window."
+        return await self._follow(rerun, turn_id)
 
 
 def _spoken_outcome(record: MissionRecord | None, answer: str | None) -> str:
@@ -357,8 +548,12 @@ class VoiceService:
         factory: ComponentFactory | None = None,
         config: VoicePipelineConfig | None = None,
         models_dir: Path | None = None,
+        partial_answers: PartialAnswers | None = None,
+        may_approve: VoiceApprovalCheck | None = None,
     ) -> None:
         self._missions = missions
+        self._partials = partial_answers
+        self._may_approve = may_approve  # PHX-135: None = voice never decides
         self._publisher = EventPublisher(events)
         self._probes = tuple(probes) if probes is not None else None
         self._factory = factory or local_components(models_dir)
@@ -423,6 +618,10 @@ class VoiceService:
         )
 
     async def _report(self, change: VoiceStateChange) -> None:
+        responder = self._responder
+        if change.state is VoicePipelineState.LISTENING and responder is not None:
+            # PHX-135: the question has been spoken (PHOENIX is silent now).
+            responder.open_approval_window()
         self._state = change.state
         if change.code is not None:
             self._code = change.code
@@ -463,7 +662,10 @@ class VoiceService:
         try:
             components = await self._factory()
             responder = MissionVoiceResponder(
-                self._missions, on_mission=self._note_mission
+                self._missions,
+                on_mission=self._note_mission,
+                partial_answers=self._partials,
+                may_approve=self._may_approve,
             )
             self._responder = responder
             pipeline = VoicePipeline(

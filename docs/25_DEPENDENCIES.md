@@ -91,6 +91,14 @@ is unchanged. It is a direct requirement, not the `uvicorn[standard]` extra, and
 tests use its synchronous client against a real loopback server.
 See https://websockets.readthedocs.io/.
 
+### yt-dlp (PHX-138)
+
+Owner-approved on 2026-10-24 (ADR-260): `yt-dlp>=2026.10.21,<2027`, locked
+**2026.10.21** (Unlicense), one pure-Python wheel with no required transitive
+packages. Used as a library only to read a public video's caption metadata and
+caption file (no media download, no cookies, no login), imported lazily after
+PermissionEngine allows `web.youtube_transcript`.
+
 ### Desktop shell HTTP / WebSocket clients (Phase 10)
 
 Owner-approved on 2026-10-18 (PHX-106, ADR-091) as required Rust dependencies of

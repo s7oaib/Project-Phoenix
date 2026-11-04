@@ -6,10 +6,13 @@
 // PHX-122 (ADR-170 to ADR-174): the bar shows KAIDO's degraded mode; Memory, Files and Voice
 // come from CapabilityViews, with the mic toggle above Chat and approval summaries above
 // Permissions.
+// PHX-129 (ADR-215): above Permissions, each pending read-only (P1) request also offers
+// "Allow this session" and "Always allow"; P2+ requests keep App's cards only. The backend still
+// refuses "always" for anything but P1, and the choice binds to the stored request.
 
-import { useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import App from '../App';
-import { verificationText, type ConnectionView, type MissionPath, type MissionView, type PhoenixStore } from './core';
+import { verificationText, type ConnectionView, type GrantChoice, type MissionPath, type MissionView, type PendingPermission, type PhoenixStore } from './core';
 import { ApprovalSummaries, FilesPanel, MemoryPanel, VoiceControl } from './CapabilityViews';
 import { CapabilityPanel, FirstRunScreen, OnboardingPanel, SettingsPanel } from './SetupViews';
 import './connected.css';
@@ -42,7 +45,7 @@ export function KaidoBanner({ connection }: { connection: Pick<ConnectionView, '
   return <p className="kaido-banner" role="alert">Degraded mode (KAIDO) — answers unverified.{trigger} PHOENIX gives short, unchecked answers and runs no tools until it recovers.</p>;
 }
 const triageText: Readonly<Record<string, string>> = {
-  decided: 'PHOENIX decided', fallback: 'triage fallback', client: 'your override',
+  decided: 'PHOENIX decided', fallback: 'triage fallback', client: 'your override', rule: 'simple request',
 };
 /** PHX-123 (ADR-185): PHOENIX refuses to type secret-looking text; the owner types it. */
 const failureText: Readonly<Record<string, string>> = {
@@ -100,6 +103,40 @@ export function ConnectionBar({ connection, store }: { connection: ConnectionVie
   );
 }
 
+/** PHX-129: the duration choice for pending P1 requests (the only ones "always" is offered for). */
+export function ReadOnlyApprovals({ approvals, store }: { approvals: readonly PendingPermission[]; store: Pick<PhoenixStore, 'submitDecision'> }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const shown = approvals.filter((request) => request.riskLevel === 'P1');
+  if (shown.length === 0) return null;
+  async function allow(requestId: string, duration: GrantChoice) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await store.submitDecision(requestId, 'approved', duration);
+      setMessage(duration === 'always' ? 'Allowed and remembered. Remove it any time in Settings → Remembered permissions.' : 'Allowed for this session.');
+    } catch {
+      setMessage('The decision was not accepted. The request is unchanged; you may retry or decide in its card below.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="capability-card" aria-labelledby="read-only-approvals-heading">
+      <h3 id="read-only-approvals-heading">Read-only requests (P1)</h3>
+      <ul className="capability-list">{shown.map((request) => (
+        <li key={request.requestId}>
+          <span>{request.action} · {request.resource} <small>({request.toolId})</small></span>
+          <button type="button" disabled={busy} onClick={() => void allow(request.requestId, 'session')}>Allow this session</button>
+          <button type="button" disabled={busy} onClick={() => void allow(request.requestId, 'always')}>Always allow</button>
+        </li>))}
+      </ul>
+      <p className="capability-note">Always allow remembers this exact tool and resource until you remove it in Settings. To deny, use the request's card below.</p>
+      <p className="capability-note" role="status" aria-live="polite">{message}</p>
+    </section>
+  );
+}
+
 export const CONNECTED_STATUS = 'Connected to the local PHOENIX backend — live data';
 
 export function ConnectedApp({ store }: { store: PhoenixStore }) {
@@ -117,7 +154,7 @@ export function ConnectedApp({ store }: { store: PhoenixStore }) {
     voice: <VoiceControl connection={connection} store={store} detailed />,
     above: {
       home: <VoiceControl connection={connection} store={store} />,
-      permissions: <ApprovalSummaries approvals={connection.approvals} />,
+      permissions: <><ReadOnlyApprovals approvals={connection.approvals} store={store} /><ApprovalSummaries approvals={connection.approvals} /></>,
     },
   };
   return (

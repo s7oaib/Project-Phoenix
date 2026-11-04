@@ -5,12 +5,13 @@
 // every action is a store method that calls an allowlisted route through the native proxy. No
 // view starts, installs or downloads anything; a disabled capability says so plainly.
 // PHX-122 (ADR-174): web research is a launch opt-in, shown read-only as on or off for this launch.
+// PHX-129 (ADR-216): Settings lists remembered ("always") permissions from GET /grants; Remove revokes one.
 
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { agentRoster } from '../App';
 import { missionPathText, type CapabilityView, type ConnectionView, type MissionPath, type ModelCheckView, type PhoenixStore, type RuntimeCheckView } from './core';
 
-export type SetupStore = Pick<PhoenixStore, 'setWorkspace' | 'setDefaultPath' | 'recheck' | 'dismissOnboarding'>;
+export type SetupStore = Pick<PhoenixStore, 'setWorkspace' | 'setDefaultPath' | 'recheck' | 'dismissOnboarding' | 'revokeGrant'>;
 
 const workspaceStatusText: Readonly<Record<string, string>> = {
   active: 'active', unset: 'not set', unavailable: 'unavailable — choose it again or pick another folder',
@@ -177,7 +178,16 @@ export function SettingsPanel({ connection, store }: { connection: ConnectionVie
           <p>{webResearchLine(connection.capabilities?.find((capability) => capability.capabilityId === 'web_research'))}</p>
         </section>
         <section aria-labelledby="settings-permissions"><h4 id="settings-permissions">Privacy and permissions</h4>
-          <p>PermissionEngine alone authorizes actions. Approve or deny requests in Permissions; nothing here changes a permission.</p>
+          <p>PermissionEngine alone authorizes actions. Approve or deny requests in Permissions; here you can only remove a remembered permission.</p>
+        </section>
+        <section aria-labelledby="settings-grants"><h4 id="settings-grants">Remembered permissions</h4>
+          {connection.grants === undefined ? <p>Remembered permissions are unavailable.</p>
+            : connection.grants.length === 0 ? <p>None. "Always allow" on a read-only (P1) request remembers it here until you remove it.</p>
+            : <ul className="setup-list">{connection.grants.map((grant) => <li key={grant.grantId}>
+              {grant.toolId} · {grant.action} · {grant.resource} · granted {grant.issuedAt}{' '}
+              <button type="button" aria-label={`Remove ${grant.toolId} for ${grant.resource}`} onClick={() => void store.revokeGrant(grant.grantId)}>Remove</button>
+            </li>)}</ul>}
+          <p className="setup-feedback" role="status" aria-live="polite">{connection.grantsMessage}</p>
         </section>
       </div>
     </section>

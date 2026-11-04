@@ -74,6 +74,7 @@ yet, so every registered candidate is treated as resource eligible.
 """
 
 import asyncio
+import os
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -93,6 +94,7 @@ from pydantic import (
 )
 
 from phoenix.agents import control_prompts, prompts
+from phoenix.agents.answer_stream import PartialAnswers, StreamingProvider
 from phoenix.agents.capability_steps import (
     CapabilityCallRecord,
     CapabilityStepRunner,
@@ -101,6 +103,7 @@ from phoenix.agents.capability_steps import (
     requires_written_file,
     wrote_file,
 )
+from phoenix.agents.chat_context import ContextSource, chat_prompt
 from phoenix.agents.combined_planning import (
     CombinedPlanningResponder,
     capability_lines,
@@ -175,6 +178,7 @@ from phoenix.agents.planner import (
     PlanningRequest,
     PlanningResponder,
 )
+from phoenix.agents.quick_commands import QuickAnswerRecord, QuickCallRecord
 from phoenix.agents.recovery import (
     MahoragaRecovery,
     MahoragaRecoveryError,
@@ -258,6 +262,8 @@ from phoenix.agents.triage import (
     TriageFallbackReason,
     TriageOutcome,
     fallback_reason,
+    rule_decides_direct,
+    rule_wants_research,
 )
 from phoenix.agents.verifier import (
     LeviVerifier,
@@ -319,8 +325,31 @@ class ModelTierTable:
         return self.roles.get(agent_id, self.default)
 
 
-def default_tier_table() -> ModelTierTable:
-    """MASTER_SPEC BLAZE-6 tiers; T0 is always the last fallback."""
+# PHX-134 (ADR-240): the tier of AIZEN's plan and PHOENIX's step assignment.
+PLANNER_TIER_ENV = "PHOENIX_PLANNER_TIER"
+PLANNER_TIERS = ("9b", "4b")
+DEFAULT_PLANNER_TIER = "9b"
+
+
+def planner_tier() -> str:
+    """``PHOENIX_PLANNER_TIER``; unset or blank is the default. Any other value
+    is refused, never guessed (ADR-241)."""
+    value = os.environ.get(PLANNER_TIER_ENV, "").strip().lower()
+    if not value:
+        return DEFAULT_PLANNER_TIER
+    if value not in PLANNER_TIERS:
+        raise ValueError(
+            f"{PLANNER_TIER_ENV} must be one of {', '.join(PLANNER_TIERS)}"
+        )
+    return value
+
+
+def default_tier_table(planner: str | None = None) -> ModelTierTable:
+    """MASTER_SPEC BLAZE-6 tiers; T0 is always the last fallback.
+
+    ``planner`` (default ``planner_tier()``) sets only the ``strategist`` and
+    ``assignment`` candidates; LEVI's verifier keeps T2 (ADR-240).
+    """
 
     def refs(*models: str) -> tuple[ModelCandidateRef, ...]:
         return tuple(
@@ -328,15 +357,20 @@ def default_tier_table() -> ModelTierTable:
         )
 
     t0, t1, t2, code = "qwen3.5:2b", "qwen3.5:4b", "qwen3.5:9b", "qwen2.5-coder:7b"
+    tier = planner_tier() if planner is None else planner
+    if tier not in PLANNER_TIERS:
+        raise ValueError(f"planner tier must be one of {', '.join(PLANNER_TIERS)}")
+    plan = refs(t2, t1, t0) if tier == "9b" else refs(t1, t0)
     return ModelTierTable(
         roles=MappingProxyType(
             {
                 "phoenix": refs(t1, t0),
-                # PHX-047 (ADR-083): PHOENIX's step assignment runs on T2.
-                "assignment": refs(t2, t1, t0),
+                # PHX-047 (ADR-083): PHOENIX's step assignment runs on T2;
+                # PHX-134 (ADR-240) can move it and AIZEN's plan to T1.
+                "assignment": plan,
                 # PHX-105 (ADR-090): PHOENIX's request triage, thinking off.
                 TRIAGE_ROLE: refs(t1, t0),
-                "strategist": refs(t2, t1, t0),
+                "strategist": plan,
                 "verifier": refs(t2, t1, t0),
                 "build_engineer": refs(code, t2, t1, t0),
                 # PHX-119 (ADR-155): KAIDO's degraded reply runs on T0 only.
@@ -486,6 +520,11 @@ class MissionTrace(_Value):
     capability_calls: tuple[CapabilityCallRecord, ...] = ()
     # PHX-112 (ADR-150): computer-control actions, IDs/codes/hashes only.
     control_calls: tuple[ControlCallRecord, ...] = ()
+    # PHX-130 (ADR-220): a quick command's one link opening; such a mission
+    # never triages, plans or calls a model (path None, label "quick").
+    quick_calls: tuple[QuickCallRecord, ...] = ()
+    # PHX-133 (ADR-237): a local-clock answer (time/date), no tool, no model.
+    quick_answers: tuple[QuickAnswerRecord, ...] = ()
 
     @model_validator(mode="after")
     def consistent_triage(self) -> Self:
@@ -500,6 +539,11 @@ class MissionTrace(_Value):
             and self.path != OrchestrationPath.COMPLEX
         ):
             raise ValueError("A triage fallback takes the complex path")
+        if (
+            self.triage_outcome == TriageOutcome.RULE
+            and self.path != OrchestrationPath.DIRECT
+        ):
+            raise ValueError("The pre-triage rule only takes the direct path")
         if any(record.direct_fallback for record in self.recoveries) and (
             self.path != OrchestrationPath.COMPLEX or TaskState.COMPLETED in self.states
         ):
@@ -598,6 +642,8 @@ class _Evidence:
     kaido: KaidoRecord | None = None
     # PHX-110: retrievals and verified citations (cited text stays in memory).
     knowledge: KnowledgeLedger = field(default_factory=KnowledgeLedger)
+    # PHX-140 (ADR-264): the caller's conversation context for DIRECT/KAIDO.
+    context: ContextSource | None = None
 
     @property
     def recovery_actions(self) -> int:
@@ -708,7 +754,10 @@ class PhoenixRuntime:
         research_tool: WebResearchTool | None = None,
         capabilities: CapabilityTools | None = None,
         control: ControlStepRunner | None = None,
+        partial_answers: PartialAnswers | None = None,
     ) -> None:
+        # PHX-132 (ADR-231): with partial_answers the DIRECT reply streams.
+        self._partials = partial_answers
         registry = (
             build_default_agent_registry() if agent_registry is None else agent_registry
         )
@@ -889,6 +938,7 @@ class PhoenixRuntime:
         session_id: str | None = None,
         decided_by: TriageOutcome = TriageOutcome.CLIENT,
         approvals: Sequence[ControlApproval] = (),
+        context: ContextSource | None = None,
     ) -> MissionResult:
         """grants and session_id are caller (user) evidence for document steps.
 
@@ -952,7 +1002,7 @@ class PhoenixRuntime:
             raise PhoenixRuntimeError("Caller task already owns an active mission")
         mission = _Mission(task, control=mission_control)
         self._active[request.request_id] = mission
-        evidence = _Evidence(directive)
+        evidence = _Evidence(directive, context=context)
         if directive is not None:
             evidence.triage_outcome = decider
         events = MissionEvents(self._events, request.request_id)
@@ -1135,8 +1185,12 @@ class PhoenixRuntime:
                 {**record, "outcome": "unavailable"}
             )
             raise
+        # PHX-140 (ADR-264): KAIDO sees the same context when it fits.
+        prompt = await chat_prompt(self._guard, request.text, evidence.context)
+        if not within_budget(prompt):
+            prompt = request.text
         async with _agent_phase(events, KAIDO_AGENT_ID, KAIDO_ROLE):
-            text = await kaido_answer(binding, request.text)
+            text = await kaido_answer(binding, prompt)
         evidence.kaido = KaidoRecord.model_validate({**record, "outcome": "answered"})
         return text
 
@@ -1475,6 +1529,22 @@ class PhoenixRuntime:
         trace and published as agent.failed (role triage) with the reason.
         """
         async with _agent_phase(events, "phoenix", TRIAGE_ROLE) as phase:
+            # PHX-140 (ADR-266): a clearly current/online question goes to the
+            # research planner when web research is enabled.
+            if self._research is not None and rule_wants_research(request.text):
+                evidence.triage_outcome = TriageOutcome.DECIDED
+                evidence.path = OrchestrationPath.COMPLEX
+                phase.result["triage_outcome"] = TriageOutcome.DECIDED.value
+                phase.result["path"] = OrchestrationPath.COMPLEX.value
+                return OrchestrationPath.COMPLEX
+            # PHX-131 (ADR-225): a clearly simple request goes DIRECT by rule,
+            # with no generation; anything else is triaged by the model.
+            if rule_decides_direct(request.text):
+                evidence.triage_outcome = TriageOutcome.RULE
+                evidence.path = OrchestrationPath.DIRECT
+                phase.result["triage_outcome"] = TriageOutcome.RULE.value
+                phase.result["path"] = OrchestrationPath.DIRECT.value
+                return OrchestrationPath.DIRECT
             try:
                 async with asyncio.timeout(self._limits.triage_timeout_seconds):
                     health = await self._health(evidence)
@@ -1503,6 +1573,35 @@ class PhoenixRuntime:
     async def _direct(
         self, request: PhoenixRequest, evidence: _Evidence, events: MissionEvents
     ) -> str:
+        partials = self._partials
+        attempts = 0
+
+        async def delta(text: str) -> None:
+            # PHX-132 (ADR-231): display text only; never stored or verified.
+            assert partials is not None
+            partials.feed(request.request_id, text)
+            await events.emit(
+                EventType.AGENT_STARTED,
+                agent_id="phoenix",
+                mission_id=request.request_id,
+                answer_delta=text,
+            )
+
+        def streamed(binding: ModelBinding) -> ModelBinding:
+            # Only the first attempt streams, so a recovery retry never
+            # appends to an earlier attempt's text; the final answer is the
+            # mission result either way (identical checks in _generate).
+            nonlocal attempts
+            attempts += 1
+            if partials is None or attempts > 1:
+                return binding
+            partials.start(request.request_id)
+            return replace(binding, provider=StreamingProvider(binding.provider, delta))
+
+        # PHX-140 (ADR-264): the reply sees the conversation and memories as
+        # guarded data; triage, plan and trace keep the user's own text.
+        prompt = await chat_prompt(self._guard, request.text, evidence.context)
+        asked = PhoenixRequest(request_id=request.request_id, text=prompt)
         async with _agent_phase(events, "phoenix", "direct"):
             health = await self._health(evidence)
             result = await self._recovering(
@@ -1512,9 +1611,9 @@ class PhoenixRuntime:
                 role=RecoveryRole.DIRECT,
                 binding=self._control("phoenix", health, evidence),
                 attempt=lambda binding: self._orchestrator.execute(
-                    request,
+                    asked,
                     OrchestrationPath.DIRECT,
-                    direct_responder=ModelDirectResponder(binding),
+                    direct_responder=ModelDirectResponder(streamed(binding)),
                 ),
             )
         assert result.text is not None  # COMPLETED is the only direct outcome.

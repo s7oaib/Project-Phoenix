@@ -75,10 +75,12 @@ from phoenix.models.provider import (
 from phoenix.persistence.database import create_engine_for_settings
 from phoenix.tools.document_files import document_file_tool_definitions
 from phoenix.tools.filesystem import filesystem_tool_definitions
+from phoenix.tools.open_app import open_app_tool_definitions
+from phoenix.tools.open_link import open_link_tool_definitions
 from phoenix.tools.web_research import web_research_tool_definitions
 from phoenix.tools.youtube import youtube_tool_definitions
 
-HEAD = "0009_default_mission_path"
+HEAD = "0010_triage_rule"
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = secrets.token_urlsafe(32)
 PORT = 48765  # Host-header identity for in-process clients; nothing binds it
@@ -268,6 +270,8 @@ def test_lifespan_builds_services_once_and_closes_them(settings: AppSettings) ->
             *document_file_tool_definitions(),
             *youtube_tool_definitions(),
             *control_tool_definitions(),
+            *open_link_tool_definitions(),  # PHX-130
+            *open_app_tool_definitions(),  # PHX-133
         )
         assert services.runtime._research is None
         # No workspace yet: capability steps offer media only, not documents.

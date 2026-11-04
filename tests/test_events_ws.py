@@ -854,12 +854,17 @@ VOICE_PACKAGES = frozenset(
 )
 
 
+# PHX-138 (ADR-258) adds yt-dlp (one package record, no dependencies); it is
+# set aside here like the voice stack.
+YT_DLP = "yt-dlp>=2026.10.21,<2027"
+
+
 def test_exact_websockets_dependency_delta() -> None:
     before = tomllib.loads(historic("pyproject.toml"))
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert project["project"]["dependencies"].count(WEBSOCKETS) == 1
     project["project"]["dependencies"].remove(WEBSOCKETS)
-    for requirement in VOICE_REQUIREMENTS:
+    for requirement in (*VOICE_REQUIREMENTS, YT_DLP):
         project["project"]["dependencies"].remove(requirement)
     assert project["tool"].pop("uv") == {
         "constraint-dependencies": ["huggingface-hub<1"]
@@ -873,7 +878,7 @@ def test_exact_websockets_dependency_delta() -> None:
         "constraints": [{"name": "huggingface-hub", "specifier": "<1"}]
     }
     assert old == new
-    for name in VOICE_PACKAGES:
+    for name in (*VOICE_PACKAGES, "yt-dlp"):
         del new_records[name]
     assert set(new_records) - set(old_records) == {"websockets"}
     assert not set(old_records) - set(new_records)
@@ -894,7 +899,7 @@ def test_exact_websockets_dependency_delta() -> None:
         if name == "phoenix":
             requires = after["metadata"]["requires-dist"]
             assert {"name": "websockets", "specifier": ">=17.2,<18"} in requires
-            voice = {r.split(">")[0] for r in VOICE_REQUIREMENTS}  # PHX-114
+            voice = {r.split(">")[0] for r in (*VOICE_REQUIREMENTS, YT_DLP)}
             for entries in (after["dependencies"], requires):
                 entries[:] = [
                     x

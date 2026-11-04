@@ -133,7 +133,7 @@ export function readPermission(value: unknown): PendingPermission | undefined {
 export type MissionView = {
   missionId: string; conversationId: string; status: string;
   /** PHX-105: null until triage decides; triageOutcome says who decided. */
-  path: 'direct' | 'complex' | null; triageOutcome: 'decided' | 'fallback' | 'client' | null; failureCode: string | null;
+  path: 'direct' | 'complex' | null; triageOutcome: 'decided' | 'fallback' | 'client' | 'rule' | null; failureCode: string | null;
   rerunOf: string | null; rerunId: string | null; taskId: string | null; taskStates: readonly string[];
   permissionRequestId: string | null;
   /** Review M1: whether LEVI verified a completed mission's answer (undefined until completed). */
@@ -200,7 +200,7 @@ export function readMission(value: unknown): MissionView | undefined {
   return {
     missionId, conversationId, status, path, verification: verificationOf({ status, path, taskStates: states, kaido }),
     kaido, sources: status === 'completed' ? readSources(value.sources) : [],
-    triageOutcome: value.triage_outcome === 'decided' || value.triage_outcome === 'fallback' || value.triage_outcome === 'client' ? value.triage_outcome : null,
+    triageOutcome: value.triage_outcome === 'decided' || value.triage_outcome === 'fallback' || value.triage_outcome === 'client' || value.triage_outcome === 'rule' ? value.triage_outcome : null,
     failureCode: str(value.failure_code, 64) ?? null, rerunOf: id(value.rerun_of) ?? null,
     rerunId: id(value.rerun_id) ?? null, taskId: id(value.task_id) ?? null, taskStates: states,
     permissionRequestId: request,
@@ -247,6 +247,8 @@ export function toPermissionEntries(pending: readonly PendingPermission[], actor
       requestId: request.requestId, actorId, toolId: request.toolId, action: request.action, resource: request.resource,
       reason: request.riskLevel === 'P4'
         ? `Mission ${request.missionId} needs ${request.action} through ${request.toolId}. One-time approval (P4): Approve allows this exact action once and queues the linked re-run; no grant is stored, so PHOENIX asks again next time. Deny fails the mission.`
+        : request.riskLevel === 'P1'
+        ? `Mission ${request.missionId} needs ${request.action} through ${request.toolId}. Approve (or Allow this session above) stores a grant for this launch; Always allow, above, remembers it until you remove it in Settings. Either queues the linked re-run; Deny fails the mission.`
         : `Mission ${request.missionId} needs ${request.action} through ${request.toolId}. Approve stores a grant for this launch (session) and queues the linked re-run; Deny fails the mission.`,
       requestedAt: request.requestedAt,
     };
@@ -379,6 +381,25 @@ export function readSettings(body: unknown): SettingsView | undefined {
   };
 }
 
+/** PHX-129 (ADR-215): a remembered ("always") grant the user can remove in Settings. */
+export type GrantView = { grantId: string; toolId: string; action: string; resource: string; issuedAt: string };
+export type GrantChoice = 'session' | 'always';
+
+/** Active "always" grants only; session grants end with the launch and are not listed. */
+export function readGrants(body: unknown): GrantView[] {
+  const found: GrantView[] = [];
+  for (const entry of items(body).slice(0, 200)) {
+    if (!isObject(entry) || entry.duration !== 'always' || entry.status !== 'active') continue;
+    const grantId = id(entry.grant_id);
+    const toolId = str(entry.tool_id, 128);
+    const action = str(entry.action, 256);
+    const resource = str(entry.resource, 512);
+    const issuedAt = utc(entry.issued_at);
+    if (grantId && toolId && action && resource && issuedAt) found.push({ grantId, toolId, action, resource, issuedAt });
+  }
+  return found;
+}
+
 export const missionPathText: Readonly<Record<MissionPath, string>> = {
   auto: 'Automatic (PHOENIX decides)', direct: 'Direct answer', complex: 'Planned steps (AIZEN plan, workspace documents)',
 };
@@ -463,6 +484,30 @@ export function readKaido(body: unknown): KaidoView | undefined {
   const engaged = flag(body.kaido.engaged);
   if (engaged === undefined) return undefined;
   return { engaged, trigger: engaged ? plainId(body.kaido.trigger) ?? null : null };
+}
+
+// ---- PHX-132 (ADR-234): live DIRECT answers
+
+export const PARTIAL_MAX = 20000;
+export const PARTIAL_BADGE = '[Answering…]';
+/** A DIRECT answer delta: agent.started from phoenix with exactly mission_id and answer_delta. */
+export function answerDelta(event: EventEnvelope): { missionId: string; text: string } | undefined {
+  if (event.eventType !== 'agent.started' || event.agentId !== 'phoenix') return undefined;
+  const keys = Object.keys(event.payload);
+  const text = event.payload.answer_delta;
+  const missionId = id(event.payload.mission_id);
+  if (keys.length !== 2 || typeof text !== 'string' || text.length === 0 || text.length > 2048) return undefined;
+  if (!missionId || missionId !== event.correlationId) return undefined;
+  return { missionId, text };
+}
+/** The chat with each live answer appended (until its stored answer replaces it). */
+export function withPartials(messages: readonly ChatMessage[], partials: ReadonlyMap<string, string>): ChatMessage[] {
+  const live: ChatMessage[] = [];
+  for (const [missionId, text] of partials) {
+    if (!text.trim() || messages.some((message) => message.id.startsWith(`${missionId}:answer`))) continue;
+    live.push({ id: `${missionId}:partial`, role: 'assistant', content: `${PARTIAL_BADGE}\n${text.slice(-(MESSAGE_PART - 32))}` });
+  }
+  return [...messages, ...live].slice(-MESSAGE_WINDOW);
 }
 
 // ---- live evidence from content-free events
@@ -701,6 +746,9 @@ export type ConnectionView = {
   searchHits: SearchHitView[] | undefined;
   knowledgeBusy: boolean;
   knowledgeMessage: string;
+  // PHX-129
+  grants: GrantView[] | undefined;
+  grantsMessage: string;
 };
 export type PortsView = {
   chatPort: ChatPort; taskPort: TaskGraphPort; agentPort: AgentPort; permissionPort: PermissionPort;
@@ -708,14 +756,16 @@ export type PortsView = {
 };
 
 type Activity = { state: AgentStatus['state']; missionId: string; currentTask?: string };
-type Refresh = 'conversation' | 'mission' | 'permissions' | 'models' | 'settings' | 'onboarding' | 'capabilities' | 'metrics' | 'ready' | 'voice' | 'knowledge';
-const EVERYTHING: readonly Refresh[] = ['conversation', 'mission', 'permissions', 'models', 'settings', 'onboarding', 'capabilities', 'metrics', 'ready', 'voice', 'knowledge'];
+type Refresh = 'conversation' | 'mission' | 'permissions' | 'models' | 'settings' | 'onboarding' | 'capabilities' | 'metrics' | 'ready' | 'voice' | 'knowledge' | 'grants';
+const EVERYTHING: readonly Refresh[] = ['conversation', 'mission', 'permissions', 'models', 'settings', 'onboarding', 'capabilities', 'metrics', 'ready', 'voice', 'knowledge', 'grants'];
 
 export class PhoenixStore {
   private backend: BackendState = { state: 'starting' };
   private stream: StreamState = { connected: false, code: null };
   private conversationId: string | undefined;
   private messages: ChatMessage[] = [];
+  private partials = new Map<string, string>(); // PHX-132: live DIRECT answers by mission
+  private settledPartials = new Set<string>();
   private activeMissionId: string | undefined;
   private mission: MissionView | undefined;
   private verifications = new Map<string, Verification>();
@@ -751,6 +801,8 @@ export class PhoenixStore {
   private searchHits: SearchHitView[] | undefined;
   private knowledgeBusy = false;
   private knowledgeMessage = '';
+  private grants: GrantView[] | undefined;
+  private grantsMessage = '';
   private due = new Set<Refresh>();
   private timer: unknown;
   private poller: unknown;
@@ -821,6 +873,7 @@ export class PhoenixStore {
     if (!isObject(value) || typeof value.connected !== 'boolean') return;
     const code = typeof value.code === 'number' ? value.code : null;
     this.stream = { connected: value.connected, code };
+    this.partials.clear(); // a gap in deltas: the answer comes over REST
     // Any (re)connection or close may have missed events: reload everything over REST.
     this.schedule(...EVERYTHING);
     this.changed();
@@ -829,6 +882,16 @@ export class PhoenixStore {
   onEvent(value: unknown): void {
     const event = readEvent(value);
     if (!event) return;
+    // PHX-132 (ADR-234): a DIRECT answer delta grows the live answer of the active mission only;
+    // it is never a trace, metric or log line. The final answer over REST replaces it.
+    const delta = answerDelta(event);
+    if (delta) {
+      if (delta.missionId === this.activeMissionId) {
+        this.partials.set(delta.missionId, ((this.partials.get(delta.missionId) ?? '') + delta.text).slice(0, PARTIAL_MAX));
+        this.changed();
+      }
+      return;
+    }
     this.traces = [...this.traces, toTrace(event)].slice(-RING);
     const metric = toMetric(event);
     if (metric) this.metrics = [...this.metrics, metric].slice(-RING);
@@ -884,6 +947,7 @@ export class PhoenixStore {
         const status = str(payload.mission_status, 32);
         if (!status) break;
         evidence.missionStatus = status;
+        if (TERMINAL_STATUSES.includes(status) || status === 'waiting_permission') this.settledPartials.add(missionId);
         const rerunOf = id(payload.rerun_of);
         if (rerunOf && rerunOf === this.activeMissionId) this.activeMissionId = missionId; // linked re-run
         if (status === 'running' && missionId === this.activeMissionId) {
@@ -978,6 +1042,7 @@ export class PhoenixStore {
       due.has('ready') ? this.loadReady() : undefined,
       due.has('voice') ? this.loadVoice() : undefined,
       due.has('knowledge') ? this.loadKnowledge() : undefined,
+      due.has('grants') ? this.loadGrants() : undefined,
     ].map((task) => task?.catch(() => undefined)));
     if (due.has('conversation')) await this.loadConversation().catch(() => undefined);
     this.changed();
@@ -998,6 +1063,20 @@ export class PhoenixStore {
     // The saved default becomes this launch's mission path once, when it is first read.
     if (settings && !this.settings) this.path = settings.defaultMissionPath;
     if (settings) this.settings = settings;
+  }
+
+  private async loadGrants(): Promise<void> {
+    this.grants = readGrants(await this.get('/grants?limit=200'));
+  }
+
+  /** PHX-129: the user's "Remove" in Settings. Revoking sets revoked_at; the audit row stays. */
+  async revokeGrant(grantId: string): Promise<void> {
+    if (!UUID.test(grantId)) return;
+    const result = await this.transport.request('POST', `/grants/${grantId}/revoke`).catch(() => ({ status: 0, body: undefined }));
+    this.grantsMessage = result.status === 200 ? 'Removed. PHOENIX will ask again next time.'
+      : result.status === 409 ? 'That permission was already removed.' : `The permission was not removed (${errorCode(result.body)}).`;
+    this.schedule('grants');
+    this.changed();
   }
 
   private async loadOnboarding(): Promise<void> {
@@ -1125,6 +1204,13 @@ export class PhoenixStore {
       if (mission?.verification) this.sources.set(missionId, mission.sources);
     }));
     this.messages = toChatMessages(body, this.verifications, this.sources);
+    // The stored answer (or the settled status) replaces a live answer.
+    for (const missionId of [...this.partials.keys()]) {
+      if (this.settledPartials.has(missionId) || this.messages.some((message) => message.id.startsWith(`${missionId}:answer`))) {
+        this.partials.delete(missionId);
+        this.settledPartials.delete(missionId);
+      }
+    }
   }
 
   // -- port operations
@@ -1139,16 +1225,20 @@ export class PhoenixStore {
     if (!missionId || !conversationId) throw new ApiError(result.status, 'invalid_response');
     this.conversationId = conversationId;
     this.activeMissionId = missionId;
+    this.partials.clear();
+    this.settledPartials.clear();
     this.missionMessage = '';
     this.mission = undefined;
     this.schedule('conversation', 'mission');
     this.changed();
   }
 
-  async submitDecision(requestId: string, decision: DecisionIntent): Promise<void> {
-    if (!UUID.test(requestId) || (decision !== 'approved' && decision !== 'denied')) throw new ApiError(0, 'invalid_request');
+  async submitDecision(requestId: string, decision: DecisionIntent, duration: GrantChoice = 'session'): Promise<void> {
+    if (!UUID.test(requestId) || (decision !== 'approved' && decision !== 'denied') || (duration !== 'session' && duration !== 'always')) throw new ApiError(0, 'invalid_request');
+    // PHX-129 (ADR-215): "always" is offered for a P1 request only; the backend still refuses it for P2+.
+    if (duration === 'always' && (decision !== 'approved' || this.pending.find((entry) => entry.requestId === requestId)?.riskLevel !== 'P1')) throw new ApiError(0, 'invalid_request');
     const result = decision === 'approved'
-      ? await this.transport.request('POST', `/permissions/${requestId}/approve`, { duration: 'session' })
+      ? await this.transport.request('POST', `/permissions/${requestId}/approve`, { duration })
       : await this.transport.request('POST', `/permissions/${requestId}/deny`, {});
     const expected = decision === 'approved' ? 202 : 200;
     if (result.status !== expected) throw new ApiError(result.status, errorCode(result.body));
@@ -1158,7 +1248,7 @@ export class PhoenixStore {
       if (rerun && (!this.activeMissionId || superseded === this.activeMissionId)) this.activeMissionId = rerun;
     }
     this.pending = this.pending.filter((entry) => entry.requestId !== requestId);
-    this.schedule('permissions', 'mission', 'conversation');
+    this.schedule('permissions', 'mission', 'conversation', ...(duration === 'always' ? ['grants' as const] : []));
     this.changed();
   }
 
@@ -1281,7 +1371,7 @@ export class PhoenixStore {
     const evidence = this.evidence.get(this.activeMissionId ?? '')?.steps.length ? this.evidence.get(this.activeMissionId ?? '') : this.evidence.get(this.latestEvidence ?? '');
     const graph = status === 'connected' ? toTaskGraph(evidence, this.mission) : undefined;
     return {
-      chatPort: { status, messages: [...this.messages], sendText: this.sendText },
+      chatPort: { status, messages: withPartials(this.messages, this.partials), sendText: this.sendText },
       taskPort: graph ? { status, graph } : { status },
       agentPort: { status, agents },
       permissionPort: { status, requests: toPermissionEntries(this.pending, this.actors), submitDecision: this.submitDecision },
@@ -1301,6 +1391,7 @@ export class PhoenixStore {
         approvals: [...this.pending], kaido: this.kaido, voice: this.voice, voiceInterrupted: this.voiceInterrupted, voiceBusy: this.voiceBusy,
         voiceMessage: this.voiceMessage, documents: this.documents, memories: this.memories, searchHits: this.searchHits,
         knowledgeBusy: this.knowledgeBusy, knowledgeMessage: this.knowledgeMessage,
+        grants: this.grants, grantsMessage: this.grantsMessage,
       },
     };
   }

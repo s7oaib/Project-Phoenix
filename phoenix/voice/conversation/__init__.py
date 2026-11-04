@@ -10,9 +10,10 @@ from __future__ import annotations
 import asyncio
 import math
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from enum import StrEnum
 from typing import ClassVar, Self, TypeVar, cast
+from uuid import uuid4
 
 from pydantic import (
     BaseModel,
@@ -392,6 +393,16 @@ class VoiceResponder(ABC):
     async def respond(self, request: VoiceResponseRequest) -> VoiceResponseDraft:
         """Return subordinate correlated text, never permissions or PCM."""
 
+    async def respond_with_preview(
+        self,
+        request: VoiceResponseRequest,
+        preview: Callable[[str], Awaitable[bool]],
+    ) -> VoiceResponseDraft:
+        """PHX-132 (ADR-233): may call ``preview`` once with the answer's first
+        sentence before the full draft; it returns False after a barge-in, and
+        the responder should then return at once. The default never previews."""
+        return await self.respond(request)
+
 
 class AudioPlaybackRequest(_Contract):
     _output = True
@@ -690,6 +701,7 @@ class VoiceConversationManager:
         self._interrupted = False
         self._sleep_requested = False
         self._event_failed = False
+        self._preview_text: str | None = None  # PHX-132: spoken early
 
     def _sleep_local(self) -> None:
         self._state = VoiceConversationState.SLEEPING
@@ -855,7 +867,12 @@ class VoiceConversationManager:
             self._check_task()
             return self._fallback(request, VoiceFailureStage.STT)
         try:
-            raw_draft = await self._responder.respond(response_request)
+            if degraded:
+                raw_draft = await self._responder.respond(response_request)
+            else:
+                raw_draft = await self._responder.respond_with_preview(
+                    response_request, lambda text: self._preview(request, text)
+                )
             self._check_task()
             draft = VoiceResponseDraft.model_validate(raw_draft)
             draft.validate_request(response_request)
@@ -871,57 +888,69 @@ class VoiceConversationManager:
                 transcript.text,
                 draft.response_text,
             )
-        try:
-            raw_tts_cap = await self._tts.capabilities()
-            self._check_task()
-            tts_cap = TtsCapabilities.model_validate(raw_tts_cap)
-            tts_cap.validate_provider(self._tts.provider_id)
-            outgoing = TtsRequest(
-                operation_id=request.turn_id,
-                text=draft.response_text,
-                voice_profile_id=request.tts_voice_profile_id,
-                language_hint=request.tts_language_hint,
-            )
-            outgoing.validate_capabilities(tts_cap)
-            raw_audio = await self._tts.synthesize(outgoing)
-            self._check_task()
-            audio = TtsAudio.model_validate(raw_audio)
-            audio.validate_request(outgoing, tts_cap)
-        except Exception:
-            self._check_task()
-            return self._fallback(
-                request, VoiceFailureStage.TTS, transcript.text, draft.response_text
-            )
-        playback = AudioPlaybackRequest(
-            playback_id=request.turn_id,
-            session_id=request.session_id,
-            turn_id=request.turn_id,
-            audio=audio,
-        )
-        async with self._lock:
-            self._check_task()
-            await self._publish(
-                EventType.VOICE_SPEAKING, request.session_id, request.turn_id
-            )
-            self._playback = request.turn_id
-            self._state = VoiceConversationState.SPEAKING
+        # PHX-132 (ADR-233): after an early first sentence only the rest is
+        # spoken; a barge-in during it ends the turn without the rest.
+        text = draft.response_text
+        spoken = self._preview_text
+        if spoken is not None and text.startswith(spoken):
+            text = text[len(spoken) :].strip()
+        speak_rest = bool(text) and not (self._interrupted or self._sleep_requested)
         playback_failed = False
-        try:
-            raw_result = await self._output.play(playback)
-            self._check_task()
-            result = AudioPlaybackResult.model_validate(raw_result)
-            result.validate_request(playback, self._output.output_id)
-        except Exception:
-            self._check_task()
-            playback_failed = True
+        status: AudioPlaybackStatus | None = None
+        if speak_rest:
+            try:
+                raw_tts_cap = await self._tts.capabilities()
+                self._check_task()
+                tts_cap = TtsCapabilities.model_validate(raw_tts_cap)
+                tts_cap.validate_provider(self._tts.provider_id)
+                outgoing = TtsRequest(
+                    operation_id=request.turn_id,
+                    text=text,
+                    voice_profile_id=request.tts_voice_profile_id,
+                    language_hint=request.tts_language_hint,
+                )
+                outgoing.validate_capabilities(tts_cap)
+                raw_audio = await self._tts.synthesize(outgoing)
+                self._check_task()
+                audio = TtsAudio.model_validate(raw_audio)
+                audio.validate_request(outgoing, tts_cap)
+            except Exception:
+                self._check_task()
+                return self._fallback(
+                    request,
+                    VoiceFailureStage.TTS,
+                    transcript.text,
+                    draft.response_text,
+                )
+            playback = AudioPlaybackRequest(
+                playback_id=request.turn_id,
+                session_id=request.session_id,
+                turn_id=request.turn_id,
+                audio=audio,
+            )
+            async with self._lock:
+                self._check_task()
+                await self._publish(
+                    EventType.VOICE_SPEAKING, request.session_id, request.turn_id
+                )
+                self._playback = request.turn_id
+                self._state = VoiceConversationState.SPEAKING
+            try:
+                raw_result = await self._output.play(playback)
+                self._check_task()
+                result = AudioPlaybackResult.model_validate(raw_result)
+                result.validate_request(playback, self._output.output_id)
+                status = result.status
+            except Exception:
+                self._check_task()
+                playback_failed = True
         async with self._lock:
             self._check_task()
             if self._sleep_requested:
                 self._sleep_local()
                 outcome = VoiceTurnOutcome.INTERRUPTED
             elif playback_failed or (
-                result.status is AudioPlaybackStatus.INTERRUPTED
-                and not self._interrupted
+                status is AudioPlaybackStatus.INTERRUPTED and not self._interrupted
             ):
                 return self._fallback(
                     request,
@@ -949,6 +978,65 @@ class VoiceConversationManager:
                 response_text=draft.response_text,
                 final_state=self._state,
             )
+
+    async def _preview(self, request: VoiceTurnRequest, text: str) -> bool:
+        """PHX-132 (ADR-233): speak the first sentence while PHOENIX answers.
+
+        False once the user barged in or asked for sleep. Barge-in works as for
+        any playback. A synthesis or playback failure only skips the preview;
+        the whole answer is then spoken as before.
+        """
+        if self._preview_text is not None or self._interrupt_attempted:
+            return not (self._interrupted or self._sleep_requested)
+        try:
+            cap = TtsCapabilities.model_validate(await self._tts.capabilities())
+            self._check_task()
+            cap.validate_provider(self._tts.provider_id)
+            outgoing = TtsRequest(
+                operation_id=str(uuid4()),
+                text=text,
+                voice_profile_id=request.tts_voice_profile_id,
+                language_hint=request.tts_language_hint,
+            )
+            outgoing.validate_capabilities(cap)
+            audio = TtsAudio.model_validate(await self._tts.synthesize(outgoing))
+            self._check_task()
+            audio.validate_request(outgoing, cap)
+        except Exception:
+            self._check_task()
+            return True
+        playback = AudioPlaybackRequest(
+            playback_id=outgoing.operation_id,
+            session_id=request.session_id,
+            turn_id=request.turn_id,
+            audio=audio,
+        )
+        async with self._lock:
+            self._check_task()
+            await self._publish(
+                EventType.VOICE_SPEAKING, request.session_id, request.turn_id
+            )
+            self._playback = playback.playback_id
+            self._state = VoiceConversationState.SPEAKING
+        completed = False
+        try:
+            raw_result = await self._output.play(playback)
+            self._check_task()
+            result = AudioPlaybackResult.model_validate(raw_result)
+            result.validate_request(playback, self._output.output_id)
+            completed = result.status is AudioPlaybackStatus.COMPLETED
+        except Exception:
+            self._check_task()
+        async with self._lock:
+            self._check_task()
+            self._playback = None
+            stopped = self._interrupted or self._sleep_requested
+            if not stopped:
+                self._state = VoiceConversationState.THINKING
+                self._barge_count = 0
+            if completed or stopped:
+                self._preview_text = text
+            return not stopped
 
     async def _interrupt(self, *, sleep: bool) -> bool:
         # Caller holds _lock, so completion cannot outrun an acknowledgement/event.

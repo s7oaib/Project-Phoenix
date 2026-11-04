@@ -1293,7 +1293,7 @@ def test_architecture_inert_source_exact_vocabulary_schema_and_dependencies() ->
     assert len(EventType) == 32
     scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
     assert (
-        scripts.get_heads() == ["0009_default_mission_path"]
+        scripts.get_heads() == ["0010_triage_rule"]
         and len(list(scripts.walk_revisions())) == 9
     )
     tree = ast.parse(inspect.getsource(module))

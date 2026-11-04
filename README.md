@@ -18,6 +18,21 @@ Healthy response:
 
 > **All agents online. All core systems operational. What's the mission?**
 
+## Quick commands
+
+Say or type "open browser", "open youtube", "open google", "search youtube
+for <x>" (or "play <x> on youtube") and "search google for <x>" (or "google
+<x>"): PHOENIX opens the link in your normal default browser at once, with no
+AI planning (PHX-130, ADR-220). The first time, PHOENIX asks to open links;
+choose **Always allow** (the approve API's `{"duration": "always"}`) and it
+never asks again. Revoke it any time under Settings, Permissions (grants).
+
+PHX-133 adds "open wikipedia", "search wikipedia for <x>", "open github",
+"open gmail", "open maps", "search maps for <x>", "directions to <x>", "open
+google news"; "what time is it" / "what's the date" (answered at once from
+the local clock); and "open notepad", "open calculator", "open file
+explorer" / "open files" (one separate **Always allow** covers the apps).
+
 ## Primary stack
 
 - Desktop: Tauri 2

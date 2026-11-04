@@ -1824,7 +1824,7 @@ def test_no_action_persistence_or_dependency_change() -> None:
     assert len(EventType) == 32
     assert ScriptDirectory.from_config(
         Config(str(ROOT / "alembic.ini"))
-    ).get_heads() == ["0009_default_mission_path"]
+    ).get_heads() == ["0010_triage_rule"]
     # PHX-072 separately owns the exact parser manifest/lock promotion.
     # PHX-080 owns only App.tsx/styles.css; every other apps path stays protected.
     assert not subprocess.check_output(
@@ -1921,6 +1921,8 @@ def test_no_action_persistence_or_dependency_change() -> None:
             ":(exclude)phoenix/api/onboarding.py",
             ":(exclude)phoenix/api/routes/setup.py",
             ":(exclude)alembic/versions/0009_default_mission_path.py",
+            # PHX-131 (ADR-227) adds the triage-rule migration.
+            ":(exclude)alembic/versions/0010_triage_rule.py",
             ":(exclude)apps/desktop/src/adapters/SetupViews.tsx",
             # PHX-115 (ADR-145, ADR-146) adds the observability modules and route
             # (server.py, launcher.py, routes/__init__.py, proxy.rs and core.ts are
@@ -1940,13 +1942,14 @@ def test_no_action_persistence_or_dependency_change() -> None:
         ],
         cwd=ROOT,
     )
-    # PHX-017 (ADR-080) intentionally changed ollama.py; it stays pinned, at the
-    # PHX-017 commit.
+    # PHX-017 (ADR-080) and PHX-130 (ADR-222, keep_alive) intentionally changed
+    # ollama.py; it stays pinned, at the PHX-130 implementation commit (the same
+    # baseline as test_prompt_injection_defenses.py).
     assert not subprocess.check_output(
         [
             "git",
             "diff",
-            "b7d96518d58ee7466d441cbe3b17c4eaad0866cf",
+            "c41bef4cce5e824a1d2c651c81c8b46b3c15421e",
             "--",
             "phoenix/models/ollama.py",
         ],

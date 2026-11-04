@@ -2084,7 +2084,7 @@ test('PHX-087 suppressed sources report counts unavailable rather than claiming 
   assert.doesNotMatch(empty, /Diagnostic counts unavailable/);
 });
 
-test('PHX-108/115/122 the native proxy allowlist is exactly the thirty-one documented REST routes', () => {
+test('PHX-108/115/122/129 the native proxy allowlist is exactly the thirty-two documented REST routes', () => {
   const proxy = readFileSync(new URL('../apps/desktop/src-tauri/src/proxy.rs', import.meta.url), 'utf8');
   const table = proxy.slice(proxy.indexOf('pub const ROUTES'), proxy.indexOf('];', proxy.indexOf('pub const ROUTES')));
   const routes = [...table.matchAll(/Method::(Get|Post|Patch|Delete),\s*"([^"]+)",\s*&\[([^\]]*)\]/g)]
@@ -2093,6 +2093,8 @@ test('PHX-108/115/122 the native proxy allowlist is exactly the thirty-one docum
     'GET /health []', 'GET /ready []', 'POST /chat []', 'GET /missions ["conversation_id","limit","offset"]', 'GET /missions/{id} []',
     'POST /missions/{id}/cancel []', 'POST /missions/{id}/run-again []', 'GET /permissions ["limit","offset"]', 'GET /permissions/{id} []',
     'POST /permissions/{id}/approve []', 'POST /permissions/{id}/deny []', 'GET /grants ["include_inactive","limit","offset"]',
+    // PHX-129 (ADR-217): Settings' "Remove" for a remembered permission (sets revoked_at).
+    'POST /grants/{id}/revoke []',
     'GET /conversations ["limit","offset"]', 'GET /conversations/{id}/messages ["limit","offset"]', 'GET /agents []', 'GET /models []',
     'GET /settings []', 'PATCH /settings []',
     // PHX-108 (ADR-110, ADR-112): read-only setup routes, no query and no body.
@@ -2107,7 +2109,7 @@ test('PHX-108/115/122 the native proxy allowlist is exactly the thirty-one docum
   const core = readFileSync(new URL('../apps/desktop/src/adapters/core.ts', import.meta.url), 'utf8');
   const named = [...core.matchAll(/(?:request\('(GET|POST|PATCH|DELETE)', |this\.get\()[`']([^`'?$]+)[`'?$]/g)].map(([, method, path]) => `${method ?? 'GET'} ${path}`);
   for (const route of ['GET /onboarding', 'GET /capabilities', 'PATCH /settings', 'GET /settings', 'GET /ready', 'GET /voice/status', 'POST /voice/start', 'POST /voice/stop',
-    'POST /files/upload', 'GET /files', 'DELETE /files/', 'GET /memory', 'POST /memory', 'GET /memory/search', 'DELETE /memory/']) assert.ok(named.includes(route), route);
+    'POST /files/upload', 'GET /files', 'DELETE /files/', 'GET /memory', 'POST /memory', 'GET /memory/search', 'DELETE /memory/', 'GET /grants', 'POST /grants/']) assert.ok(named.includes(route), route);
   // A path that continues with an ID ("/files/" + id) must match an `{id}` route of that method.
   for (const route of named) assert.ok(routes.some((entry) => entry.startsWith(route.endsWith('/') ? `${route}{id}` : `${route} `)), route);
 });
