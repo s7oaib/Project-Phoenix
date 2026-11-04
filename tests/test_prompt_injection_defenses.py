@@ -2101,6 +2101,9 @@ PHX_EXPO_VOICE_PATHS = ("phoenix/api/launcher.py",)  # voice.py moved to the int
 # integration commit.
 PHX_EXPO_INTEGRATION_COMMIT = "e0b0ab59e89494a55fd030be2cca5cdda42d7b8c"
 PHX_EXPO_INTEGRATION_PATHS = (
+    "apps/desktop/src/Hud.tsx",
+    "apps/desktop/src/adapters/sites.ts",
+    "phoenix/sites/command.py",
     "phoenix/agents/capability_steps.py",
     "phoenix/agents/control_steps.py",
     "phoenix/agents/research_steps.py",
