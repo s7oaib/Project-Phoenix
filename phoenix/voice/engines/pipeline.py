@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import math
+import os
 import re
 import struct
 import time
@@ -705,6 +706,18 @@ class VoicePipeline:
     async def run(self) -> None:
         await self._c.microphone.start()
         await self._publish(VoicePipelineState.SLEEPING)
+        if os.environ.get("PHOENIX_WAKE_ON_START") == "1":  # the listener opened us
+            try:
+                await self._manager.activate(self.session_id)
+                self._c.microphone.drain()
+                self._listen_again()
+                await self._publish(VoicePipelineState.LISTENING)
+                say = getattr(self._responder, "stopped", None)  # "Yes boss, tell me."
+                if say is not None:
+                    await say(str(uuid4()))
+                self._c.microphone.drain()
+            except Exception:
+                pass  # fall back to waiting for the wake word
         try:
             while True:
                 if not self._in_conversation():

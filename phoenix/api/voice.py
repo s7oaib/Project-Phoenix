@@ -538,7 +538,7 @@ class MissionVoiceResponder(VoiceResponder):
         accepted = VoiceResponseRequest.model_validate(request)
         text = strip_wake_phrase(accepted.transcript_text).strip()
         if not text:
-            spoken = "I'm listening."
+            spoken = READY_LINE  # a bare "Phoenix": always answer, audibly
         elif stop_phrase_score(text) >= WAKE_DETECTION_THRESHOLD:
             spoken = READY_LINE  # "Stop, Phoenix": nothing to run, just listen
         else:

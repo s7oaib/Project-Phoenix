@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import difflib
+import os
 import queue
 import re
 import subprocess
@@ -66,7 +67,13 @@ def launch(dry_run: bool) -> str:
     if not _running("phoenix-desktop.exe"):
         started.append("phoenix")
         if not dry_run:
-            subprocess.Popen([str(EXE)], cwd=str(EXE.parent), creationflags=0x00000008)
+            # PHOENIX_WAKE_ON_START: the app starts awake, so no second "Phoenix" is needed.
+            subprocess.Popen(
+                [str(EXE)],
+                cwd=str(EXE.parent),
+                env={**os.environ, "PHOENIX_WAKE_ON_START": "1"},
+                creationflags=0x00000008,
+            )
     return ", ".join(started) or "already running"
 
 

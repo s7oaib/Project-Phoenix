@@ -223,6 +223,25 @@ def stop_phrase_score(text: str) -> float:
     return stop
 
 
+def _debug_log(text: str, wake: float, stop: float) -> None:
+    """Off unless PHOENIX_WAKE_DEBUG=1: log what the wake listener heard."""
+    import os
+    import time
+    from pathlib import Path
+
+    flag = Path.home() / ".phoenix" / "wake_debug.on"  # or just create this file
+    if os.environ.get("PHOENIX_WAKE_DEBUG") != "1" and not flag.exists():
+        return
+    path = Path.home() / ".phoenix" / "wake_debug.log"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            stamp = time.strftime("%H:%M:%S")
+            handle.write(f"{stamp} wake={wake:.2f} stop={stop:.2f} heard={text!r}\n")
+    except OSError:
+        pass
+
+
 def _loop_guard() -> Callable[[], None]:
     state: dict[str, asyncio.AbstractEventLoop] = {}
 
@@ -307,7 +326,9 @@ class FasterWhisperWakeWordProvider(WakeWordProvider):
         finally:
             self._active = None
         score = float(wake_phrase_score(text))
-        self.stop_heard = stop_phrase_score(text) >= self._threshold
+        stop = stop_phrase_score(text)
+        self.stop_heard = stop >= self._threshold
+        _debug_log(text, score, stop)
         return WakeWordDetection(
             operation_id=accepted.operation_id,
             provider_id=self.provider_id,
