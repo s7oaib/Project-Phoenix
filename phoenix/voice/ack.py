@@ -12,7 +12,7 @@ from typing import Final
 from uuid import uuid4
 
 from phoenix.voice.conversation import AudioOutput, AudioPlaybackRequest
-from phoenix.voice.persona import ACK_LINES
+from phoenix.voice.persona import ACK_LINES, READY_LINE
 from phoenix.voice.tts import TtsAudio, TtsProvider, TtsRequest
 
 __all__ = ("CACHE_DIR_ENV", "AckClips", "default_cache_dir")
@@ -30,6 +30,7 @@ class AckClips:
     def __init__(self, cache_dir: Path) -> None:
         self._dir = cache_dir
         self._clips: list[TtsAudio] = []
+        self._ready: list[TtsAudio] = []  # "Yes boss, tell me." after a spoken stop
 
     @property
     def count(self) -> int:
@@ -41,14 +42,22 @@ class AckClips:
             async with asyncio.timeout(PREPARE_SECONDS):
                 for text in ACK_LINES:
                     await self._one(tts, voice_profile_id, text)
+                await self._one(tts, voice_profile_id, READY_LINE, self._ready)
         except Exception:
             pass  # includes timeout; whatever loaded stays usable
 
-    async def _one(self, tts: TtsProvider, profile: str, text: str) -> None:
+    async def _one(
+        self,
+        tts: TtsProvider,
+        profile: str,
+        text: str,
+        target: list[TtsAudio] | None = None,
+    ) -> None:
+        bucket = self._clips if target is None else target
         key = hashlib.sha256(f"{profile}\0{text}".encode()).hexdigest()[:16]
         path = self._dir / f"ack-{key}.json"
         try:
-            self._clips.append(TtsAudio.model_validate_json(path.read_text("utf-8")))
+            bucket.append(TtsAudio.model_validate_json(path.read_text("utf-8")))
             return
         except Exception:
             pass  # absent or corrupt: render again
@@ -60,7 +69,7 @@ class AckClips:
             )
         except Exception:
             return
-        self._clips.append(audio)
+        bucket.append(audio)
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
             path.write_text(audio.model_dump_json(), "utf-8")
@@ -82,4 +91,23 @@ class AckClips:
             )
         except Exception:
             return False  # CancelledError is BaseException and propagates
+        return True
+
+    async def play_ready(
+        self, output: AudioOutput, session_id: str, turn_id: str
+    ) -> bool:
+        """Say "Yes boss, tell me." once PHOENIX has stopped and is listening."""
+        if not self._ready:
+            return False
+        try:
+            await output.play(
+                AudioPlaybackRequest(
+                    playback_id=str(uuid4()),
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    audio=self._ready[0],
+                )
+            )
+        except Exception:
+            return False
         return True

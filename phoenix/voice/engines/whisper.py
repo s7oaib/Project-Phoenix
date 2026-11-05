@@ -47,6 +47,7 @@ __all__ = (
     "WAKE_DETECTION_THRESHOLD",
     "VoiceModelMissingError",
     "WhisperEngine",
+    "stop_phrase_score",
     "wake_phrase_score",
     "FasterWhisperWakeWordProvider",
     "FasterWhisperSttProvider",
@@ -178,7 +179,7 @@ def wake_phrase_score(text: str) -> float:
         rise = _similar(before[-1], _RISE_FORMS, "rise")
         best = max(best, (rise + phoenix) / 2)
     # "Phoenix, rise" (the owner's wake phrase, 2026-11-05): a Phoenix-like word in the
-    # first three words followed by a rise-like word. "Phoenix is a city" does not match.
+    # first three words, then a rise-like word. "Phoenix is a city" does not match.
     for index, word in enumerate(words[:3]):
         phoenix = _similar(word, _PHOENIX_FORMS, "phoenix")
         after = [w for w in words[index + 1 :] if w not in _FILLERS][:1]
@@ -187,6 +188,32 @@ def wake_phrase_score(text: str) -> float:
         rise = _similar(after[0], _RISE_FORMS, "rise")
         if rise >= 0.75:
             best = max(best, (rise + phoenix) / 2)
+    return best
+
+
+_STOP_FORMS: Final = frozenset(
+    {"stop", "stops", "stopped", "halt", "cancel", "enough", "quiet", "wait"}
+)
+
+
+def stop_phrase_score(text: str) -> float:
+    """How well a transcript matches "Stop, Phoenix" or "Phoenix, stop" (0 to 1).
+
+    A Phoenix-like word within the first five words with a stop-like word right
+    before it, or right after it (ignoring fillers). "Phoenix is a city" does not match.
+    """
+    words = _WORD.findall(text.lower())[:5]
+    best = 0.0
+    for index, word in enumerate(words):
+        phoenix = _similar(word, _PHOENIX_FORMS, "phoenix")
+        if phoenix < 0.75:
+            continue
+        before = [words[index - 1]] if index else []
+        after = [w for w in words[index + 1 :] if w not in _FILLERS][:1]
+        for near in before + after:
+            stop = _similar(near, _STOP_FORMS, "stop")
+            if stop >= 0.75:
+                best = max(best, (stop + phoenix) / 2)
     return best
 
 
@@ -220,6 +247,8 @@ class FasterWhisperWakeWordProvider(WakeWordProvider):
         self._active: str | None = None
         self._closed = False
         self._check_loop = _loop_guard()
+        # Was the last transcript "Stop, Phoenix"? A flag only; text is never kept.
+        self.stop_heard = False
 
     @property
     def active_operation_ids(self) -> tuple[str, ...]:
@@ -272,6 +301,7 @@ class FasterWhisperWakeWordProvider(WakeWordProvider):
         finally:
             self._active = None
         score = float(wake_phrase_score(text))
+        self.stop_heard = stop_phrase_score(text) >= self._threshold
         return WakeWordDetection(
             operation_id=accepted.operation_id,
             provider_id=self.provider_id,

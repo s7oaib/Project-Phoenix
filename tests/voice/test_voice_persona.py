@@ -150,7 +150,8 @@ def test_ack_clips_render_once_then_load_from_disk(tmp_path: Path) -> None:
     cold, warm = AckClips(tmp_path), AckClips(tmp_path)
     asyncio.run(cold.prepare(cast(Any, first), "p"))
     asyncio.run(warm.prepare(cast(Any, second), "p"))
-    assert cold.count == warm.count == first.calls == 3
+    assert cold.count == warm.count == 3
+    assert first.calls == 4  # three acknowledgements and "Yes boss, tell me."
     assert second.calls == 0  # all served from the cache
 
 

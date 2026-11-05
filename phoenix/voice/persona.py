@@ -9,6 +9,7 @@ from typing import Final
 
 __all__ = (
     "ACK_LINES",
+    "READY_LINE",
     "VOICE_RULE",
     "VOICE_RULE_ENV",
     "apply_voice_rule",
@@ -25,6 +26,7 @@ VOICE_RULE: Final = (
 )
 VOICE_RULE_ENV: Final = "PHOENIX_VOICE_RULE"
 ACK_LINES: Final = ("On it, boss.", "Right away, boss.", "Working on it, boss.")
+READY_LINE: Final = "Yes boss, tell me."  # after "Stop, Phoenix": stopped, listening
 
 
 def voice_rule_enabled() -> bool:

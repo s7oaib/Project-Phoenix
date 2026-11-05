@@ -77,8 +77,17 @@ from phoenix.voice.engines.pipeline import (
     strip_wake_phrase,
 )
 from phoenix.voice.engines.sound import MicrophoneError
-from phoenix.voice.engines.whisper import VoiceModelMissingError
-from phoenix.voice.persona import site_failed_line, site_pending_line, site_ready_line
+from phoenix.voice.engines.whisper import (
+    WAKE_DETECTION_THRESHOLD,
+    VoiceModelMissingError,
+    stop_phrase_score,
+)
+from phoenix.voice.persona import (
+    READY_LINE,
+    site_failed_line,
+    site_pending_line,
+    site_ready_line,
+)
 from phoenix.voice.startup import (
     StartupCheckResult,
     StartupCheckStatus,
@@ -369,6 +378,7 @@ class MissionVoiceResponder(VoiceResponder):
         approval_seconds: float = VOICE_APPROVAL_SECONDS,
         clock: Callable[[], float] = time.monotonic,
         acknowledge: Callable[[str], Awaitable[object]] | None = None,
+        ready: Callable[[str], Awaitable[object]] | None = None,
         site_command: SiteCommand | None = None,
         site_status: SiteStatusReader | None = None,
         site_wait_seconds: float = SITE_WAIT_SECONDS,
@@ -384,6 +394,7 @@ class MissionVoiceResponder(VoiceResponder):
         self._clock = clock
         self._approval: _SpokenApproval | None = None
         self._acknowledge = acknowledge
+        self._ready = ready
         self._site_command = site_command
         self._site_status = site_status
         self._site_wait = site_wait_seconds
@@ -505,6 +516,12 @@ class MissionVoiceResponder(VoiceResponder):
         self._timer.since_stt("first_token", turn_id)
         return spoken
 
+    async def stopped(self, turn_id: str) -> None:
+        """After "Stop, Phoenix": say "Yes boss, tell me" and listen."""
+        if self._ready is not None:
+            with contextlib.suppress(Exception):
+                await self._ready(turn_id)
+
     async def respond(self, request: VoiceResponseRequest) -> VoiceResponseDraft:
         return await self._respond(request, None)
 
@@ -522,6 +539,8 @@ class MissionVoiceResponder(VoiceResponder):
         text = strip_wake_phrase(accepted.transcript_text).strip()
         if not text:
             spoken = "I'm listening."
+        elif stop_phrase_score(text) >= WAKE_DETECTION_THRESHOLD:
+            spoken = READY_LINE  # "Stop, Phoenix": nothing to run, just listen
         else:
             turn_id = accepted.turn_id
             ack = None
@@ -865,12 +884,16 @@ class VoiceService:
             async def acknowledge(turn_id: str) -> bool:
                 return await clips.play(components.output, session, turn_id)
 
+            async def ready(turn_id: str) -> bool:
+                return await clips.play_ready(components.output, session, turn_id)
+
             responder = MissionVoiceResponder(
                 self._missions,
                 on_mission=self._note_mission,
                 partial_answers=self._partials,
                 may_approve=self._may_approve,
                 acknowledge=acknowledge,
+                ready=ready,
                 site_command=self._site_command,
                 site_status=self._site_status,
                 timer=timer,

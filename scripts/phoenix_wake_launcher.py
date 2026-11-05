@@ -12,11 +12,13 @@ idle cost is a microphone stream and a little RMS arithmetic.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import difflib
 import queue
 import re
 import subprocess
 import sys
+import threading
 import time
 import wave
 from pathlib import Path
@@ -64,6 +66,24 @@ def launch(dry_run: bool) -> str:
         if not dry_run:
             subprocess.Popen([str(EXE)], cwd=str(EXE.parent), creationflags=0x00000008)
     return ", ".join(started) or "already running"
+
+
+def show_fullscreen(title: str = "PHOENIX", wait: float = 40.0) -> bool:
+    """Maximize the PHOENIX window and bring it to the front (waits for it to appear)."""
+    user32 = ctypes.windll.user32  # Windows only, like the app
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        hwnd = user32.FindWindowW(None, title)
+        if hwnd:
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE: out of the taskbar if minimized
+            user32.ShowWindow(hwnd, 3)  # SW_MAXIMIZE
+            user32.keybd_event(0x12, 0, 0, 0)  # a tap of Alt lets a background
+            user32.keybd_event(0x12, 0, 2, 0)  # process take the foreground
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+            return True
+        time.sleep(0.5)
+    return False
 
 
 def log(line: str) -> None:
@@ -134,6 +154,8 @@ def listen(dry_run: bool) -> int:
                     if is_wake(text):
                         last_launch = time.time()
                         log(f"wake heard -> {launch(dry_run)}")
+                        if not dry_run:  # take over the screen, open or closed before
+                            threading.Thread(target=show_fullscreen, daemon=True).start()
 
 
 def main() -> int:
