@@ -189,6 +189,19 @@ def strip_wake_phrase(text: str) -> str:
     first = _PHOENIX_FIRST.sub("", text, count=1)
     if first != text:
         return first
+    paired = _strip_rise_phoenix(text)
+    if paired != text:
+        return paired
+    # Just "Phoenix" (or "hey Phoenix") is the shortest wake word.
+    return _PHOENIX_LEAD.sub("", text, count=1)
+
+
+_PHOENIX_LEAD = re.compile(
+    r"^\W*(?:(?:okay|ok|hey|hi)\W+)?(?:phoenix|phenix|feenix|fenix)\b\W*", re.IGNORECASE
+)
+
+
+def _strip_rise_phoenix(text: str) -> str:
     return re.sub(
         r"^\W*(?:(?:okay|ok|hey)\W+)?[\w']*\W+(?:(?:the|of|a)\W+)?"
         r"(?:phoenix|phenix|feenix)\b\W*",

@@ -28,9 +28,17 @@ def test_both_orders_wake(heard: str) -> None:
 
 @pytest.mark.parametrize(
     "heard",
-    ["Phoenix is a city in Arizona.", "Phoenix, open YouTube", "I love phoenix", "phoenix"],
+    ["Phoenix.", "phoenix", "Hey Phoenix", "Phoenix, open YouTube", "Phenix, what time is it?"],
 )
-def test_phoenix_alone_or_with_other_words_does_not_wake(heard: str) -> None:
+def test_just_phoenix_wakes(heard: str) -> None:
+    assert wake_phrase_score(heard) >= THRESHOLD
+
+
+@pytest.mark.parametrize(
+    "heard",
+    ["The weather today is fine and the phoenix rose", "I love my city", "Hello there", ""],
+)
+def test_phoenix_deep_in_a_sentence_or_absent_does_not_wake(heard: str) -> None:
     assert wake_phrase_score(heard) < THRESHOLD
 
 
@@ -41,6 +49,9 @@ def test_phoenix_alone_or_with_other_words_does_not_wake(heard: str) -> None:
         ("Hey Phoenix rise, open YouTube", "open YouTube"),
         ("Rise, Phoenix, design a site", "design a site"),
         ("Phoenix, rise", ""),
+        ("Phoenix, what time is it?", "what time is it?"),
+        ("Hey Phoenix, open YouTube", "open YouTube"),
+        ("Phoenix", ""),
     ],
 )
 def test_the_wake_phrase_is_trimmed_from_the_request(heard: str, rest: str) -> None:
@@ -58,7 +69,7 @@ from phoenix.voice.engines.whisper import stop_phrase_score  # noqa: E402
 
 @pytest.mark.parametrize(
     "heard",
-    ["Stop, Phoenix.", "stop phoenix", "Phoenix, stop", "Phoenix stop it", "Hey Phoenix stop", "Phenix, cancel"],
+    ["Stop.", "stop", "Stop it", "cancel", "Stop, Phoenix.", "stop phoenix", "Phoenix, stop", "Phenix, cancel", "enough"],
 )
 def test_stop_phrases_match(heard: str) -> None:
     assert stop_phrase_score(heard) >= THRESHOLD
@@ -66,7 +77,7 @@ def test_stop_phrases_match(heard: str) -> None:
 
 @pytest.mark.parametrize(
     "heard",
-    ["Phoenix is a city", "Please stop the music", "Phoenix, open YouTube", "I love phoenix", "Rise, Phoenix"],
+    ["Phoenix is a city", "stop the music", "Please stop the music now", "Phoenix, open YouTube", "Rise, Phoenix", "what time is it", ""],
 )
 def test_other_speech_is_not_a_stop(heard: str) -> None:
     assert stop_phrase_score(heard) < THRESHOLD

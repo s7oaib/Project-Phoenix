@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Always-on "Phoenix, Rise" listener (either word order): starts Ollama and the PHOENIX app by voice.
 
 Local only. Audio is processed in memory and never written to disk or sent anywhere.
@@ -39,13 +40,14 @@ COOLDOWN_SECONDS = 25
 
 
 def is_wake(text: str) -> bool:
-    """True for "Phoenix, Rise" or "Rise, Phoenix" and the usual mishearings (rice phoenix, fenix rise)."""
+    """True when "Phoenix" (or a mishearing: fenix, finix) is among the first three words.
+
+    So "Phoenix", "hey Phoenix", "Phoenix, rise" and "Rise, Phoenix" all wake it.
+    """
     words = re.sub(r"[^a-z ]", " ", text.lower()).split()
-    rise = any(difflib.SequenceMatcher(None, w, "rise").ratio() >= 0.7 for w in words)
-    phoenix = any(
-        difflib.SequenceMatcher(None, w, "phoenix").ratio() >= 0.6 for w in words
+    return any(
+        difflib.SequenceMatcher(None, w, "phoenix").ratio() >= 0.6 for w in words[:3]
     )
-    return rise and phoenix
 
 
 def _running(image: str) -> bool:

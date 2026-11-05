@@ -188,33 +188,39 @@ def wake_phrase_score(text: str) -> float:
         rise = _similar(after[0], _RISE_FORMS, "rise")
         if rise >= 0.75:
             best = max(best, (rise + phoenix) / 2)
+    # The shortest wake word: just "Phoenix" (or "hey Phoenix") as the first words.
+    for word in words[:2]:
+        phoenix = _similar(word, _PHOENIX_FORMS, "phoenix")
+        if phoenix >= 0.75:
+            best = max(best, phoenix)
     return best
 
 
-_STOP_FORMS: Final = frozenset(
-    {"stop", "stops", "stopped", "halt", "cancel", "enough", "quiet", "wait"}
-)
+_STOP_FORMS: Final = frozenset({"stop", "stops", "stopped", "halt", "cancel", "enough"})
+_STOP_EXTRAS: Final = frozenset({"it", "that", "now", "please", "hey", "ok", "okay"})
 
 
 def stop_phrase_score(text: str) -> float:
-    """How well a transcript matches "Stop, Phoenix" or "Phoenix, stop" (0 to 1).
+    """How well a transcript is a stop command ("stop", "Stop, Phoenix"), 0 to 1.
 
-    A Phoenix-like word within the first five words with a stop-like word right
-    before it, or right after it (ignoring fillers). "Phoenix is a city" does not match.
+    The whole utterance (at most four words) must be a stop-like word plus only
+    filler words, "it", "that", "now", "please" or Phoenix. "Stop the music" is a
+    real request, so it does not match.
     """
-    words = _WORD.findall(text.lower())[:5]
-    best = 0.0
-    for index, word in enumerate(words):
-        phoenix = _similar(word, _PHOENIX_FORMS, "phoenix")
-        if phoenix < 0.75:
+    words = _WORD.findall(text.lower())
+    if not words or len(words) > 4:
+        return 0.0
+    stop = max(_similar(w, _STOP_FORMS, "stop") for w in words)
+    if stop < 0.75:
+        return 0.0
+    for word in words:
+        if _similar(word, _STOP_FORMS, "stop") >= 0.75:
             continue
-        before = [words[index - 1]] if index else []
-        after = [w for w in words[index + 1 :] if w not in _FILLERS][:1]
-        for near in before + after:
-            stop = _similar(near, _STOP_FORMS, "stop")
-            if stop >= 0.75:
-                best = max(best, (stop + phoenix) / 2)
-    return best
+        if _similar(word, _PHOENIX_FORMS, "phoenix") >= 0.75:
+            continue
+        if word not in _STOP_EXTRAS and word not in _FILLERS:
+            return 0.0
+    return stop
 
 
 def _loop_guard() -> Callable[[], None]:
