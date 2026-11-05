@@ -2098,7 +2098,7 @@ PHX_EXPO_VOICE_PATHS = ("phoenix/api/launcher.py",)  # voice.py moved to the int
 # 2026-11-05 expo build, integration: the four verification steps also accept
 # Trust-mode grants, and the voice service reads website status; pinned at the
 # integration commit.
-PHX_EXPO_INTEGRATION_COMMIT = "1c3e83a1bd6eced702412c2933c774ccb80971e4"
+PHX_EXPO_INTEGRATION_COMMIT = "0addb7a90c68f708a7a8e60a07984098f7366590"
 PHX_EXPO_INTEGRATION_PATHS = (
     "phoenix/voice/ack.py",
     "phoenix/voice/persona.py",
