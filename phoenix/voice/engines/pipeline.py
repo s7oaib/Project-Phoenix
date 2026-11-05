@@ -177,8 +177,18 @@ class VoicePipelineConfig:
     max_consecutive_stt_failures: int = 3
 
 
+_PHOENIX_FIRST = re.compile(
+    r"^\W*(?:(?:okay|ok|hey)\W+)?(?:phoenix|phenix|feenix|fenix)\W+"
+    r"(?:(?:the|of|a)\W+)?(?:rise|rises|rice|raise|arise|rias|rose)\b\W*",
+    re.IGNORECASE,
+)
+
+
 def strip_wake_phrase(text: str) -> str:
-    """Drop a leading "Rise, Phoenix" (as heard) from a transcript."""
+    """Drop a leading "Phoenix, rise" or "Rise, Phoenix" (as heard) from a transcript."""
+    first = _PHOENIX_FIRST.sub("", text, count=1)
+    if first != text:
+        return first
     return re.sub(
         r"^\W*(?:(?:okay|ok|hey)\W+)?[\w']*\W+(?:(?:the|of|a)\W+)?"
         r"(?:phoenix|phenix|feenix)\b\W*",

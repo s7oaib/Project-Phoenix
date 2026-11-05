@@ -1,4 +1,4 @@
-"""Always-on "Rise, Phoenix" listener: starts Ollama and the PHOENIX app by voice.
+"""Always-on "Phoenix, Rise" listener (either word order): starts Ollama and the PHOENIX app by voice.
 
 Local only. Audio is processed in memory and never written to disk or sent anywhere.
 Only short voiced segments are transcribed (offline Whisper tiny.en on the CPU), so the
@@ -37,7 +37,7 @@ COOLDOWN_SECONDS = 25
 
 
 def is_wake(text: str) -> bool:
-    """True for "Rise, Phoenix" and the usual mishearings (rice phoenix, rise fenix)."""
+    """True for "Phoenix, Rise" or "Rise, Phoenix" and the usual mishearings (rice phoenix, fenix rise)."""
     words = re.sub(r"[^a-z ]", " ", text.lower()).split()
     rise = any(difflib.SequenceMatcher(None, w, "rise").ratio() >= 0.7 for w in words)
     phoenix = any(

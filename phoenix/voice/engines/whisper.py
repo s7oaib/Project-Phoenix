@@ -177,6 +177,16 @@ def wake_phrase_score(text: str) -> float:
             continue
         rise = _similar(before[-1], _RISE_FORMS, "rise")
         best = max(best, (rise + phoenix) / 2)
+    # "Phoenix, rise" (the owner's wake phrase, 2026-11-05): a Phoenix-like word in the
+    # first three words followed by a rise-like word. "Phoenix is a city" does not match.
+    for index, word in enumerate(words[:3]):
+        phoenix = _similar(word, _PHOENIX_FORMS, "phoenix")
+        after = [w for w in words[index + 1 :] if w not in _FILLERS][:1]
+        if phoenix < 0.75 or not after:
+            continue
+        rise = _similar(after[0], _RISE_FORMS, "rise")
+        if rise >= 0.75:
+            best = max(best, (rise + phoenix) / 2)
     return best
 
 
