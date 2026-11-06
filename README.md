@@ -81,5 +81,5 @@ version 3 of the License, or (at your option) any later version. See [LICENSE](L
 Copyright (C) 2026 Shoaib H Jamadar, Mohammed Mueiz and Mohammed Soud,
 Department of AIML, HKBK College of Engineering.
 
-Text-to-speech uses [Piper](https://github.com/rhasspy/piper), which is licensed under
-the GPL-3.0; PHOENIX's installer bundles it, which is why PHOENIX is GPL-licensed too.
+Text-to-speech uses [Piper](https://github.com/OHF-Voice/piper1-gpl) (`piper-tts` 1.8,
+GPL-3.0-or-later); PHOENIX's installer bundles it, which is why PHOENIX is GPL-licensed too.
