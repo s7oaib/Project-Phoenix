@@ -71,7 +71,12 @@ async def handle_command(
     service = service or get_default()
     text = " ".join(text.split())
     if TRUST_CMD.fullmatch(text.strip(" .!?,")):
-        on = not re.search(r"\b(?:off|disable|deactivate)\b", text, re.I)
+        if re.search(r"\b(?:off|disable|deactivate)\b", text, re.I):
+            on = False
+        elif re.search(r"\b(?:on|enable|activate)\b", text, re.I):
+            on = True
+        else:
+            return _pass()  # "trust mode" alone changes nothing
         TRUST.set(on)
         return CommandOutcome(
             "site", None, "Trust mode on. I won't ask again, boss." if on else "Trust mode off."

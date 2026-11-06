@@ -234,6 +234,8 @@ def _debug_log(text: str, wake: float, stop: float) -> None:
         return
     path = Path.home() / ".phoenix" / "wake_debug.log"
     try:
+        if path.exists() and path.stat().st_size > 5_000_000:
+            return  # bounded: a forgotten flag never fills the disk
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             stamp = time.strftime("%H:%M:%S")

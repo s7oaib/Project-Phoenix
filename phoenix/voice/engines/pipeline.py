@@ -559,9 +559,10 @@ class VoicePipeline:
         except VoiceConversationError:
             result = None
         except asyncio.CancelledError:
-            if not context.stopped:
-                raise
-            result = None  # "Stop, Phoenix": we cancelled the turn ourselves
+            me = asyncio.current_task()
+            if not context.stopped or (me is not None and me.cancelling()):
+                raise  # a real shutdown, not our own stop
+            result = None  # "stop": we cancelled the turn ourselves
         finally:
             if not task.done():
                 task.cancel()

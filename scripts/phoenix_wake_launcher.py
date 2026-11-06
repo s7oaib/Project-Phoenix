@@ -30,7 +30,12 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 EXE = ROOT / "apps/desktop/src-tauri/target/release/phoenix-desktop.exe"
 OLLAMA = Path.home() / "AppData/Local/Programs/Ollama/ollama app.exe"
-MODEL_DIR = Path(r"D:\Phoenix\models\voice\whisper\tiny.en")
+# Same models folder as the app: PHOENIX_VOICE_MODELS_DIR, else the BLAZE6 default.
+MODEL_DIR = (
+    Path(os.environ.get("PHOENIX_VOICE_MODELS_DIR") or r"D:\Phoenix\models\voice")
+    / "whisper"
+    / "tiny.en"
+)
 LOG = Path.home() / ".phoenix" / "wake_launcher.log"
 RATE = 16000
 BLOCK = 1600  # 0.1 s
