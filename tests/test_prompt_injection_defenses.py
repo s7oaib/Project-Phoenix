@@ -1759,8 +1759,7 @@ PHX_105_PATHS: tuple[str, ...] = ()
 # sidecar, proxy and event bridge); they stay pinned, at the PHX-106/107
 # implementation commit.
 PHX_106_COMMIT = "e34ca3d18e9444ff5ed32b3f1abb60fc5344f246"
-PHX_106_PATHS = (
-    "apps/desktop/package.json",
+PHX_106_PATHS = (  # package.json moved to the license pin
     "apps/desktop/src/main.tsx",
     "apps/desktop/src-tauri/tauri.conf.json",
     "apps/desktop/src-tauri/Cargo.toml",
@@ -2092,6 +2091,9 @@ PHX_139_PATHS: tuple[str, ...] = ()
 # server.py carries PHX-139 and PHX-140; pinned at the local merge resolution.
 PHX_139_140_COMMIT = "0588b6223af086f6aaed24a6be96fc51c326c9fb"
 PHX_139_140_PATHS = ("phoenix/api/server.py",)
+# 2026-11-06 license PR: package.json gains its "license" field; pinned there.
+PHX_LICENSE_COMMIT = "c32950e58c41491890788c7c1deac70730e8d0e1"
+PHX_LICENSE_PATHS = ("apps/desktop/package.json",)
 # 2026-11-05 expo build, voice (ADR-315 to ADR-319): launcher.py starts the
 # model pre-warm; pinned at the local merge of that work.
 PHX_EXPO_VOICE_COMMIT = "476815b2965d29aa3520e58292458b117a2babd2"
@@ -2178,6 +2180,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
         and path not in PHX_139_PATHS
         and path not in PHX_140_PATHS
         and path not in PHX_139_140_PATHS
+        and path not in PHX_LICENSE_PATHS
         and path not in PHX_EXPO_VOICE_PATHS
         and path not in PHX_EXPO_INTEGRATION_PATHS
         and path not in PHX_SITES_PATHS
@@ -2231,6 +2234,7 @@ def test_protected_existing_sources_dependencies_schema_and_event_vocabulary() -
     baselines += [(PHX_139_COMMIT, path) for path in PHX_139_PATHS]
     baselines += [(PHX_140_COMMIT, path) for path in PHX_140_PATHS]
     baselines += [(PHX_139_140_COMMIT, path) for path in PHX_139_140_PATHS]
+    baselines += [(PHX_LICENSE_COMMIT, path) for path in PHX_LICENSE_PATHS]
     baselines += [(PHX_EXPO_VOICE_COMMIT, path) for path in PHX_EXPO_VOICE_PATHS]
     baselines += [
         (PHX_EXPO_INTEGRATION_COMMIT, path) for path in PHX_EXPO_INTEGRATION_PATHS

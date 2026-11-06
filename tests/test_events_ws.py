@@ -869,6 +869,9 @@ def test_exact_websockets_dependency_delta() -> None:
     assert project["tool"].pop("uv") == {
         "constraint-dependencies": ["huggingface-hub<1"]
     }
+    # 2026-11-06 license PR: PHOENIX is GPL-3.0-or-later (metadata only).
+    assert project["project"].pop("license") == "GPL-3.0-or-later"
+    assert project["project"].pop("license-files") == ["LICENSE"]
     assert project == before
     old = tomllib.loads(historic("uv.lock"))
     new = tomllib.loads((ROOT / "uv.lock").read_text())

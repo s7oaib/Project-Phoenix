@@ -6,6 +6,8 @@ build-backend = "hatchling.build"
 name = "phoenix"
 version = "0.1.0"
 description = "PHOENIX local-first desktop assistant"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "alembic>=1,<2",

@@ -71,3 +71,15 @@ explorer" / "open files" (one separate **Always allow** covers the apps).
 10. Existing code/tests
 
 If authoritative documents conflict, stop and resolve the conflict before coding.
+
+## License
+
+PHOENIX is free software: you can redistribute it and/or modify it under the terms of
+the GNU General Public License as published by the Free Software Foundation, either
+version 3 of the License, or (at your option) any later version. See [LICENSE](LICENSE).
+
+Copyright (C) 2026 Shoaib H Jamadar, Mohammed Mueiz and Mohammed Soud,
+Department of AIML, HKBK College of Engineering.
+
+Text-to-speech uses [Piper](https://github.com/OHF-Voice/piper1-gpl) (`piper-tts` 1.8,
+GPL-3.0-or-later); PHOENIX's installer bundles it, which is why PHOENIX is GPL-licensed too.

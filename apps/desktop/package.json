@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "PHOENIX desktop foundation",
+  "license": "GPL-3.0-or-later",
   "engines": { "node": ">=22.12.0", "npm": ">=10" },
   "scripts": {
     "dev": "vite",
