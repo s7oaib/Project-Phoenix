@@ -1803,6 +1803,9 @@ def test_exact_voice_dependency_delta() -> None:
     assert project["tool"].pop("uv") == {
         "constraint-dependencies": ["huggingface-hub<1"]
     }
+    # 2026-11-06 license PR: PHOENIX is GPL-3.0-or-later (metadata only).
+    assert project["project"].pop("license") == "GPL-3.0-or-later"
+    assert project["project"].pop("license-files") == ["LICENSE"]
     assert project == before
     old = tomllib.loads(at_base("uv.lock"))
     new = tomllib.loads((ROOT / "uv.lock").read_text())
