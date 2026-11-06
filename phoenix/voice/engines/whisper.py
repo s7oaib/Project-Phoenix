@@ -47,6 +47,7 @@ __all__ = (
     "WAKE_DETECTION_THRESHOLD",
     "VoiceModelMissingError",
     "WhisperEngine",
+    "stop_phrase_score",
     "wake_phrase_score",
     "FasterWhisperWakeWordProvider",
     "FasterWhisperSttProvider",
@@ -177,7 +178,70 @@ def wake_phrase_score(text: str) -> float:
             continue
         rise = _similar(before[-1], _RISE_FORMS, "rise")
         best = max(best, (rise + phoenix) / 2)
+    # "Phoenix, rise" (the owner's wake phrase, 2026-11-05): a Phoenix-like word in the
+    # first three words, then a rise-like word. "Phoenix is a city" does not match.
+    for index, word in enumerate(words[:3]):
+        phoenix = _similar(word, _PHOENIX_FORMS, "phoenix")
+        after = [w for w in words[index + 1 :] if w not in _FILLERS][:1]
+        if phoenix < 0.75 or not after:
+            continue
+        rise = _similar(after[0], _RISE_FORMS, "rise")
+        if rise >= 0.75:
+            best = max(best, (rise + phoenix) / 2)
+    # The shortest wake word: just "Phoenix" (or "hey Phoenix") as the first words.
+    for word in words[:2]:
+        phoenix = _similar(word, _PHOENIX_FORMS, "phoenix")
+        if phoenix >= 0.75:
+            best = max(best, phoenix)
     return best
+
+
+_STOP_FORMS: Final = frozenset({"stop", "stops", "stopped", "halt", "cancel", "enough"})
+_STOP_EXTRAS: Final = frozenset({"it", "that", "now", "please", "hey", "ok", "okay"})
+
+
+def stop_phrase_score(text: str) -> float:
+    """How well a transcript is a stop command ("stop", "Stop, Phoenix"), 0 to 1.
+
+    The whole utterance (at most four words) must be a stop-like word plus only
+    filler words, "it", "that", "now", "please" or Phoenix. "Stop the music" is a
+    real request, so it does not match.
+    """
+    words = _WORD.findall(text.lower())
+    if not words or len(words) > 4:
+        return 0.0
+    stop = max(_similar(w, _STOP_FORMS, "stop") for w in words)
+    if stop < 0.75:
+        return 0.0
+    for word in words:
+        if _similar(word, _STOP_FORMS, "stop") >= 0.75:
+            continue
+        if _similar(word, _PHOENIX_FORMS, "phoenix") >= 0.75:
+            continue
+        if word not in _STOP_EXTRAS and word not in _FILLERS:
+            return 0.0
+    return stop
+
+
+def _debug_log(text: str, wake: float, stop: float) -> None:
+    """Off unless PHOENIX_WAKE_DEBUG=1: log what the wake listener heard."""
+    import os
+    import time
+    from pathlib import Path
+
+    flag = Path.home() / ".phoenix" / "wake_debug.on"  # or just create this file
+    if os.environ.get("PHOENIX_WAKE_DEBUG") != "1" and not flag.exists():
+        return
+    path = Path.home() / ".phoenix" / "wake_debug.log"
+    try:
+        if path.exists() and path.stat().st_size > 5_000_000:
+            return  # bounded: a forgotten flag never fills the disk
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            stamp = time.strftime("%H:%M:%S")
+            handle.write(f"{stamp} wake={wake:.2f} stop={stop:.2f} heard={text!r}\n")
+    except OSError:
+        pass
 
 
 def _loop_guard() -> Callable[[], None]:
@@ -210,6 +274,8 @@ class FasterWhisperWakeWordProvider(WakeWordProvider):
         self._active: str | None = None
         self._closed = False
         self._check_loop = _loop_guard()
+        # Was the last transcript "Stop, Phoenix"? A flag only; text is never kept.
+        self.stop_heard = False
 
     @property
     def active_operation_ids(self) -> tuple[str, ...]:
@@ -262,6 +328,9 @@ class FasterWhisperWakeWordProvider(WakeWordProvider):
         finally:
             self._active = None
         score = float(wake_phrase_score(text))
+        stop = stop_phrase_score(text)
+        self.stop_heard = stop >= self._threshold
+        _debug_log(text, score, stop)
         return WakeWordDetection(
             operation_id=accepted.operation_id,
             provider_id=self.provider_id,

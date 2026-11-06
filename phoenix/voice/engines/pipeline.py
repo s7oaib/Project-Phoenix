@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import math
+import os
 import re
 import struct
 import time
@@ -177,8 +178,31 @@ class VoicePipelineConfig:
     max_consecutive_stt_failures: int = 3
 
 
+_PHOENIX_FIRST = re.compile(
+    r"^\W*(?:(?:okay|ok|hey)\W+)?(?:phoenix|phenix|feenix|fenix)\W+"
+    r"(?:(?:the|of|a)\W+)?(?:rise|rises|rice|raise|arise|rias|rose)\b\W*",
+    re.IGNORECASE,
+)
+
+
 def strip_wake_phrase(text: str) -> str:
-    """Drop a leading "Rise, Phoenix" (as heard) from a transcript."""
+    """Drop a leading "Phoenix, rise" or "Rise, Phoenix" (as heard)."""
+    first = _PHOENIX_FIRST.sub("", text, count=1)
+    if first != text:
+        return first
+    paired = _strip_rise_phoenix(text)
+    if paired != text:
+        return paired
+    # Just "Phoenix" (or "hey Phoenix") is the shortest wake word.
+    return _PHOENIX_LEAD.sub("", text, count=1)
+
+
+_PHOENIX_LEAD = re.compile(
+    r"^\W*(?:(?:okay|ok|hey|hi)\W+)?(?:phoenix|phenix|feenix|fenix)\b\W*", re.IGNORECASE
+)
+
+
+def _strip_rise_phoenix(text: str) -> str:
     return re.sub(
         r"^\W*(?:(?:okay|ok|hey)\W+)?[\w']*\W+(?:(?:the|of|a)\W+)?"
         r"(?:phoenix|phenix|feenix)\b\W*",
@@ -297,6 +321,9 @@ class _Utterance:
 class _TurnContext:
     recent: deque[PcmAudioFrame] = field(default_factory=lambda: deque(maxlen=12))
     interrupted: bool = False
+    stopped: bool = False  # "Stop, Phoenix" heard while thinking
+    heard: list[PcmAudioFrame] = field(default_factory=list)  # the utterance so far
+    quiet: int = 0  # silent frames since the last speech
 
 
 class VoicePipeline:
@@ -531,10 +558,62 @@ class VoicePipeline:
             result: VoiceTurnResult | None = await task
         except VoiceConversationError:
             result = None
+        except asyncio.CancelledError:
+            me = asyncio.current_task()
+            if not context.stopped or (me is not None and me.cancelling()):
+                raise  # a real shutdown, not our own stop
+            result = None  # "stop": we cancelled the turn ourselves
         finally:
             if not task.done():
                 task.cancel()
+        if context.stopped:
+            await self._stopped(turn_id)
+            return
         await self._settle(result, turn_id, context)
+
+    async def _heard_stop(self, frame: PcmAudioFrame, context: _TurnContext) -> bool:
+        """THINKING: cut short utterances and listen for "Stop, Phoenix". Fails safe."""
+        try:
+            if await self._classify(self._vad, frame):
+                context.heard.append(frame)
+                context.quiet = 0
+                if len(context.heard) > 150:  # about 4.5 s: not a stop command
+                    context.heard.clear()
+                return False
+            if not context.heard:
+                return False
+            context.heard.append(frame)
+            context.quiet += 1
+            if context.quiet < 12:  # 360 ms of quiet ends the utterance
+                return False
+            frames, voiced = context.heard, len(context.heard) - context.quiet
+            context.heard, context.quiet = [], 0
+            if voiced < 8:  # under 240 ms of speech: a click or a cough
+                return False
+            pcm = b"".join(f.pcm_bytes_for_provider() for f in frames)
+            await self._c.wake.detect(_wake_request(pcm))
+            return bool(getattr(self._c.wake, "stop_heard", False))
+        except Exception:
+            return False
+
+    async def _stopped(self, turn_id: str) -> None:
+        """The turn was cut short: say "Yes boss, tell me." and listen again."""
+        try:
+            await self._manager.activate(self.session_id)
+        except Exception:
+            self._deadline = None
+            await self._publish(VoicePipelineState.SLEEPING, turn_id=turn_id)
+            return
+        self._c.microphone.drain()
+        say = getattr(self._responder, "stopped", None)
+        if say is not None:
+            try:
+                await say(turn_id)
+            except Exception:
+                pass  # no spoken confirmation is not a failure
+        self._c.microphone.drain()
+        self._listen_again()
+        await self._publish(VoicePipelineState.LISTENING, turn_id=turn_id)
 
     async def _watch(
         self, task: asyncio.Task[VoiceTurnResult], turn_id: str, context: _TurnContext
@@ -550,6 +629,10 @@ class VoicePipeline:
                 break
             frame = reader.result()
             if self._manager.state is not VoiceConversationState.SPEAKING:
+                if await self._heard_stop(frame, context):
+                    context.stopped = True
+                    task.cancel()
+                    break
                 continue
             if self._state is not VoicePipelineState.SPEAKING:
                 await self._publish(VoicePipelineState.SPEAKING, turn_id=turn_id)
@@ -624,6 +707,18 @@ class VoicePipeline:
     async def run(self) -> None:
         await self._c.microphone.start()
         await self._publish(VoicePipelineState.SLEEPING)
+        if os.environ.get("PHOENIX_WAKE_ON_START") == "1":  # the listener opened us
+            try:
+                await self._manager.activate(self.session_id)
+                self._c.microphone.drain()
+                self._listen_again()
+                await self._publish(VoicePipelineState.LISTENING)
+                say = getattr(self._responder, "stopped", None)  # "Yes boss, tell me."
+                if say is not None:
+                    await say(str(uuid4()))
+                self._c.microphone.drain()
+            except Exception:
+                pass  # fall back to waiting for the wake word
         try:
             while True:
                 if not self._in_conversation():

@@ -42,7 +42,11 @@ export default function Hud(props: ComponentProps<typeof LegacyApp> = {}) {
   useEffect(() => { if (site?.status === 'ready') note(`${site.name} ready (v${site.head}/${site.max}).`); }, [site?.id, site?.status, note]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void api.list().then(setSites, () => undefined); }, [api, tab, site?.head, site?.max, site?.status]);
   useEffect(() => {
-    const load = () => { void api.trust().then(setTrust, () => undefined); void api.voice().then(setVoice); };
+    // Voice-first: whenever the listener is off, start it. "Rise, Phoenix" then wakes it.
+    const load = () => {
+      void api.trust().then(setTrust, () => undefined);
+      void api.voice().then((state) => { setVoice(state); if (state === 'off') void api.startVoice(); });
+    };
     load();
     const timer = window.setInterval(load, 4000);
     return () => window.clearInterval(timer);
@@ -89,8 +93,10 @@ export default function Hud(props: ComponentProps<typeof LegacyApp> = {}) {
   const simulated = api.kind === 'mock' && building ? { strategist: 'planning', build_engineer: 'building', verifier: 'checking' }[simId] : undefined;
   const roster = agentRoster.map((a) => {
     const live = agents.agents.find((s) => s.internalId === a.internalId);
-    const state = live?.state ?? (simulated && a.internalId === simId ? 'working' : 'idle');
-    return { ...a, state, task: live?.currentTask ?? (state === 'working' ? simulated : undefined) };
+    // A site build reports who is doing what (AIZEN plans, ROBIN polishes, LEVI checks, FRANKY builds).
+    const step = site?.agents?.find((s) => s.name.toLowerCase() === a.alias.toLowerCase());
+    const state = live?.state ?? step?.state ?? (simulated && !site?.agents && a.internalId === simId ? 'working' : 'idle');
+    return { ...a, state, task: live?.currentTask ?? step?.note ?? (state === 'working' ? simulated : undefined) };
   }).sort((a, b) => Number(b.state !== 'idle') - Number(a.state !== 'idle'));
   const logs = readObservabilityPort(props.observabilityPort).logs.slice(0, 30);
   const sectionOf = spec?.sections.find((s) => s.id === selected);
@@ -122,7 +128,7 @@ export default function Hud(props: ComponentProps<typeof LegacyApp> = {}) {
         <div className="hud-body">
           <aside className="rail" aria-label={tab}>
             {tab === 'agents' && <div className="agent-grid">{roster.map((a) => (
-              <Frame key={a.internalId} label={a.alias} state={a.state.replace('_', ' ')} tone={a.state === 'working' ? 'live' : a.state === 'idle' ? undefined : 'warn'}>
+              <Frame key={a.internalId} label={a.alias} state={a.state.replace('_', ' ')} tone={a.state === 'working' ? 'live' : a.state === 'done' ? 'done' : a.state === 'idle' ? undefined : 'warn'}>
                 <p>{a.task ?? a.professionalRole}</p>
               </Frame>
             ))}</div>}
@@ -157,6 +163,9 @@ export default function Hud(props: ComponentProps<typeof LegacyApp> = {}) {
           <main className="stage" id="main-content">
             {spec ? (
               <Frame className="preview-frame" label={`${spec.name} · ${building ? 'rebuilding' : 'live preview'}`} state={site ? `v${site.head}/${site.max}` : undefined} tone={building ? 'live' : 'done'}>
+                <div className="preview-actions">
+                  <button type="button" aria-label="Close preview" onClick={() => { setSiteId(undefined); setSite(undefined); setSpec(undefined); setSelected(undefined); }}>Close preview ×</button>
+                </div>
                 <Preview spec={spec} selected={selected} onSelect={setSelected} />
                 {building && site && <div className="scrim"><Progress phase={site.phase} failed={site.error} /></div>}
               </Frame>

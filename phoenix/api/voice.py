@@ -77,8 +77,17 @@ from phoenix.voice.engines.pipeline import (
     strip_wake_phrase,
 )
 from phoenix.voice.engines.sound import MicrophoneError
-from phoenix.voice.engines.whisper import VoiceModelMissingError
-from phoenix.voice.persona import site_failed_line, site_pending_line, site_ready_line
+from phoenix.voice.engines.whisper import (
+    WAKE_DETECTION_THRESHOLD,
+    VoiceModelMissingError,
+    stop_phrase_score,
+)
+from phoenix.voice.persona import (
+    READY_LINE,
+    site_failed_line,
+    site_pending_line,
+    site_ready_line,
+)
 from phoenix.voice.startup import (
     StartupCheckResult,
     StartupCheckStatus,
@@ -247,6 +256,7 @@ SITE_WAIT_SECONDS: Final = 120.0
 class SiteOutcome(Protocol):
     kind: str  # "site" | "passthrough"
     site_id: str | None
+    message: str
 
 
 class SiteCommand(Protocol):
@@ -266,6 +276,9 @@ def default_site_command() -> SiteCommand | None:
         return None
     handle: SiteCommand = module.handle_command
     return handle
+
+
+ACK_DELAY_SECONDS = 1.5  # a quick answer needs no "On it, boss"
 
 
 def default_site_status() -> SiteStatusReader | None:
@@ -365,6 +378,7 @@ class MissionVoiceResponder(VoiceResponder):
         approval_seconds: float = VOICE_APPROVAL_SECONDS,
         clock: Callable[[], float] = time.monotonic,
         acknowledge: Callable[[str], Awaitable[object]] | None = None,
+        ready: Callable[[str], Awaitable[object]] | None = None,
         site_command: SiteCommand | None = None,
         site_status: SiteStatusReader | None = None,
         site_wait_seconds: float = SITE_WAIT_SECONDS,
@@ -380,6 +394,7 @@ class MissionVoiceResponder(VoiceResponder):
         self._clock = clock
         self._approval: _SpokenApproval | None = None
         self._acknowledge = acknowledge
+        self._ready = ready
         self._site_command = site_command
         self._site_status = site_status
         self._site_wait = site_wait_seconds
@@ -477,6 +492,8 @@ class MissionVoiceResponder(VoiceResponder):
             return None  # fail soft: the normal mission path still answers
         if outcome.kind != "site":
             return None
+        if outcome.site_id is None and outcome.message:
+            return outcome.message  # e.g. "Trust mode on."
         if outcome.site_id is not None:
             self.active_site_id = outcome.site_id
         return await self._site_line(outcome.site_id)
@@ -499,6 +516,12 @@ class MissionVoiceResponder(VoiceResponder):
         self._timer.since_stt("first_token", turn_id)
         return spoken
 
+    async def stopped(self, turn_id: str) -> None:
+        """After "Stop, Phoenix": say "Yes boss, tell me" and listen."""
+        if self._ready is not None:
+            with contextlib.suppress(Exception):
+                await self._ready(turn_id)
+
     async def respond(self, request: VoiceResponseRequest) -> VoiceResponseDraft:
         return await self._respond(request, None)
 
@@ -515,13 +538,26 @@ class MissionVoiceResponder(VoiceResponder):
         accepted = VoiceResponseRequest.model_validate(request)
         text = strip_wake_phrase(accepted.transcript_text).strip()
         if not text:
-            spoken = "I'm listening."
+            spoken = READY_LINE  # a bare "Phoenix": always answer, audibly
+        elif stop_phrase_score(text) >= WAKE_DETECTION_THRESHOLD:
+            spoken = READY_LINE  # "Stop, Phoenix": nothing to run, just listen
         else:
             turn_id = accepted.turn_id
             ack = None
-            if self._acknowledge is not None:
+            acknowledge = self._acknowledge
+            started = False
+
+            async def late_ack() -> None:
+                # Only a slow request earns "On it, boss"; quick answers speak at once.
+                nonlocal started
+                assert acknowledge is not None
+                await asyncio.sleep(ACK_DELAY_SECONDS)
+                started = True
                 self._timer.since_stt("first_audio", turn_id, "ack")
-                ack = asyncio.ensure_future(self._acknowledge(turn_id))
+                await acknowledge(turn_id)
+
+            if acknowledge is not None:
+                ack = asyncio.ensure_future(late_ack())
             try:
                 spoken = await self._site(text) or await self._mission(
                     text, turn_id, preview
@@ -531,8 +567,11 @@ class MissionVoiceResponder(VoiceResponder):
                     ack.cancel()  # flushes the clip via the output's cancel path
                 raise
             if ack is not None:
-                with contextlib.suppress(Exception):
-                    await ack  # the output is free before the answer plays
+                if started:
+                    with contextlib.suppress(Exception):
+                        await ack  # the output is free before the answer plays
+                else:
+                    ack.cancel()  # the answer was quick: no acknowledgement needed
         return VoiceResponseDraft(
             session_id=accepted.session_id,
             turn_id=accepted.turn_id,
@@ -845,12 +884,16 @@ class VoiceService:
             async def acknowledge(turn_id: str) -> bool:
                 return await clips.play(components.output, session, turn_id)
 
+            async def ready(turn_id: str) -> bool:
+                return await clips.play_ready(components.output, session, turn_id)
+
             responder = MissionVoiceResponder(
                 self._missions,
                 on_mission=self._note_mission,
                 partial_answers=self._partials,
                 may_approve=self._may_approve,
                 acknowledge=acknowledge,
+                ready=ready,
                 site_command=self._site_command,
                 site_status=self._site_status,
                 timer=timer,

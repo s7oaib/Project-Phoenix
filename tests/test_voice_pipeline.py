@@ -559,8 +559,6 @@ def test_wake_phrase_variants_match(heard: str) -> None:
     [
         "",
         "Hello there, how are you?",
-        "Phoenix is a city in Arizona.",
-        "I love phoenix",
         "rise and shine",
         "The weather today is fine and the phoenix rose",
     ],

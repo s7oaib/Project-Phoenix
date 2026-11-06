@@ -150,7 +150,8 @@ def test_ack_clips_render_once_then_load_from_disk(tmp_path: Path) -> None:
     cold, warm = AckClips(tmp_path), AckClips(tmp_path)
     asyncio.run(cold.prepare(cast(Any, first), "p"))
     asyncio.run(warm.prepare(cast(Any, second), "p"))
-    assert cold.count == warm.count == first.calls == 3
+    assert cold.count == warm.count == 3
+    assert first.calls == 4  # three acknowledgements and "Yes boss, tell me."
     assert second.calls == 0  # all served from the cache
 
 
@@ -344,3 +345,11 @@ def test_prewarm_pins_model_30m_and_fails_soft(
     monkeypatch.setattr(prewarm.httpx, "post", down)
     assert prewarm.prewarm_ollama("http://x") is False
     assert prewarm.start_prewarm() == []  # no threads under pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_ack_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The acknowledgement waits 1.5 s in real use; the fake missions finish at once."""
+    import phoenix.api.voice as voice_module
+
+    monkeypatch.setattr(voice_module, "ACK_DELAY_SECONDS", 0.0)

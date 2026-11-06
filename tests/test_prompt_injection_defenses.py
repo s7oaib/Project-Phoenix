@@ -2045,8 +2045,7 @@ PHX_132_PATHS = (  # voice.py moved to PHX-135
     "phoenix/agents/answer_stream.py",
     "phoenix/api/observability.py",
     "phoenix/voice/conversation/__init__.py",
-    "phoenix/voice/engines/pipeline.py",
-)
+)  # engines/pipeline.py moved to the expo integration pin
 # core.ts and runtime.py carry both PHX-131 and PHX-132; they are pinned at
 # the local merge resolution commit.
 PHX_131_132_COMMIT = "35c9d287255e692837c78c99f37251d4f26065df"
@@ -2099,8 +2098,17 @@ PHX_EXPO_VOICE_PATHS = ("phoenix/api/launcher.py",)  # voice.py moved to the int
 # 2026-11-05 expo build, integration: the four verification steps also accept
 # Trust-mode grants, and the voice service reads website status; pinned at the
 # integration commit.
-PHX_EXPO_INTEGRATION_COMMIT = "9a90856765d0c3fdd4cf34f444d00bb2de852eee"
+PHX_EXPO_INTEGRATION_COMMIT = "185de8923bcc4778391c940b56696ce16c147b47"
 PHX_EXPO_INTEGRATION_PATHS = (
+    "phoenix/voice/ack.py",
+    "phoenix/voice/persona.py",
+    "phoenix/voice/engines/pipeline.py",
+    "phoenix/voice/engines/whisper.py",
+    "apps/desktop/src/Hud.tsx",
+    "phoenix/api/routes/sites.py",
+    "phoenix/sites/service.py",
+    "apps/desktop/src/adapters/sites.ts",
+    "phoenix/sites/command.py",
     "phoenix/agents/capability_steps.py",
     "phoenix/agents/control_steps.py",
     "phoenix/agents/research_steps.py",

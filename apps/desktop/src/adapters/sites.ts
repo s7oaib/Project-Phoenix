@@ -12,7 +12,8 @@ export type SiteSpec = { id: string; name: string; type: SiteKind; theme: { prim
 export type Phase = 'planning' | 'spec' | 'render' | 'ready';
 export const PHASES: readonly Phase[] = ['planning', 'spec', 'render', 'ready'];
 export type SiteSummary = { id: string; name: string; type: SiteKind; head: number; max: number; updated_at: string };
-export type SiteState = { id: string; name: string; type: SiteKind; status: 'building' | 'ready' | 'failed'; phase: Phase; head: number; max: number; spec?: SiteSpec; error?: string; message?: string };
+export type AgentStep = { id: string; name: string; state: 'idle' | 'working' | 'done'; note: string };
+export type SiteState = { id: string; name: string; type: SiteKind; status: 'building' | 'ready' | 'failed'; phase: Phase; head: number; max: number; spec?: SiteSpec; error?: string; message?: string; agents?: AgentStep[] };
 export type CommandOutcome = { kind: 'site' | 'mission'; site_id?: string; mission_id?: string; message: string };
 export type TrustState = { enabled: boolean; since: string | null; allow: string[]; deny: string[] };
 
@@ -27,6 +28,8 @@ export interface SitesApi {
   trust(): Promise<TrustState>;
   setTrust(enabled: boolean): Promise<TrustState>;
   voice(): Promise<string | undefined>;
+  /** Voice-first: the HUD starts the wake-phrase listener itself; the user never clicks a mic. */
+  startVoice(): Promise<void>;
 }
 
 // ---- rendering (client side: the srcdoc inherits the shell CSP, so style lives in a CSSOM sheet) ----
@@ -143,6 +146,7 @@ export function createMockSitesApi(): SitesApi {
     async trust() { return trust; },
     async setTrust(enabled) { trust = { ...trust, enabled, since: enabled ? new Date().toISOString() : null, allow: enabled ? ['P1', 'P2', 'P3 (trust_mode)'] : [] }; return trust; },
     async voice() { return undefined; },
+    async startVoice() {},
   };
 }
 
@@ -168,6 +172,7 @@ function real(transport: Transport): SitesApi {
     trust: () => call('GET', '/trust'),
     setTrust: (enabled) => call('POST', '/trust', { enabled }),
     voice: async () => { try { return (await call<{ state?: string }>('GET', '/voice/status')).state; } catch { return undefined; } },
+    startVoice: async () => { try { await call('POST', '/voice/start'); } catch { /* fail soft: the typed bar still works */ } },
   };
 }
 
